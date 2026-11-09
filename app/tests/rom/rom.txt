@@ -1,0 +1,36 @@
+# Samples built in (tools/mkrom.py), as test/run.sh makes them: an S700 disk image in slot 1 (its parameters and
+# programs), a 440 Hz sine WAV in slot 2 (resampled to rate code 76, its smpl loop, root A3, alone in program 2)
+wait 600
+expect rom1 1
+expect rom2 1
+expect rom3 0
+expect words1 32752
+expect mode1 2
+expect mode2 2
+expect root2 69
+expect free 73
+# program 2: the sine alone
+turn PRESET 1
+wait 30
+expect program 2
+midi 90 45 64
+wait 30
+expect voices 1
+wav rom_sine.wav
+wait 400
+wavstop
+midi 80 45 40
+wait 500
+# a dump sent to slot 2 replaces the built-in sample, in the flash
+usb plug
+sysex F0 7E 01 01 00 0C 41 45 01 3C 00 00 00 00 00 3C 00 00 00 00 00 40 00 40 00 40 00 40 00 40 00 40 00 40 00 40 00 40 00 40 00 40 00 40 00 40 00 40 00 40 00 40 00 40 00 40 00 40 00 40 00 40 00 40 00 40 00 40 00 40 00 40 00 40 00 40 00 40 00 40 00 40 00 40 00 40 00 40 00 40 00 40 00 40 00 40 00 40 00 40 00 40 00 40 00 40 00 40 00 40 00 40 00 40 00 40 00 40 00 40 00 40 00 40 00 40 00 40 00 40 00 40 00 40 00 40 00 40 00 40 00 40 00 40 00 40 00 40 00 40 00 40 00 40 00 40 00 40 00 40 00 00 F7
+wait 100
+expect rom2 0
+expect words2 60
+expect free 72
+wait 3500
+reboot
+wait 600
+expect rom1 1
+expect rom2 0
+expect words2 60

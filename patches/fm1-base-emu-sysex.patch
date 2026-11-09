@@ -1,0 +1,51 @@
+diff --git a/web/emu/emu_web.c b/web/emu/emu_web.c
+index dca067b..c4f5e05 100644
+--- a/web/emu/emu_web.c
++++ b/web/emu/emu_web.c
+@@ -187,7 +187,10 @@ __attribute__((used, visibility("default"))) uint32_t web_store_max(void) { retu
+  * every byte to app_sysex_byte first, any length, up to a status byte inside). What the app sent (plat_sysex_send, a
+  * stream), F0 .. F7 frames one after another (a stream cut short ends at the next F0), from web_sx_out_buf
+  * (web_sx_out_len bytes; web_sx_out_clear when read) */
+-#define WEB_SX_IN 8192u
++#ifndef APP_WEB_SX_IN
++#define APP_WEB_SX_IN 8192u               /* app.h may take longer frames whole (a sample dump: 66,632 bytes) */
++#endif
++#define WEB_SX_IN APP_WEB_SX_IN
+ #define WEB_SX_MAX 640u
+ static uint8_t wsx_in[WEB_SX_IN];
+ __attribute__((used, visibility("default"))) uint8_t *web_sx_in_buf(void) { return wsx_in; }
+diff --git a/web/emu/parts/midi_worklet.js b/web/emu/parts/midi_worklet.js
+index 05c04c2..3999e7c 100644
+--- a/web/emu/parts/midi_worklet.js
++++ b/web/emu/parts/midi_worklet.js
+@@ -53,7 +53,7 @@ function sysexIn(ex, frame) {
+ }
+ 
+ // the bytes out: packets (a SysEx in packets too, CIN 4..7) and the app's frames, as whole messages
+-let osx = null;
++let osx = null, ostream = null;
+ function drain(fm1) {
+   const ex = fm1.ex, msgs = [];
+   const n = ex.web_out_n();
+@@ -74,12 +74,18 @@ function drain(fm1) {
+     ex.web_out_clear();
+   }
+   if (ex.web_sx_out_len && ex.web_sx_out_len()) {
++    // whole frames to the page; a frame still being streamed (plat_sysex_begin .. end over several frames of the
++    // main loop: a sample dump) kept until its F7 comes; one cut short ends at the next F0
+     const all = new Uint8Array(ex.memory.buffer, ex.web_sx_out_buf(), ex.web_sx_out_len());
+     for (let at = 0; at < all.length;) {
+-      let k = at + 1;
++      let k = at;
++      if (all[k] === 0xf0) { ostream = []; k++; }
+       while (k < all.length && all[k] !== 0xf7 && all[k] !== 0xf0) k++;
+-      const end = k < all.length && all[k] === 0xf7 ? k + 1 : k;   // (a frame cut short: up to the next F0)
+-      if (all[end - 1] === 0xf7) msgs.push(all.slice(at, end));
++      const end = k < all.length && all[k] === 0xf7 ? k + 1 : k;
++      if (ostream) {
++        for (let i = at; i < end; i++) ostream.push(all[i]);
++        if (all[end - 1] === 0xf7) { msgs.push(Uint8Array.from(ostream)); ostream = null; }
++      }
+       at = end;
+     }
+     ex.web_sx_out_clear();

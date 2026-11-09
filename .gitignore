@@ -1,0 +1,15 @@
+# build output
+/build/
+/app/build/
+# the build's generated files (fm1-base tools/build.py)
+/app/web/words/
+# Python tools' environment (pillow, numpy, mido)
+/.venv/
+# samples built in for a test build (tools/mkrom.py): yours or a library's, not ours to publish
+/app/rom/
+
+# example sounds for testing
+/sounds/
+
+# Python bytecode
+__pycache__/

@@ -1,0 +1,112 @@
+# The MMT-8 workflow: arm, a bar's count-in, a take from MIDI in that sets the part's length, play it back, mute it,
+# choose the record track, a song of two steps, and all of it kept across a power cycle. 120 BPM: a beat is 500 ms.
+wait 600
+tap SEQ
+wait 30
+expect part 0
+expect tracks 0
+expect beats 0
+shot seq_empty.png
+# REC arms track 1 (the lowest); PLAY starts the count-in
+tap REC
+wait 30
+expect armed 1
+expect rectrack 1
+tap PLAY
+wait 30
+expect seq 1
+shot seq_countin.png
+wait 2000
+expect seq 2
+expect take 1
+# two notes from the TRS jack, a beat apart
+midi TRS 90 3C 64
+wait 250
+midi TRS 80 3C 40
+wait 250
+midi TRS 90 40 50
+wait 250
+midi TRS 80 40 40
+wait 220
+shot seq_rec.png
+# stopped just past the second beat: a part of 2 beats, its first track recorded
+tap PLAY
+wait 100
+expect seq 0
+expect beats 2
+expect tracks 1
+expect take 0
+expect armed 0
+# played back: its notes go out over USB and to the sampler
+tap PLAY
+wait 60
+expect seq 2
+expect_out USB 90 3C 64
+expect voices 1
+wait 1000
+expect seq 2
+expect beat 1
+# SEL + the first white key: track 1 muted
+press SEL
+key w0 down
+wait 40
+key w0 up
+wait 40
+wait 30
+shot seq_tracks.png
+release SEL
+wait 30
+expect mask 254
+tap PLAY
+wait 30
+expect seq 0
+# REC + the third white key: track 3 to record next
+press REC
+key w2 down
+wait 40
+key w2 up
+wait 40
+release REC
+wait 30
+expect rectrack 3
+expect armed 1
+tap REC
+wait 30
+expect armed 0
+# the part's tracks on again
+press SEL
+key w0 down
+wait 40
+key w0 up
+wait 40
+release SEL
+wait 30
+expect mask 255
+# a song: SEQ again; at its END, K3 appends the part last worked on (00), twice
+tap SEQ
+wait 30
+expect songmode 1
+expect steps 0
+turn K3 1
+wait 30
+expect steps 1
+turn SELECT 1
+turn K3 1
+wait 30
+expect steps 2
+shot seq_song.png
+tap PLAY
+wait 2100
+expect seq 0
+tap SEQ
+wait 30
+expect songmode 0
+tap SAVE
+wait 500
+expect unsaved 0
+reboot
+wait 600
+tap SEQ
+wait 30
+expect beats 2
+expect tracks 1

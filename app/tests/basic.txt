@@ -1,0 +1,48 @@
+# SM-87 in the host simulator: fm1-base/tools/build.py ../app --host, then
+#   app/build/host/sm87_host app/tests/basic.txt app/build/host
+wait 600
+shot boot.png
+expect program 1
+expect voices 0
+# the X7000's empty memory: slot 1's test tone in P1, keys 24-99
+midi 90 3C 64
+wait 50
+expect voices 1
+wav note.wav
+wait 300
+midi 80 3C 40
+wait 1000
+wavstop
+expect voices 0
+# a key on the panel plays it too
+key 7 down
+wait 50
+expect voices 1
+shot key.png
+key 7 up
+wait 1000
+expect voices 0
+# PRESET: the program; P2 has nothing in it
+turn PRESET 1
+wait 30
+expect program 2
+key 7 down
+wait 50
+expect voices 0
+key 7 up
+turn PRESET -1
+wait 30
+expect program 1
+# six voices at most
+midi 90 30 64
+midi 90 32 64
+midi 90 34 64
+midi 90 35 64
+midi 90 37 64
+midi 90 39 64
+midi 90 3B 64
+wait 30
+expect voices 6
+midi B0 7B 00
+wait 1500
+expect voices 0

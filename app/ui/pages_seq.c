@@ -1,0 +1,148 @@
+/* SM-87: the MMT-8's page. The LCD as the MMT-8 shows a part or a song playing; the first eight white keys are its
+ * eight track buttons while SEL is held (mutes), and choose the record track with REC held; PRESET picks the part (or
+ * the song), queued while playing; K1 the tempo, K2 the record track's channel; in a song, SELECT its step and K3 the
+ * step's part (past 99: the song ends there). Part of the unity build (app.c). */
+
+static const uint8_t WHITE[16] = PLAT_WHITE_KEYS;
+
+/* the white key's track, or -1 */
+static int32_t key_track(uint32_t k)
+{
+    uint32_t i;
+    for (i = 0; i < SQ_TRACKS; i++)
+        if (WHITE[i] == k)
+            return (int32_t)i;
+    return -1;
+}
+
+static uint32_t seq_song_step;    /* the step the song page edits */
+static uint8_t seq_last_part;     /* the part last chosen in PART: a new song step starts with it */
+
+static void seq_draw(int sel_held)
+{
+    char t[LCD_COLS + 1], n[8];
+    uint32_t i, used = sq_part_used(sqp.part);
+    const char *state = sqp.state == SQP_STOPPED ? " " : sqp.take_state == SQP_TAKE_RUNNING ? CH_REC : CH_PLAY;
+    t[0] = 0;
+    if (sqp.song_mode) {
+        str_cat(t, "SONG ");
+        fmt_uint(n, sqp.song, 2, '0');
+        str_cat(t, n);
+        str_cat(t, "  ST ");
+        fmt_uint(n, (sqp.state == SQP_STOPPED ? seq_song_step : sqp.step) + 1u, 3, '0');
+    } else {
+        str_cat(t, "PART ");
+        fmt_uint(n, sqp.part, 2, '0');
+        str_cat(t, n);
+        str_cat(t, "  BT ");
+        fmt_uint(n, sqp_beat(), 3, '0');
+    }
+    str_cat(t, n);
+    str_cat(t, state);
+    lcd_row(0, t);
+    t[0] = 0;
+    if (sel_held) {                          /* the tracks: on, muted, empty */
+        str_cat(t, "TRACKS  ");
+        for (i = 0; i < SQ_TRACKS; i++) {
+            char c[2] = {(char)('1' + i), 0};
+            if (!(used >> i & 1u))
+                c[0] = '.';
+            else if (!(sqp.mask >> i & 1u))
+                c[0] = '-';
+            str_cat(t, c);
+        }
+    } else if (sqp.state == SQP_COUNTIN) {
+        str_cat(t, "COUNT IN    ");
+        fmt_uint(n, (uint32_t)(sqp.countin + (int32_t)SQ_PPQN - 1) / SQ_PPQN, 1, ' ');
+        str_cat(t, n);
+    } else if (sqp.rec_armed || sqp.take_state == SQP_TAKE_RUNNING) {
+        uint32_t ch = sq.part[sqp.part].chan[sqp.rec_track];
+        str_cat(t, "REC TRK ");
+        fmt_uint(n, sqp.rec_track + 1u, 1, ' ');
+        str_cat(t, n);
+        str_cat(t, ch ? " CH " : " UNCHG");
+        if (ch) {
+            fmt_uint(n, ch, 2, '0');
+            str_cat(t, n);
+        }
+    } else if (sqp.song_mode && sqp.state == SQP_STOPPED) {
+        uint32_t steps = sq_song_steps(sqp.song);
+        if (seq_song_step < steps) {
+            uint8_t part, mask;
+            sq_song_step(sqp.song, seq_song_step, &part, &mask);
+            str_cat(t, "PART ");
+            fmt_uint(n, part, 2, '0');
+            str_cat(t, n);
+            str_cat(t, " ");
+            for (i = 0; i < SQ_TRACKS; i++) {
+                char c[2] = {mask >> i & 1u ? (char)('1' + i) : '-', 0};
+                str_cat(t, c);
+            }
+        } else {
+            str_cat(t, "END OF SONG");
+        }
+    } else if (sqp.song_mode) {
+        for (i = 0; i < SQ_NAME; i++)
+            t[i] = sq.song[sqp.song].name[i];
+        t[SQ_NAME] = 0;
+    } else {
+        for (i = 0; i < SQ_NAME; i++)
+            t[i] = sq.part[sqp.part].name[i];
+        t[SQ_NAME] = 0;
+        if (sq_part_empty(sqp.part))
+            t[0] = 0, str_cat(t, "EMPTY PART");
+    }
+    lcd_row(1, t);
+}
+
+/* the strip under the LCD: the eight tracks, the tempo, the memory */
+static void seq_status(void)
+{
+    char t[24], n[8];
+    uint32_t i, used = sq_part_used(sqp.part), pct = (uint32_t)sq.used * 100u / SQ_ARENA;
+    cv_begin(240, STATUS_H, C_BLACK);
+    for (i = 0; i < SQ_TRACKS; i++) {
+        int32_t x = 6 + (int32_t)i * 29;
+        uint16_t c = !(used >> i & 1u) ? C_LINE : (sqp.mask >> i & 1u) ? C_HI : C_DIM;
+        cv_rect(x, 2, 26, 20, c);
+        if ((sqp.rec_armed || sqp.take_state == SQP_TAKE_RUNNING) && sqp.rec_track == i) {
+            cv_rect(x, 2, 26, 3, RGB(230, 50, 40));
+            cv_rect(x, 19, 26, 3, RGB(230, 50, 40));
+        }
+        n[0] = (char)('1' + i);
+        n[1] = 0;
+        cv_text(x + 10, 5, &FONT_XS, n, (used >> i & 1u) ? C_BLACK : C_GRAY);
+    }
+    t[0] = 0;
+    str_cat(t, sqp.song_mode ? "SONG" : "PART");
+    cv_text(8, 30, &FONT_XS, t, C_GRAY);
+    cv_text(50, 30, &FONT_XS, "TEMPO", C_GRAY);
+    fmt_uint(n, sqp.tempo, 0, ' ');
+    cv_text(92, 30, &FONT_XS, n, C_HI);
+    cv_text(130, 30, &FONT_XS, "MEM", C_GRAY);
+    fmt_uint(n, pct, 0, ' ');
+    str_cat(n, "%");
+    cv_text(162, 30, &FONT_XS, n, C_HI);
+    cv_text(8, 44, &FONT_XS, "SAMPLER CH", C_GRAY);
+    fmt_uint(n, set.s7_channel + 1u, 0, ' ');
+    cv_text(88, 44, &FONT_XS, n, C_HI);
+    cv_text(130, 44, &FONT_XS, "CPU", C_GRAY);
+    fmt_uint(n, plat_cpu_pct(), 0, ' ');
+    str_cat(n, "%");
+    cv_text(162, 44, &FONT_XS, n, C_HI);
+    cv_blit(0, LCD_Y + LCD_H + 10);
+}
+
+/* the track keys' lights while SEL or REC is held: lit on, dim muted, dark empty */
+static void seq_track_lights(uint32_t *lit, uint32_t *dim)
+{
+    uint32_t i, used = sq_part_used(sqp.part);
+    for (i = 0; i < SQ_TRACKS; i++) {
+        if (!(used >> i & 1u) && !(sqp.rec_armed && sqp.rec_track == i))
+            continue;
+        if ((sqp.mask >> i & 1u) || (sqp.rec_armed && sqp.rec_track == i))
+            *lit |= 1u << WHITE[i];
+        else
+            *dim |= 1u << WHITE[i];
+    }
+}

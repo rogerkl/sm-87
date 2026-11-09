@@ -1,0 +1,81 @@
+# The sampler's pages: EDIT, ENV, LFO; SELECT the slot, K1..K4 the values; SAVE keeps them
+wait 600
+tap ENV
+wait 30
+expect page 5
+# FILTER of slot 1, from 99 down 9
+turn K1 -9
+wait 30
+expect filter1 90
+expect unsaved 1
+shot out.png
+# slot 2 is another slot's filter
+turn SELECT 1
+wait 30
+expect slot 2
+turn K1 -50
+wait 30
+expect filter2 49
+expect filter1 90
+# EDIT round: POINTS, LOOP, TUNE, KEYS
+tap EDIT
+wait 30
+expect page 1
+shot points.png
+tap EDIT
+tap EDIT
+tap EDIT
+wait 30
+expect page 4
+shot keys.png
+# slot 2 in P1: in no program (LO 24, HI 0, shown "--"). A detent of HI puts it in, the whole keyboard C0-D#6
+expect inprog2 0
+turn K2 1
+wait 30
+expect inprog2 1
+expect keyl2 24
+expect keyh2 99
+expect unsaved 1
+# HI down to C4 (72), LO up to C2 (48)
+turn K2 -27
+wait 30
+turn K1 24
+wait 30
+expect keyh2 72
+expect keyl2 48
+# LO turned past HI takes it out (it stops one past); one detent back puts it in again, on the one key
+turn K1 30
+wait 30
+expect inprog2 0
+expect keyl2 73
+turn K1 -1
+wait 30
+expect inprog2 1
+expect keyl2 72
+turn K1 -24
+wait 30
+expect keyl2 48
+# a slot as the sampler leaves it, LO turned down: in too
+turn SELECT 1
+wait 30
+turn K1 -1
+wait 30
+expect inprog3 1
+expect keyl3 24
+expect keyh3 99
+turn SELECT -1
+wait 30
+tap LFO
+wait 30
+expect page 7
+shot lfo.png
+tap SAVE
+wait 300
+expect unsaved 0
+reboot
+wait 600
+expect filter1 90
+expect filter2 49
+expect keyh2 72
+expect keyl2 48
+expect inprog3 1

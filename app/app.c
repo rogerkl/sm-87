@@ -1,0 +1,947 @@
+/* SM-87: an MMT-8 style sequencer and an Akai S700 / X7000 style sampler on the M-VAVE FM-1.
+ * The app's glue: the sound (app_render), MIDI in, the panel and the screen. Part of fm1-base's unity build
+ * (device/unity.c, host/plat_host.c), after the platform: gfx.c and announce.c are in scope. The sampler (s700/) is
+ * compiled apart, at -O2. */
+#include "fastmath.h"
+#include "s700/s7.h"
+#include "s700/s7mem.h"
+#include "s700/sds.h"
+#include "mmt8/seq.h"
+#include "mmt8/player.h"
+#include "ui/lcd.c"
+#include "ui/pages_s700.c"
+
+#ifdef PLAT_HOST
+#define SM_FS 44100.0f            /* the simulator's rate */
+#else
+#define SM_FS 44117.647f          /* the FM-1's: 24 MHz / 544 (felucca-bsp fm1_audio.h) */
+#endif
+
+/* ------------------------------------------------------------------------------------------------ settings --- */
+#define SET_MAGIC 0x37384D53u     /* "SM87" */
+typedef struct {
+    uint32_t magic;
+    uint8_t s7_channel;           /* the sampler's MIDI channel, 0..15 (the X7000 received on 1) */
+    uint8_t bend_range;           /* semitones (PWRNGE) */
+    int8_t octave;                /* the keys: -2 .. +2 */
+    uint8_t rsv[5];
+} settings_t;
+static settings_t set;
+static uint8_t set_dirty;
+
+static void settings_defaults(void)
+{
+    set.magic = SET_MAGIC;
+    set.s7_channel = 0;
+    set.bend_range = 2;
+    set.octave = 0;
+}
+
+/* the sample dumps' staging: one taken while the last is written to the flash (s700/sds.h) */
+static uint8_t stage[SDS_BUFS][S7_PACKED(S7_MAXWORDS)] __attribute__((section(".pool")));
+
+/* -------------------------------------------------------------------------- events: main loop -> audio --- */
+/* the panel plays the sampler from the main loop; the voices live in the audio interrupt. A ring of MIDI-like
+ * messages (status | d1 << 8 | d2 << 16) between them, one writer and one reader */
+#define EVQ 64u
+static volatile uint32_t evq[EVQ];
+static volatile uint32_t evq_w, evq_r;
+
+static void ev_push(uint32_t st, uint32_t d1, uint32_t d2)
+{
+    uint32_t w = evq_w;
+    if (w - evq_r >= EVQ)
+        return;                   /* full: dropped (64 in under 3 ms: not from hands) */
+    evq[w % EVQ] = st | d1 << 8 | d2 << 16;
+    evq_w = w + 1u;
+}
+
+/* one message to the sampler (audio interrupt) */
+static void s7_message(uint32_t st, uint32_t d1, uint32_t d2)
+{
+    switch (st & 0xF0u) {
+    case 0x90u:
+        s7_note_on(d1, d2);       /* velocity 0: a note off at 64 */
+        break;
+    case 0x80u:
+        s7_note_off(d1, d2);
+        break;
+    case 0xB0u:
+        if (d1 == 1u)
+            s7_modwheel(d2);
+        else if (d1 == 120u)
+            s7_kill();
+        else if (d1 == 123u)
+            s7_all_off();
+        break;
+    case 0xC0u:
+        s7_program(d1);
+        break;
+    case 0xD0u:
+        s7_pressure(d1);
+        break;
+    case 0xE0u:
+        s7_bend((int32_t)(d1 | d2 << 7) - 8192);
+        break;
+    default:
+        break;
+    }
+}
+
+static volatile uint32_t midi_in_count, midi_in_last;
+
+/* ------------------------------------------------------------------------------------------ the routing --- */
+/* everything played, by the sequencer, the keys or MIDI in, goes here: the sampler on its channel, and out over USB
+ * (to (TO_USB): where it may go; MIDI in does not go back where it came from) */
+static void play_out(uint32_t st, uint32_t d1, uint32_t d2, uint32_t to)
+{
+    if (st < 0xF0u) {
+        if ((st & 0x0Fu) == set.s7_channel)
+            s7_message(st, d1, d2);
+        if (to) {
+            uint32_t len = (st & 0xE0u) == 0xC0u ? 2u : 3u;
+            plat_midi_send((st >> 4) | st << 8 | d1 << 16 | (len == 3u ? d2 << 24 : 0u), to);
+        }
+    } else if (st == 0xF2u && to) {          /* song position: system common, 3 bytes */
+        plat_midi_send(0x03u | st << 8 | d1 << 16 | d2 << 24, to);
+    }
+}
+
+/* the sequencer's (mmt8/player.h) */
+void sqp_emit(uint32_t st, uint32_t d1, uint32_t d2) { play_out(st, d1, d2, TO_USB); }
+void sqp_midi_rt(uint32_t b) { plat_midi_send(0x0Fu | b << 8, TO_USB); }
+
+/* the click: a short blip, higher on the bar's first beat */
+static float click_env, click_ph, click_inc;
+void sqp_click(int accent)
+{
+    click_env = 1.0f;
+    click_ph = 0.0f;
+    click_inc = (accent ? 2000.0f : 1400.0f) / SM_FS;
+}
+
+static void click_render(float *out, uint32_t n)
+{
+    uint32_t i;
+    for (i = 0; i < n && click_env > 1e-3f; i++) {
+        out[i] += 900.0f * click_env * fm_sin_turns(click_ph);
+        click_ph += click_inc;
+        if (click_ph >= 1.0f)
+            click_ph -= 1.0f;
+        click_env *= 0.9985f;               /* ~15 ms */
+    }
+}
+
+/* something played in (MIDI in, or the keys on the sampler's channel): into a take that runs, and through (the
+ * MMT-8's MIDI ECHO: to the record track's channel while one is ready, unless it is UNCHANGED) */
+static void played_in(uint32_t st, uint32_t d1, uint32_t d2, uint32_t to)
+{
+    if (st >= 0xF0u)
+        return;
+    sqp_input(st, d1, d2);
+    if (sqp.rec_armed || sqp.take_state == SQP_TAKE_RUNNING) {
+        uint32_t ch = sq.part[sqp.part].chan[sqp.rec_track];
+        if (ch)
+            st = (st & 0xF0u) | (ch - 1u);
+    }
+    play_out(st, d1, d2, to);
+}
+
+static void midi_in(void)         /* audio interrupt: the packets that came in */
+{
+    uint32_t pkt;
+    int port;
+    while (plat_midi_in(&pkt, &port)) {
+        uint32_t st = (pkt >> 8) & 0xFFu, d1 = (pkt >> 16) & 0x7Fu, d2 = pkt >> 24 & 0x7Fu;
+        if (st < 0xF0u) {
+            played_in(st, d1, d2, TO_USB & ~plat_midi_in_from());
+            midi_in_count++;
+            midi_in_last = st;
+        }
+    }
+}
+
+/* ------------------------------------------------------------------------------------------------- sound --- */
+static float mix[APP_BLOCK];
+static float gain_now;
+
+void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
+{
+    uint32_t i, done = 0;
+    /* a voice at its loudest (LEVEL 99, velocity 127) peaks at -6 dBFS: room for a few at once */
+    float gain = (float)master_q12 / 4096.0f * (8388607.0f * 0.5f / 2048.0f);
+    while (evq_r != evq_w) {                 /* the keys, played on the sampler's channel */
+        uint32_t e = evq[evq_r % EVQ];
+        uint32_t st = e & 0xFFu;
+        if (st >= 0xF0u)
+            s7_message(st, e >> 8 & 0xFFu, e >> 16 & 0xFFu);
+        else
+            played_in(st | set.s7_channel, e >> 8 & 0xFFu, e >> 16 & 0xFFu, TO_USB);
+        evq_r = evq_r + 1u;
+    }
+    midi_in();
+    for (i = 0; i < n; i++)
+        mix[i] = 0.0f;
+    /* in stretches to the sequencer's next tick, so its events land on their frame */
+    while (done < n) {
+        uint32_t seg = sqp_frames_to_tick();
+        if (seg > n - done)
+            seg = n - done;
+        if (seg) {
+            s7_render(mix + done, seg);
+            click_render(mix + done, seg);
+        }
+        done += seg;
+        sqp_advance(seg);
+    }
+    for (i = 0; i < n; i++) {
+        float s;
+        int32_t v;
+        gain_now += (gain - gain_now) * 0.004f;   /* MASTER glides: no zipper */
+        s = mix[i] * gain_now;
+        v = s > 8388607.0f ? 8388607 : s < -8388607.0f ? -8388607 : (int32_t)s;
+        lr[2 * i] = v;
+        lr[2 * i + 1] = v;        /* the S700 is mono */
+    }
+}
+
+void app_panic(void)
+{
+    s7_kill();
+}
+
+/* ------------------------------------------------------------------------------------ the sequencer's memory --- */
+/* the arena changes inside plat_lock, the player's places found again before the unlock (mmt8/seq.h) */
+static uint32_t sq_lock_flags;
+void sq_lock(void) { sq_lock_flags = plat_lock(); }
+void sq_unlock(void)
+{
+    sqp_resync();
+    plat_unlock(sq_lock_flags);
+}
+
+/* a track being made (a take, an edit), one at a time (mmt8/seq.h SQ_SCRATCH) */
+static uint8_t sq_scratch[SQ_SCRATCH] __attribute__((section(".pool")));
+static uint8_t sq_dirty;
+
+/* The memory in the flash: XDATA1 (0xE5000, 23 sectors). The update loader reads the last 256 bytes of every sector
+ * there (plat.h), so each sector holds 3,840 bytes and keeps those erased. A header (magic, length, a checksum),
+ * then the tables and the arena's used bytes. One copy: written only when stopped (SAVE) */
+#define SQS_BASE PLAT_XDATA1_LO
+#define SQS_SECTORS ((PLAT_XDATA1_HI - PLAT_XDATA1_LO) / 4096u)
+#define SQS_PER 0xF00u
+#define SQS_MAGIC 0x56535153u     /* "SQSV" */
+#define SQS_TABLES ((uint32_t)(sizeof sq - SQ_ARENA))
+
+static uint32_t sqs_sum(const uint8_t *p, uint32_t n, uint32_t h)
+{
+    uint32_t i;
+    for (i = 0; i < n; i++)
+        h = (h ^ p[i]) * 16777619u;   /* FNV-1a */
+    return h;
+}
+
+static const uint8_t *sqs_byte_at(uint32_t i)   /* byte i of the saved image (after the header), in place */
+{
+    const uint8_t *sec = plat_data(SQS_BASE + (i / SQS_PER) * 4096u);
+    return sec ? sec + i % SQS_PER : 0;
+}
+
+static int sq_save(void)
+{
+    static uint8_t sec[4096];
+    uint32_t total = SQS_TABLES + sq.used, hdr[3], k, at = 0;
+    const uint8_t *src = (const uint8_t *)&sq;
+    hdr[0] = SQS_MAGIC;
+    hdr[1] = total;
+    hdr[2] = sqs_sum(sq.arena, sq.used, sqs_sum(src, SQS_TABLES, 2166136261u));
+    if ((total + sizeof hdr + SQS_PER - 1u) / SQS_PER > SQS_SECTORS)
+        return -1;
+    /* the image: the header, the tables, the arena's used bytes; 3,840 of them a sector */
+    for (k = 0; at < total + sizeof hdr; k++) {
+        uint32_t i;
+        for (i = 0; i < 4096u; i++)
+            sec[i] = 0xFFu;
+        for (i = 0; i < SQS_PER && at < total + sizeof hdr; i++, at++) {
+            uint32_t j = at;
+            if (j < sizeof hdr)
+                sec[i] = ((const uint8_t *)hdr)[j];
+            else if ((j -= sizeof hdr) < SQS_TABLES)
+                sec[i] = src[j];
+            else
+                sec[i] = sq.arena[j - SQS_TABLES];
+        }
+        if (plat_data_erase(SQS_BASE + k * 4096u) != 0 || plat_data_write(SQS_BASE + k * 4096u, sec, 4096u) != 0)
+            return -1;
+    }
+    sq_dirty = 0;
+    return 0;
+}
+
+static void sq_load(void)
+{
+    uint32_t hdr[3], i, total;
+    uint8_t *dst = (uint8_t *)&sq;
+    const uint8_t *b;
+    for (i = 0; i < sizeof hdr; i++) {
+        if (!(b = sqs_byte_at(i)))
+            goto empty;
+        ((uint8_t *)hdr)[i] = *b;
+    }
+    total = hdr[1];
+    if (hdr[0] != SQS_MAGIC || total < SQS_TABLES || total > sizeof sq)
+        goto empty;
+    for (i = 0; i < total; i++) {
+        uint32_t j = i;
+        b = sqs_byte_at(i + sizeof hdr);
+        if (j < SQS_TABLES)
+            dst[j] = *b;
+        else
+            sq.arena[j - SQS_TABLES] = *b;
+    }
+    if (sqs_sum(sq.arena, total - SQS_TABLES, sqs_sum(dst, SQS_TABLES, 2166136261u)) != hdr[2] || !sq_valid() ||
+        sq.used != total - SQS_TABLES)
+        goto empty;
+    return;
+empty:
+    sq_clear();
+}
+
+/* a take done: made into its track (the sorting outside the lock, the move inside) */
+static void take_service(void)
+{
+    char t[LCD_COLS + 1] = "TRACK ", n[4];
+    int r;
+    if (sqp.take_state != SQP_TAKE_DONE)
+        return;
+    r = sq_commit(sqp.take_part, sqp.take_track, sqp_take, sqp.take_n, sqp.take_beats, sq_scratch);
+    {
+        uint32_t f = plat_lock();
+        sqp.take_state = SQP_TAKE_NONE;
+        plat_unlock(f);
+    }
+    fmt_uint(n, sqp.take_track + 1u, 1, ' ');
+    str_cat(t, n);
+    app_say(r == 0 ? (sqp.take_full ? "TAKE CUT SHORT" : "RECORDED") : "MEMORY FULL", t);
+    sq_dirty = 1;
+}
+
+void app_init(void)
+{
+    if (plat_store_load(OBJ_SETTINGS, &set, sizeof set) != (int)sizeof set || set.magic != SET_MAGIC ||
+        set.s7_channel > 15u || set.bend_range > 12u || set.octave < -2 || set.octave > 2)
+        settings_defaults();
+    s7_init(SM_FS);
+    s7_bend_range(set.bend_range);
+    s7mem_init();
+    sds_init(stage[0], stage[1]);
+    sq_load();
+    sqp_init(SM_FS);
+    sqp_select_part(0);
+}
+
+/* ------------------------------------------------------------------------------------------- the S700's MIDI --- */
+/* the FM-1 answers as an X7000 with 16 slots (s700/sds.h): sample dumps in (byte by byte, the USB interrupt) and out,
+ * the parameters (SPRM) and the overall settings (OVS) both ways, on the sampler's channel */
+static uint32_t sx_last_ms;       /* the last SysEx of ours: an automatic save waits for quiet */
+static uint8_t sx_autosave;       /* parameters came over MIDI: saved once it is quiet */
+static int32_t dump_request = -1; /* RSD: the slot to send, from the main loop */
+static void say_slot(const char *a, const char *b, uint32_t slot);
+
+void app_sysex_byte(uint8_t b) { sds_rx_byte(b); }
+
+/* the dumps received, into the flash, in the order they came (before any SPRM after them is taken) */
+static void dumps_flush(void)
+{
+    for (;;) {
+        sds_dump_t *d = 0;
+        uint32_t i, len;
+        int r;
+        for (i = 0; i < SDS_BUFS; i++)
+            if (sds_buf[i].state == SDS_READY && (!d || sds_buf[i].seq - d->seq > 0x80000000u))
+                d = &sds_buf[i];
+        if (!d)
+            return;
+        len = sds_length(d);
+        if (d->slot >= S7_SLOTS) {
+            say_slot("NO SUCH SLOT", "", d->slot);
+        } else if ((r = s7mem_write(d->slot, d->data, len)) != 0) {
+            say_slot(r == -1 ? "MEMORY FULL" : "WRITE FAILED", "SLOT ", d->slot);
+        } else {
+            uint32_t f = plat_lock();
+            sds_apply(d, s7_slot[d->slot].p);
+            plat_unlock(f);
+            sx_autosave = 1;
+            say_slot("RECEIVED", "SLOT ", d->slot);
+        }
+        d->state = SDS_FREE;
+        sx_last_ms = plat_ms();
+    }
+}
+
+/* a dump going out (RSD), a few blocks a frame: the UI keeps going, and the computer reads as it comes */
+#define TX_BLOCKS_A_FRAME 16u
+static struct {
+    uint8_t on;
+    sds_tx_t t;
+    uint32_t next, blocks;
+} tx;
+
+static void dump_send(uint32_t slot)
+{
+    uint8_t h[SDS_HEADER];
+    if (tx.on || plat_sysex_begin() != 0)
+        return;
+    tx.blocks = sds_tx_header(&tx.t, &s7_slot[slot], slot, h);
+    tx.next = 0;
+    tx.on = plat_sysex_put(h, SDS_HEADER) == 0;
+    if (!tx.on)
+        (void)plat_sysex_end();
+}
+
+static void dump_send_service(void)
+{
+    uint8_t blk[SDS_BLOCK], f7 = 0xF7;
+    uint32_t k;
+    if (!tx.on)
+        return;
+    for (k = 0; k < TX_BLOCKS_A_FRAME && tx.next < tx.blocks; k++, tx.next++) {
+        sds_tx_block(&tx.t, tx.next, blk);
+        if (plat_sysex_put(blk, SDS_BLOCK) != 0) {   /* nobody reading: the frame is cut, given up */
+            (void)plat_sysex_end();
+            tx.on = 0;
+            return;
+        }
+    }
+    if (tx.next == tx.blocks) {
+        (void)plat_sysex_put(&f7, 1);
+        (void)plat_sysex_end();
+        tx.on = 0;
+    }
+    sx_last_ms = plat_ms();
+}
+
+int app_sysex(const uint8_t *p, uint32_t n)
+{
+    uint32_t ch = set.s7_channel;
+    dumps_flush();
+    if (n >= 1u && p[0] == 0x7Eu) {          /* the sample dump's: a request, the handshake, a dump (byte path) */
+        if (n >= 3u && p[1] == 0x00u)        /* RSD: F0 7E 00 nn 00 F7 */
+            dump_request = p[2] < S7_SLOTS ? (int32_t)p[2] : -1;
+        return 1;
+    }
+    if (n < 6u || p[0] != 0x47u || p[1] != ch || p[3] != AKAI_ID)
+        return 0;                            /* not Akai's, or not our channel */
+    sx_last_ms = plat_ms();
+    switch (p[2]) {
+    case 0x01: {                             /* ROVS: the overall settings */
+        uint8_t o[OVS_LEN];
+        s7_ovs_t v = {(uint8_t)ch, 3, (uint8_t)ch, 0, set.bend_range, 0, 5, 127};
+        ovs_build(o, ch, &v);
+        (void)plat_sysex_send(o, OVS_LEN);
+        break;
+    }
+    case 0x04:                               /* RSPRM: a slot's parameters */
+        if (p[4] < S7_SLOTS) {
+            static uint8_t o[SPRM_LEN];
+            sprm_build(o, ch, p[4], s7_slot[p[4]].p);
+            (void)plat_sysex_send(o, SPRM_LEN);
+        }
+        break;
+    case 0x05:
+    case 0x06:                               /* SECRE / SECRD: sample dumps taken or not */
+        sds_enabled = p[2] == 0x05u;
+        break;
+    case 0x08: {                             /* OVS: the channel and the pitch wheel's range */
+        s7_ovs_t v = {(uint8_t)ch, 3, (uint8_t)ch, 0, set.bend_range, 0, 5, 127};
+        if (ovs_parse(p, n, &v) == 0 && v.channel < 16u && v.bend_range <= 12u) {
+            set.s7_channel = v.channel;
+            set.bend_range = v.bend_range;
+            s7_bend_range(v.bend_range);
+            set_dirty = 1;
+        }
+        break;
+    }
+    case 0x0A: {                             /* SPRM: a slot's parameters */
+        int32_t slot = sprm_check(p, n, ch);
+        if (slot >= 0) {
+            uint32_t f = plat_lock();
+            sprm_take(p, s7_slot[slot].p);
+            plat_unlock(f);
+            s7mem_touch();
+            sx_autosave = 1;
+        }
+        break;
+    }
+    default:
+        break;
+    }
+    return 1;
+}
+
+/* the main loop's part of the S700's MIDI: dumps into the flash, a dump out, the save once the transfer is over */
+static void s700_midi_service(void)
+{
+    dumps_flush();
+    if (dump_request >= 0 && !tx.on) {
+        uint32_t slot = (uint32_t)dump_request;
+        dump_request = -1;
+        dump_send(slot);
+        sx_last_ms = plat_ms();
+    }
+    dump_send_service();
+    if (sx_autosave && plat_ms() - sx_last_ms > 3000u && !sds_rx_progress()) {
+        sx_autosave = 0;
+        if (s7mem_save() != 0)
+            app_say("SAVE", "FAILED");
+    }
+}
+
+/* ------------------------------------------------------------------------------------------------------ UI --- */
+#include "ui/pages_seq.c"
+#define PG_SEQ PG_N               /* the sequencer's page, after the sampler's */
+
+static struct {
+    uint32_t keys, btn;           /* held at the last input */
+    uint8_t key_note[NKEYS];      /* the note each held key plays (the octave may change while held) */
+    char msg[2][LCD_COLS + 1];    /* a message over the page for a moment */
+    uint32_t msg_until;
+    uint8_t redraw;
+    uint8_t page;                 /* PG_* (ui/pages_s700.c), PG_SEQ */
+    uint8_t slot;                 /* the slot the sampler's pages edit, 0..15 */
+    uint8_t rec_used;             /* REC held: a track key chose the track (its release does not arm) */
+} ui;
+
+void app_say(const char *a, const char *b)
+{
+    uint32_t i;
+    for (i = 0; i < LCD_COLS && a && a[i]; i++)
+        ui.msg[0][i] = a[i];
+    ui.msg[0][i] = 0;
+    for (i = 0; i < LCD_COLS && b && b[i]; i++)
+        ui.msg[1][i] = b[i];
+    ui.msg[1][i] = 0;
+    ui.msg_until = plat_ms() + 1300u;
+    ui.redraw = 1;
+    if (ann_on()) {
+        char t[40] = "";
+        str_cat(t, ui.msg[0]);
+        str_cat(t, " ");
+        str_cat(t, ui.msg[1]);
+        ann_say(t, 0, ANN_NOW);
+    }
+}
+
+static int unsaved(void) { return set_dirty || s7mem_dirty() || sq_dirty; }
+
+static void save_all(void)
+{
+    int ok = 1;
+    if (sqp.state != SQP_STOPPED && sq_dirty) {
+        app_say("STOP FIRST", "");          /* a save stops the sound a moment */
+        return;
+    }
+    if (set_dirty) {
+        if (plat_store_save(OBJ_SETTINGS, &set, sizeof set) == 0)
+            set_dirty = 0;
+        else
+            ok = 0;
+    }
+    if (s7mem_dirty() && s7mem_save() != 0)
+        ok = 0;
+    if (sq_dirty && sq_save() != 0)
+        ok = 0;
+    app_say(ok ? "SAVED" : "SAVE", ok ? "" : "FAILED");
+}
+
+static void program_step(int32_t d)
+{
+    int32_t p = (int32_t)s7_current_program() + d;
+    p = p < 0 ? 0 : p > 31 ? 31 : p;
+    ev_push(0xC0u, (uint32_t)p, 0);
+    ui.redraw = 1;
+}
+
+/* the transport, any page: PLAY plays from the top or stops, SEL + PLAY continues; REC (released without a track
+ * key) arms recording, or punches out a take that runs */
+static void transport_button(uint32_t k, uint32_t btn)
+{
+    uint32_t f = plat_lock();
+    if (k == B_PLAY) {
+        if (sqp.state != SQP_STOPPED)
+            sqp_stop();
+        else if (btn >> B_SEL & 1u)
+            sqp_continue();
+        else
+            sqp_play();
+    } else if (k == B_REC) {
+        if (sqp.take_state == SQP_TAKE_RUNNING)
+            sqp_punch();
+        else
+            sqp.rec_armed = (uint8_t)!sqp.rec_armed;
+    }
+    plat_unlock(f);
+    ui.redraw = 1;
+}
+
+/* a track key on the sequencer's page: SEL held, its mute (and the song step's); REC held, the record track */
+static void track_key(uint32_t t, uint32_t btn)
+{
+    uint32_t f;
+    if (btn >> B_REC & 1u) {
+        f = plat_lock();
+        sqp.rec_track = (uint8_t)t;
+        sqp.rec_armed = 1;
+        plat_unlock(f);
+        ui.rec_used = 1;
+    } else {
+        f = plat_lock();
+        sqp.mask ^= (uint8_t)(1u << t);
+        plat_unlock(f);
+        if (sqp.song_mode && sqp.state == SQP_STOPPED && seq_song_step < sq_song_steps(sqp.song)) {
+            uint8_t part, mask;
+            sq_song_step(sqp.song, seq_song_step, &part, &mask);
+            (void)sq_song_set(sqp.song, seq_song_step, part, sqp.mask, sq_scratch);
+            sq_dirty = 1;
+        }
+    }
+    ui.redraw = 1;
+}
+
+/* the sequencer's encoders */
+static void seq_turn(uint32_t enc, int32_t e)
+{
+    uint32_t f;
+    if (enc == EN_PRESET) {                  /* the part (queued while playing), or the song */
+        int32_t v = (int32_t)(sqp.song_mode ? sqp.song : sqp.next_part != 0xFFu ? sqp.next_part : sqp.part) + e;
+        v = v < 0 ? 0 : v > 99 ? 99 : v;
+        f = plat_lock();
+        if (sqp.song_mode)
+            sqp_select_song((uint32_t)v);
+        else
+            sqp_select_part((uint32_t)v);
+        plat_unlock(f);
+        if (!sqp.song_mode)
+            seq_last_part = (uint8_t)v;
+        seq_song_step = 0;
+    } else if (enc == EN_K1) {               /* the tempo (a song keeps its own) */
+        f = plat_lock();
+        sqp_set_tempo((uint32_t)((int32_t)sqp.tempo + e));
+        plat_unlock(f);
+        if (sqp.song_mode) {
+            sq.song[sqp.song].tempo = (uint8_t)sqp.tempo;
+            sq_dirty = 1;
+        }
+    } else if (enc == EN_K2) {               /* the record track's channel: UNCHANGED, 1..16 */
+        int32_t c = (int32_t)sq.part[sqp.part].chan[sqp.rec_track] + e;
+        sq.part[sqp.part].chan[sqp.rec_track] = (uint8_t)(c < 0 ? 0 : c > 16 ? 16 : c);
+        sq_dirty = 1;
+    } else if (sqp.song_mode && sqp.state == SQP_STOPPED && enc == EN_SELECT) {   /* the step to edit */
+        int32_t st = (int32_t)seq_song_step + e, n = (int32_t)sq_song_steps(sqp.song);
+        seq_song_step = (uint32_t)(st < 0 ? 0 : st > n ? n : st);
+    } else if (sqp.song_mode && sqp.state == SQP_STOPPED && enc == EN_K3) {       /* the step's part; past 99: END */
+        uint32_t n = sq_song_steps(sqp.song);
+        uint8_t part = 100, mask = sqp.mask;
+        int32_t v;
+        if (seq_song_step < n)
+            sq_song_step(sqp.song, seq_song_step, &part, &mask);
+        v = seq_song_step < n ? (int32_t)part + e : (int32_t)seq_last_part;   /* at the END: the last part, appended */
+        v = v < 0 ? 0 : v > 100 ? 100 : v;
+        if (sq_song_set(sqp.song, seq_song_step, v == 100 ? 0xFFu : (uint8_t)v, mask, sq_scratch) != 0)
+            app_say("MEMORY FULL", "");
+        sq_dirty = 1;
+    }
+    ui.redraw = 1;
+}
+
+static void input(void)
+{
+    uint32_t keys, btn = plat_buttons(), k, lit_keys, dim_keys = 0, lit_btn;
+    int32_t e;
+    int tracks = ui.page == PG_SEQ && (btn & (1u << B_SEL | 1u << B_REC));
+    touch_poll();
+    keys = touch_keys();
+    for (k = 0; k < NKEYS; k++) {            /* key 0 is F3 (MIDI 53) */
+        uint32_t bit = 1u << k;
+        if ((keys & bit) && !(ui.keys & bit)) {
+            uint32_t note = (uint32_t)(53 + (int32_t)k + 12 * set.octave), v = touch_vel(k);
+            if (tracks) {                    /* the eight track buttons */
+                if (key_track(k) >= 0)
+                    track_key((uint32_t)key_track(k), btn);
+                ui.key_note[k] = 0xFFu;
+                continue;
+            }
+            ui.key_note[k] = (uint8_t)note;
+            ev_push(0x90u, note, v ? v : 1u);
+        } else if (!(keys & bit) && (ui.keys & bit) && ui.key_note[k] != 0xFFu) {
+            ev_push(0x80u, ui.key_note[k], 64u);
+        }
+    }
+    for (k = 0; k < NB; k++) {
+        uint32_t bit = 1u << k;
+        if (k == B_REC && !(btn & bit) && (ui.btn & bit)) {   /* REC released */
+            if (!ui.rec_used)
+                transport_button(B_REC, btn);
+            ui.rec_used = 0;
+        }
+        if (!(btn & bit) || (ui.btn & bit))
+            continue;
+        if (k == B_OCTDN || k == B_OCTUP) {
+            int32_t o = set.octave + (k == B_OCTUP ? 1 : -1);
+            if (o >= -2 && o <= 2) {
+                set.octave = (int8_t)o;
+                set_dirty = 1;
+                ui.redraw = 1;
+            }
+        } else if (k == B_SAVE) {
+            save_all();
+        } else if (k == B_PLAY) {
+            transport_button(k, btn);
+        } else if (k == B_SEQ) {             /* the sequencer; again: PART or SONG */
+            if (ui.page == PG_SEQ && sqp.state == SQP_STOPPED) {
+                uint32_t f = plat_lock();
+                sqp.song_mode = (uint8_t)!sqp.song_mode;
+                if (sqp.song_mode) {
+                    seq_last_part = sqp.part;
+                    sqp_select_song(sqp.song);
+                } else {
+                    sqp.mask = 0xFFu;
+                    sqp_select_part(seq_last_part);
+                }
+                plat_unlock(f);
+                seq_song_step = 0;
+            }
+            ui.page = PG_SEQ;
+            ui.redraw = 1;
+        } else if (k == B_EDIT) {            /* EDIT: the points, the loop, the tuning, the keys, round */
+            ui.page = ui.page >= PG_POINTS && ui.page < PG_KEYS ? (uint8_t)(ui.page + 1u) : PG_POINTS;
+            ui.redraw = 1;
+        } else if (k == B_ENV) {             /* ENV: the S700's OUT, then its velocity amounts */
+            ui.page = ui.page == PG_OUT1 ? PG_OUT2 : PG_OUT1;
+            ui.redraw = 1;
+        } else if (k == B_LFO) {
+            ui.page = PG_LFO;
+            ui.redraw = 1;
+        } else if (k == B_HOME) {
+            ui.page = PG_HOME;
+            ui.redraw = 1;
+        }
+    }
+    if (btn != ui.btn)
+        ui.redraw = 1;
+    for (k = 0; k < NE; k++) {
+        if ((e = plat_enc((int)k)) == 0)
+            continue;
+        if (ui.page == PG_SEQ) {
+            seq_turn(k, e);
+        } else if (k == EN_PRESET) {
+            program_step(e);
+        } else if (k == EN_SELECT) {         /* SELECT: the slot the sampler's pages edit */
+            int32_t sl = (int32_t)ui.slot + e;
+            ui.slot = (uint8_t)(sl < 0 ? 0 : sl > 15 ? 15 : sl);
+            ui.redraw = 1;
+        } else if (k >= EN_K1 && ui.page != PG_HOME &&
+                   page_s700_turn(ui.page, ui.slot, s7_current_program(), k - EN_K1, e)) {
+            ui.redraw = 1;
+        }
+    }
+    ui.keys = keys;
+    ui.btn = btn;
+    /* the lights: the held, SAVE while something is not saved, the transport, the page's button */
+    lit_btn = btn | (unsaved() ? 1u << B_SAVE : 0u) | (sqp.rec_armed ? 1u << B_REC : 0u);
+    lit_btn |= ui.page == PG_SEQ ? 1u << B_SEQ : 0u;
+    if (sqp.state != SQP_STOPPED)
+        lit_btn |= LED_PLAY_GREEN;
+    lit_keys = keys;
+    if (tracks) {
+        lit_keys = 0;
+        seq_track_lights(&lit_keys, &dim_keys);
+    }
+    plat_play_red(sqp.state == SQP_COUNTIN || sqp.take_state == SQP_TAKE_RUNNING);
+    plat_lights(lit_btn, lit_keys, 0, dim_keys, 1);
+}
+
+void app_input_only(void) { input(); }
+
+static void say_slot(const char *a, const char *b, uint32_t slot)
+{
+    char t[LCD_COLS + 1] = "", n[4];
+    str_cat(t, b);
+    fmt_uint(n, slot + 1u, 2, '0');
+    str_cat(t, n);
+    app_say(a, t);
+}
+
+/* the page under the panel: what the sampler holds */
+static void draw_status(void)
+{
+    char t[32];
+    uint32_t i, used = 0, fr = s7mem_free_sectors();
+    for (i = 0; i < S7_SLOTS; i++)
+        used += (uint32_t)s7mem_has_sample(i);
+    cv_begin(240, STATUS_H, C_BLACK);
+    cv_text(8, 4, &FONT_XS, "SAMPLES", C_GRAY);
+    fmt_uint(t, used, 0, ' ');
+    str_cat(t, "/16");
+    cv_text(70, 4, &FONT_XS, t, C_HI);
+    cv_text(120, 4, &FONT_XS, "FREE", C_GRAY);
+    fmt_uint(t, fr * 4u, 0, ' ');
+    str_cat(t, "K");
+    cv_text(160, 4, &FONT_XS, t, C_HI);
+    cv_text(8, 22, &FONT_XS, "MIDI CH", C_GRAY);
+    fmt_uint(t, set.s7_channel + 1u, 0, ' ');
+    cv_text(70, 22, &FONT_XS, t, C_HI);
+    cv_text(120, 22, &FONT_XS, "CPU", C_GRAY);
+    fmt_uint(t, plat_cpu_pct(), 0, ' ');
+    str_cat(t, "%");
+    cv_text(160, 22, &FONT_XS, t, C_HI);
+    /* what the sampler's pages edit: the slot (SELECT), its sample, the program (PRESET) */
+    cv_text(8, 40, &FONT_XS, "SLOT", C_GRAY);
+    fmt_uint(t, ui.slot + 1u, 2, '0');
+    cv_text(70, 40, &FONT_XS, t, C_HI);
+    cv_text(120, 40, &FONT_XS, "PROGRAM", C_GRAY);
+    fmt_uint(t, s7_current_program() + 1u, 2, '0');
+    cv_text(190, 40, &FONT_XS, t, C_HI);
+    {
+        const char *nm = s7mem_name(ui.slot) ? s7mem_name(ui.slot) : s7mem_has_sample(ui.slot) ? "SAMPLE" : "TEST TONE";
+        for (i = 0; nm[i] && i < 28u; i++)  /* (a built-in sample's name: its file's) */
+            t[i] = nm[i];
+        t[i] = 0;
+    }
+    cv_text(8, 58, &FONT_XS, t, C_HI);
+    if (!s7_slot_in_program(&s7_slot[ui.slot], s7_current_program()))
+        cv_text(190, 58, &FONT_XS, "OUT", C_GRAY);
+    cv_blit(0, LCD_Y + LCD_H + 10);
+}
+
+static void page_home(void)
+{
+    char t[LCD_COLS + 1], n[8];
+    uint32_t prog = s7_current_program(), i, nslots = 0;
+    for (i = 0; i < S7_SLOTS; i++)
+        nslots += (uint32_t)s7_slot_in_program(&s7_slot[i], prog);
+    t[0] = 0;
+    str_cat(t, "PROGRAM ");
+    fmt_uint(n, prog + 1u, 2, '0');
+    str_cat(t, n);
+    str_cat(t, " OCT");
+    fmt_signed(n, set.octave, 2);
+    str_cat(t, n);
+    lcd_row(0, t);
+    t[0] = 0;
+    str_cat(t, "SMP ");
+    fmt_uint(n, nslots, 2, '0');
+    str_cat(t, n);
+    str_cat(t, "  VOICES ");
+    fmt_uint(n, s7_voices_active(), 1, ' ');
+    str_cat(t, n);
+    lcd_row(1, t);
+}
+
+void app_ui_init(void)
+{
+    touch_on(1);
+    lcd_fill(0, 0, 240, 240, C_BLACK);
+    lcd_clear();
+    ui.redraw = 1;
+}
+
+void app_frame(void)
+{
+    static uint32_t last_status;
+    uint32_t now = plat_ms();
+    input();
+    s700_midi_service();
+    take_service();
+    if (sds_rx_progress()) {                 /* a dump coming in: its progress, as the sampler shows it */
+        char t[LCD_COLS + 1] = "WORDS ", n[8];
+        fmt_uint(n, sds_rx_progress(), 5, ' ');
+        str_cat(t, n);
+        lcd_row(0, "RECEIVING DUMP");
+        lcd_row(1, t);
+    } else if (now < ui.msg_until) {
+        lcd_row(0, ui.msg[0]);
+        lcd_row(1, ui.msg[1]);
+    } else if (ui.page == PG_SEQ) {
+        seq_draw(ui.btn >> B_SEL & 1u);
+    } else if (ui.page == PG_HOME) {
+        page_home();
+    } else {
+        page_s700_draw(ui.page, ui.slot, s7_current_program());
+    }
+    lcd_draw(ui.redraw);
+    if (ui.redraw || now - last_status >= 250u) {
+        last_status = now;
+        if (ui.page == PG_SEQ)
+            seq_status();
+        else
+            draw_status();
+    }
+    ui.redraw = 0;
+    ann_tick(now);
+}
+
+#ifdef PLAT_HOST
+int app_expect(const char *what, int *got)
+{
+    if (!strcmp(what, "program"))
+        *got = (int)s7_current_program() + 1;
+    else if (!strcmp(what, "voices"))
+        *got = (int)s7_voices_active();
+    else if (!strcmp(what, "octave"))
+        *got = set.octave;
+    else if (!strcmp(what, "free"))
+        *got = (int)s7mem_free_sectors();
+    else if (!strncmp(what, "words", 5))    /* wordsN: slot N's words (1..16), 0 for the test tone */
+        *got = s7mem_has_sample((uint32_t)atoi(what + 5) - 1u) ? (int)s7_slot[(atoi(what + 5) - 1) % 16].words : 0;
+    else if (!strncmp(what, "end", 3))      /* endN: slot N's END + 1 */
+        *got = (int)s7_word(s7_slot[(atoi(what + 3) - 1) % 16].p, S7_P_SEND);
+    else if (!strncmp(what, "mode", 4))     /* modeN: slot N's scan mode */
+        *got = s7_slot[(atoi(what + 4) - 1) % 16].p[S7_P_RPMODE];
+    else if (!strncmp(what, "root", 4))     /* rootN */
+        *got = s7_slot[(atoi(what + 4) - 1) % 16].p[S7_P_RECNP];
+    else if (!strncmp(what, "filter", 6))   /* filterN */
+        *got = s7_slot[(atoi(what + 6) - 1) % 16].p[S7_P_FLTFRQ];
+    else if (!strncmp(what, "keyh", 4))     /* keyhN: slot N's high key in the program */
+        *got = s7_slot[(atoi(what + 4) - 1) % 16].p[S7_P_KEYH(s7_current_program())];
+    else if (!strncmp(what, "keyl", 4))     /* keylN: its low key */
+        *got = s7_slot[(atoi(what + 4) - 1) % 16].p[S7_P_KEYL(s7_current_program())];
+    else if (!strncmp(what, "inprog", 6))   /* inprogN: slot N plays in the program */
+        *got = s7_slot_in_program(&s7_slot[(atoi(what + 6) - 1) % 16], s7_current_program());
+    else if (!strcmp(what, "page"))
+        *got = ui.page;
+    else if (!strcmp(what, "slot"))
+        *got = ui.slot + 1;
+    else if (!strncmp(what, "rom", 3))      /* romN: slot N plays a built-in sample */
+        *got = s7mem_is_rom((uint32_t)atoi(what + 3) - 1u);
+    else if (!strcmp(what, "unsaved"))
+        *got = unsaved();
+    else if (!strcmp(what, "seq"))          /* the transport: 0 stopped, 1 count-in, 2 playing */
+        *got = sqp.state;
+    else if (!strcmp(what, "part"))
+        *got = sqp.part;
+    else if (!strcmp(what, "beat"))
+        *got = (int)sqp_beat();
+    else if (!strcmp(what, "beats"))        /* the part's length */
+        *got = sq.part[sqp.part].beats;
+    else if (!strcmp(what, "tracks"))       /* the part's tracks with data, a bit each */
+        *got = (int)sq_part_used(sqp.part);
+    else if (!strcmp(what, "mask"))
+        *got = sqp.mask;
+    else if (!strcmp(what, "armed"))
+        *got = sqp.rec_armed;
+    else if (!strcmp(what, "rectrack"))
+        *got = sqp.rec_track + 1;
+    else if (!strcmp(what, "take"))
+        *got = sqp.take_state;
+    else if (!strcmp(what, "tempo"))
+        *got = sqp.tempo;
+    else if (!strcmp(what, "steps"))
+        *got = (int)sq_song_steps(sqp.song);
+    else if (!strcmp(what, "songmode"))
+        *got = sqp.song_mode;
+    else
+        return 0;
+    return 1;
+}
+#endif
