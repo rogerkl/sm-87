@@ -27,6 +27,7 @@ typedef struct {
     int32_t countin;              /* ticks of count-in left */
     uint32_t take_n, take_beats;  /* the take's events; the length a first take sets */
     uint8_t take_part, take_track, take_full;
+    uint8_t take_nothing;         /* a take ended with nothing to keep (the app says so, and clears it) */
 } sqp_t;
 
 extern volatile sqp_t sqp;

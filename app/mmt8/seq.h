@@ -109,3 +109,34 @@ int sq_erase(uint32_t p, uint32_t mask);
 int sq_merge(uint32_t p, uint32_t a, uint32_t b, uint8_t *scratch);
 /* part a's tracks of mask copied over part b's (b takes a's length when empty) */
 int sq_copy_tracks(uint32_t a, uint32_t b, uint32_t mask);
+
+/* ERASE's and COPY's filters, the MMT-8's 22: everything, a kind of event, or one MIDI channel (as recorded) */
+enum { SQ_F_ALL, SQ_F_NOTES, SQ_F_BEND, SQ_F_CTRL, SQ_F_PROG, SQ_F_TOUCH, SQ_F_CHAN, SQ_F_N = SQ_F_CHAN + 16 };
+int sq_filter_match(const uint8_t *e, uint32_t filter);
+/* the events of the filter erased from the tracks of mask (SQ_F_ALL: sq_erase) */
+int sq_erase_filter(uint32_t p, uint32_t mask, uint32_t filter, uint8_t *scratch);
+/* LENGTH with the beats added or taken off at the part's top: the events move (those in beats taken off go, held
+ * notes too) */
+int sq_set_length_top(uint32_t p, uint32_t beats, uint8_t *scratch);
+/* errors of the copies: no room, a part or song too long, nothing to copy */
+enum { SQ_E_ROOM = -1, SQ_E_LONG = -2, SQ_E_NONE = -3 };
+/* COPY a part: a's events of the filter after b's, b as long as both (b empty: a copy of a, its channels and name;
+ * a = b: twice as long). All or nothing */
+int sq_append_part(uint32_t a, uint32_t b, uint32_t filter, uint8_t *scratch);
+/* COPY a track: part a's track ta (the filter's events) over part b's track tb, cut to b's length (b without one
+ * takes a's). An empty track takes the channel too */
+int sq_copy_track(uint32_t a, uint32_t ta, uint32_t b, uint32_t tb, uint32_t filter, uint8_t *scratch);
+
+/* ---- songs, the MMT-8's song edits ---- */
+int sq_song_append(uint32_t a, uint32_t b, uint8_t *scratch);   /* COPY: song a's steps after b's */
+void sq_song_erase(uint32_t s);
+int sq_song_insert(uint32_t s, uint32_t i, uint8_t part, uint8_t mask, uint8_t *scratch);  /* the steps from i on move */
+int sq_song_delete(uint32_t s, uint32_t i, uint8_t *scratch);
+
+/* ---- EDIT: a track's events one at a time ---- */
+uint32_t sq_events(uint32_t p, uint32_t t);
+const uint8_t *sq_event(uint32_t p, uint32_t t, uint32_t i);    /* 0 past the last */
+/* event i replaced by ev (7 bytes for a note, else 5), or added (i = the count); the track sorted again. Returns
+ * ev's index then, or -1 (no room) */
+int32_t sq_event_put(uint32_t p, uint32_t t, uint32_t i, const uint8_t *ev, uint8_t *scratch);
+int sq_event_delete(uint32_t p, uint32_t t, uint32_t i, uint8_t *scratch);

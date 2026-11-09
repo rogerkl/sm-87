@@ -1,0 +1,257 @@
+# The MMT-8's functions on the panel: ALGO turns to them on the SEQ page, the first eight white keys are the track
+# buttons, K1..K4 the values, REC does it. A part made in EDIT, then QUANTIZE, TRANSPOSE, COPY, MERGE, MIDI CHANNEL,
+# NAME, ERASE, LENGTH from the top; a song's steps put in and taken out; all of it kept across a power cycle.
+wait 600
+tap SEQ
+wait 30
+expect fn 0
+# LENGTH: 4 beats for the empty part 00
+turn ALGO 1
+wait 30
+expect fn 1
+turn K1 4 20
+wait 30
+shot fn_length.png
+tap REC
+wait 30
+expect beats 4
+expect beats0 4
+# EDIT, track 1: REC at the end adds a note at 001.00 (C3, 64, a beat), K2 K3 K1 make it E3, 100, 5 clocks in
+turn ALGO 8
+wait 30
+expect fn 9
+expect evn 0
+tap REC
+wait 30
+expect evn 1
+expect evi 1
+expect evkey 60
+expect evvel 64
+expect evdur 96
+turn K2 4 20
+turn K3 36 20
+turn K1 5 20
+wait 30
+expect evkey 64
+expect evvel 100
+expect evtick 5
+shot fn_edit.png
+# past the last: SEL + K1 moves where REC adds by beats, K2 what; a program change at beat 3, then erased (SEL + REC)
+turn SELECT 1
+wait 30
+expect evi 2
+press SEL
+turn K1 2 20
+release SEL
+turn K2 1
+wait 30
+tap REC
+wait 30
+expect evn 2
+expect evi 2
+expect evst 192
+expect evtick 192
+press SEL
+tap REC
+release SEL
+wait 30
+expect evn 1
+# and a note there instead
+turn K2 -1
+wait 30
+tap REC
+wait 30
+expect evn 2
+expect evkey 60
+expect evtick 192
+# QUANTIZE (1/16, the starts): not while playing
+turn ALGO -4
+wait 30
+expect fn 5
+expect sel 255
+tap PLAY
+wait 50
+expect seq 2
+tap REC
+wait 30
+expect armed 0
+tap PLAY
+wait 50
+expect seq 0
+tap REC
+wait 30
+turn ALGO 4
+wait 30
+expect evtick 0
+expect evkey 64
+# TRANSPOSE track 1 only (its key: the others go out), up an octave
+turn ALGO -3
+wait 30
+expect fn 6
+tapkey w0
+wait 30
+expect sel 1
+turn K1 12 20
+wait 30
+shot fn_transpose.png
+tap REC
+wait 30
+turn ALGO 3
+wait 30
+expect evkey 76
+turn SELECT 1
+wait 30
+expect evkey 72
+# COPY: the part to the empty part 01 (a copy)
+turn ALGO -6
+wait 30
+expect fn 3
+turn K1 1
+wait 30
+tap REC
+wait 30
+expect beats1 4
+expect used1 1
+# a key that is not a track button still plays
+key b5 down
+wait 50
+expect voices 1
+key b5 up
+# track 1 to track 2 of this part (lit, flashing)
+tapkey w0
+tapkey w1
+turn K1 -1
+wait 30
+shot fn_copy.png
+tap REC
+wait 30
+expect used0 3
+expect events2 2
+# part 01 to itself: twice as long (track 1 again: the whole part)
+turn PRESET 1
+wait 30
+expect part 1
+tapkey w0
+turn K1 1
+wait 30
+tap REC
+wait 30
+expect beats1 8
+turn PRESET -1
+wait 30
+expect part 0
+# MERGE track 1 into track 2
+turn ALGO 1
+wait 30
+expect fn 4
+tapkey w0
+tapkey w1
+wait 30
+tap REC
+wait 30
+expect events2 4
+expect events1 2
+# MIDI CHANNEL: track 2 on 5 (at once)
+turn ALGO 3
+wait 30
+expect fn 7
+tapkey w1
+turn K1 5 20
+wait 30
+expect chan2 5
+# NAME: the first letter one on (N to O), stored with REC
+turn ALGO 1
+wait 30
+expect fn 8
+expect name1 78
+turn K2 1
+wait 30
+shot fn_name.png
+expect name1 78
+tap REC
+wait 30
+expect name1 79
+# ERASE the notes only (the part keeps its length), then everything (EMPTY PART)
+turn ALGO -6
+wait 30
+expect fn 2
+turn K1 1
+wait 30
+tap REC
+wait 30
+expect events1 0
+expect events2 0
+expect beats0 4
+turn K1 -1
+wait 30
+tap REC
+wait 30
+expect beats0 0
+expect used0 0
+# LENGTH of part 01 from the top: a beat more, everything a beat later
+turn PRESET 1
+wait 30
+turn ALGO -1
+wait 30
+expect fn 1
+turn K1 1
+turn K2 1
+wait 30
+tap REC
+wait 30
+expect beats1 9
+turn ALGO 8
+wait 30
+expect evtick 96
+# SONG: SEQ back to the part, SEQ again the song; its functions are ERASE, COPY, NAME, EDIT
+tap SEQ
+wait 30
+expect fn 0
+tap SEQ
+wait 30
+expect songmode 1
+turn ALGO 4
+wait 30
+expect fn 9
+# REC at the end adds the part last chosen (01), K1 there another (00); SEL + REC takes the step shown out
+tap REC
+wait 30
+expect steps 1
+expect step1 1
+turn SELECT 1
+turn K1 -1
+wait 30
+tap REC
+wait 30
+expect steps 2
+expect step2 0
+turn SELECT -2
+wait 30
+press SEL
+tap REC
+release SEL
+wait 30
+expect steps 1
+expect step1 0
+shot fn_song_edit.png
+# COPY the song to itself, then ERASE it
+turn ALGO -2
+wait 30
+expect fn 3
+tap REC
+wait 30
+expect steps 2
+turn ALGO -1
+wait 30
+expect fn 2
+tap REC
+wait 30
+expect steps 0
+# kept
+tap SAVE
+wait 300
+expect unsaved 0
+reboot
+wait 600
+expect beats1 9
+expect beats0 0

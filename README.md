@@ -35,6 +35,9 @@ on an FM-1 yet** (see *On the device*).
   - Per-track MIDI channel, or UNCHANGED.
   - MIDI echo to the record track's channel.
   - MIDI clock and song position out.
+  - The MMT-8's functions: LENGTH (at the end or the top), ERASE and COPY with its 22 filters, MERGE, QUANTIZE (10
+    grids, 4 modes), TRANSPOSE, MIDI CHANNEL, NAME, and EDIT, the event list editor; in a song ERASE, COPY, NAME and
+    EDIT, its steps put in and taken out.
 - **The screen** is a 2 × 16 character LCD, drawn dot by dot, with a status strip under it.
 
 ## Controls
@@ -44,11 +47,12 @@ on an FM-1 yet** (see *On the device*).
 | Keys | Play the sampler on its channel (and out over USB); OCT- / OCT+ shift them |
 | SEQ | The sequencer's page; again (stopped): PART ↔ SONG |
 | PLAY | Play from the top / stop; SEL + PLAY continues from the beat |
-| REC | Arm recording (the lowest track unless chosen); while a take runs: punch out |
+| REC | Arm recording on the part's lowest empty track (or the one chosen with REC + its key); again: disarm; while a take runs: punch out |
 | SEL + first 8 white keys | Track mutes (on the SEQ page; in a song: the step's mutes) |
 | REC + first 8 white keys | The record track |
 | PRESET | The part or song (SEQ page), else the sampler's program |
 | K1 / K2 (SEQ) | Tempo / the record track's channel (UNCHANGED, 1-16) |
+| ALGO (SEQ) | The MMT-8's functions, below; SEQ goes back to the part or song |
 | SELECT / K3 (SONG, stopped) | The step / its part (at the END: appends the last part; past 99: the song ends there) |
 | EDIT | The sampler's pages round: POINTS (START, END), LOOP (LOOP, MODE), TUNE (ROOT, FINE, RATE), KEYS (LO, HI, TRANSPOSE, CONSTANT) |
 | ENV | OUT (FILTER, RELEASE, LEVEL), then the velocity amounts |
@@ -56,6 +60,49 @@ on an FM-1 yet** (see *On the device*).
 | SELECT / K1-K4 (sampler pages) | The slot / the page's values. The strip under the LCD shows the slot, its sample and the program |
 | HOME | The sampler's overview |
 | SAVE | Lit when something isn't saved: settings, the sample parameters, the sequencer (stopped) |
+
+### Recording a part
+
+1. SEQ, and PRESET to the part. The LCD's top left says PART (SEQ again switches to SONG, which plays parts but
+   doesn't record).
+2. REC: it lights, and the LCD shows `REC TRK 1`, the part's lowest empty track. REC + a track key chooses
+   another; it stays chosen until you change part.
+3. PLAY: four clicks of count-in (`COUNT IN 4` .. `1`), then it records from beat 1. Notes in the count-in aren't
+   recorded, except one played in its last sixteenth, which lands on beat 1.
+4. PLAY (or REC) to stop. On an empty part this sets its length, to the nearest beat. Later takes stop at the
+   part's end. The LCD says `RECORDED TRACK 1`, or `NOTHING RECORDED` when nothing was played after the count-in.
+5. PLAY plays it back. Another REC arms the next empty track, so takes don't record over each other unless you
+   choose a recorded track yourself (like tape, that replaces it).
+6. SAVE (lit while something isn't saved) keeps it in the flash. Without it, the part is gone after a power cycle
+   (or a reload of the emulator page).
+
+### The MMT-8's functions (ALGO on the SEQ page)
+
+As on the MMT-8, where you hold a function's button: the first eight white keys are the track buttons, K1-K4 set
+the function's values, and **REC does it** (RECORD). Nothing changes before REC. The functions that change the
+part's events wait until the sequencer stops ("STOP FIRST"). The tracks: a function starts with all eight lit; a
+track key chooses only its own, then the keys add and take away. COPY and MERGE take a track from (lit) and one to
+(flashing; red on the screen). The strip under the LCD shows the tracks and the function.
+
+| Function | K1 | K2 | REC |
+|---|---|---|---|
+| LENGTH | Beats, 1-682 (SEL: tens) | At the end / at the top | Sets the part's length: events past a new end go, a note held over it is cut; at the top, the beats are added or taken off at the start |
+| ERASE | What: all, notes, bend, controllers, programs, aftertouch, or channel 1-16 | | Erases it from the tracks lit; all of everything: EMPTY PART. In a song: the song |
+| COPY | The part (song) to | What, as ERASE | All tracks: the part goes after the other's end (an empty one gets a copy; itself: twice as long). One track (and one to): over that track, cut to the other part's length. In a song: after the other song's steps |
+| MERGE | | | The track lit onto the flashing one, both channels baked in, the merged track UNCHANGED |
+| QUANTIZE | 1/2 ... 1/64 | Note start / start & end / note end / keep duration | The notes of the tracks lit |
+| TRANSPOSE | Semitones, ±99 (SEL: octaves) | | The tracks lit; out of range folds back by octaves |
+| MIDI CHANNEL | The track's channel, UNCHANGED or 1-16, at once | | |
+| NAME | The cursor | The character | Stores the 14-character name (a part once used) |
+| EDIT | The event's place (SEL: by beats) | Key, controller, program, bend (SEL: the channel) | Adds a C3 note where the event shown is; SEL + REC erases the event |
+
+**EDIT** shows one track's events (the track key chooses which), as the MMT-8: `1 001.05 E3  100` is track 1, beat
+1, clock 5, E3 at velocity 100, and `DUR 001.00 CH01` its duration (a beat) and channel (in brackets when the track
+plays on a channel of its own). SELECT goes from event to event; K3 is the velocity (a controller's value, the bend
+fine), K4 the duration (SEL: by beats; not a note: the channel). Past the last is END OF TRACK: K1 is where REC adds,
+K2 what (a note, a program change, a controller, bend, aftertouch). In a **song**, EDIT shows its steps: SELECT the
+step, K1 its part, the track keys its tracks, REC puts a step in before it (at the end: the part K1 chose), SEL + REC
+takes it out.
 
 **A slot into a program:** PRESET to the program, EDIT to the KEYS page, SELECT to the slot. LO and HI show `--`
 while the slot isn't in the program (the strip says OUT). One detent of K1 (LO) or K2 (HI) puts it in with the whole
@@ -72,7 +119,7 @@ goes quiet.
 | `app/` | The firmware: `app.c` (glue, routing, render, pages), `fm1.toml`, `app.h` (contract, flash map) |
 | `app/s700/` | The sampler: `s7engine.c` (voices), `s7mem.c` (flash pool, directory), `sds.c` (sample dump, SPRM, OVS) |
 | `app/mmt8/` | The sequencer: `seq.c` (memory, takes, edits), `player.c` (clock, playback, recording, songs) |
-| `app/ui/` | The LCD (`lcd.c`, a 5 × 7 font) and the pages |
+| `app/ui/` | The LCD (`lcd.c`, a 5 × 7 font) and the pages; `seq_edit.c` the MMT-8's functions |
 | `app/tests/` | Scripts for the host simulator (`sysex.txt` is generated by `test/gen_sysex_test.py`) |
 | `test/` | C unit tests against the X7000 measurements, Axs7's fixtures and the MMT-8's behaviour; `run.sh` runs all |
 | `tools/mkrom.py` | Samples built into the firmware, from WAV files and `.qd` images (`app/rom/`, not in the repository) |
@@ -175,6 +222,5 @@ The first things to measure on a device, before more is built on these assumptio
 
 ## Next
 
-- The MMT-8's edits on the panel. COPY, ERASE, MERGE, QUANTIZE (4 modes), TRANSPOSE and LENGTH exist in
-  `mmt8/seq.c` with tests; NAME and the event list editor don't exist yet.
+- The MMT-8's song QUANTIZE (a clock offset for each track, ±48) and a part's events shown as it plays in EDIT.
 - MIDI clock in, MMT-8 sysex memory dumps in and out (`documentation/MMT-8 SYSEX.odt`), and the HR-16 drum machine.

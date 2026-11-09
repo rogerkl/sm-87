@@ -97,6 +97,18 @@ uint32_t sq_part_used(uint32_t p)
 
 int sq_part_empty(uint32_t p) { return !sq.part[p].beats && !sq_part_used(p); }
 
+/* a part's first use: EMPTY PART becomes NO PART NAME (the MMT-8's), a name given stays */
+static void part_used_name(uint32_t p)
+{
+    static const char E[SQ_NAME] = "EMPTY PART    ", N[SQ_NAME] = "NO PART NAME  ";
+    uint32_t i;
+    for (i = 0; i < SQ_NAME; i++)
+        if (sq.part[p].name[i] != E[i])
+            return;
+    for (i = 0; i < SQ_NAME; i++)
+        sq.part[p].name[i] = N[i];
+}
+
 /* ------------------------------------------------------------------------------------------- a take --- */
 static void put_ev(uint8_t *e, uint32_t tick, uint32_t st, uint32_t d1, uint32_t d2)
 {
@@ -183,6 +195,7 @@ int sq_commit(uint32_t p, uint32_t t, const sq_raw_t *take, uint32_t n, uint32_t
         return -1;
     if (!sq.part[p].beats)
         sq.part[p].beats = (uint16_t)beats;
+    part_used_name(p);
     return 0;
 }
 
@@ -260,6 +273,7 @@ int sq_set_length(uint32_t p, uint32_t beats, uint8_t *scratch)
         if (rebuild(SQ_TRK(p, t), fn_length, &end, scratch) != 0)
             return -1;
     sq.part[p].beats = (uint16_t)beats;
+    part_used_name(p);
     return 0;
 }
 
@@ -330,8 +344,10 @@ int sq_erase(uint32_t p, uint32_t mask)
     for (t = 0; t < SQ_TRACKS; t++)
         if (mask >> t & 1u)
             (void)sq_replace(SQ_TRK(p, t), 0, 0);
-    if (!sq_part_used(p))
+    if (!sq_part_used(p)) {       /* the whole part: EMPTY PART again (its channels stay, as the MMT-8's) */
         sq.part[p].beats = 0;
+        sq_part_name_default(p);
+    }
     return 0;
 }
 
@@ -387,4 +403,259 @@ int sq_copy_tracks(uint32_t a, uint32_t b, uint32_t mask)
     if (!sq.part[b].beats)
         sq.part[b].beats = sq.part[a].beats;
     return 0;
+}
+
+/* ------------------------------------------------------------------------------ filters, LENGTH top --- */
+int sq_filter_match(const uint8_t *e, uint32_t filter)
+{
+    uint32_t st = e[2] & 0xF0u;
+    switch (filter) {
+    case SQ_F_ALL:
+        return 1;
+    case SQ_F_NOTES:
+        return st == 0x90u;
+    case SQ_F_BEND:
+        return st == 0xE0u;
+    case SQ_F_CTRL:
+        return st == 0xB0u;
+    case SQ_F_PROG:
+        return st == 0xC0u;
+    case SQ_F_TOUCH:
+        return st == 0xD0u || st == 0xA0u;
+    default:
+        return filter < SQ_F_N && (e[2] & 0x0Fu) == filter - SQ_F_CHAN;
+    }
+}
+
+static int fn_keep_unmatched(uint8_t *e, void *ctx) { return !sq_filter_match(e, *(uint32_t *)ctx); }
+
+int sq_erase_filter(uint32_t p, uint32_t mask, uint32_t filter, uint8_t *scratch)
+{
+    uint32_t t;
+    if (filter == SQ_F_ALL)
+        return sq_erase(p, mask);
+    for (t = 0; t < SQ_TRACKS; t++)    /* (a track only gets shorter: never out of room) */
+        if ((mask >> t & 1u) && rebuild(SQ_TRK(p, t), fn_keep_unmatched, &filter, scratch) != 0)
+            return -1;
+    return 0;
+}
+
+static int fn_shift(uint8_t *e, void *ctx)
+{
+    int32_t t = (int32_t)sq_ev_tick(e) + *(int32_t *)ctx;
+    if (t < 0)
+        return 0;
+    e[0] = (uint8_t)t;
+    e[1] = (uint8_t)((uint32_t)t >> 8);
+    return 1;
+}
+
+int sq_set_length_top(uint32_t p, uint32_t beats, uint8_t *scratch)
+{
+    uint32_t t;
+    int32_t shift = ((int32_t)beats - (int32_t)sq.part[p].beats) * (int32_t)SQ_PPQN;
+    if (beats < 1u || beats > SQ_MAX_BEATS)
+        return -1;
+    for (t = 0; t < SQ_TRACKS; t++)
+        if (rebuild(SQ_TRK(p, t), fn_shift, &shift, scratch) != 0)
+            return -1;
+    sq.part[p].beats = (uint16_t)beats;
+    part_used_name(p);
+    return 0;
+}
+
+/* ----------------------------------------------------------------------------------------- copies --- */
+static uint32_t filtered_len(uint32_t blob, uint32_t filter)
+{
+    const uint8_t *d = sq_data(blob);
+    uint32_t len = sq_len(blob), a, n = 0;
+    for (a = 0; a < len; a += sq_ev_len(d + a))
+        if (sq_filter_match(d + a, filter))
+            n += sq_ev_len(d + a);
+    return n;
+}
+
+int sq_append_part(uint32_t a, uint32_t b, uint32_t filter, uint8_t *scratch)
+{
+    uint32_t t, need = 0, off, beats, k;
+    int empty = sq_part_empty(b);
+    if (sq_part_empty(a))
+        return SQ_E_NONE;
+    off = empty ? 0u : sq_part_ticks(b);
+    beats = (empty ? 0u : sq.part[b].beats) + sq.part[a].beats;
+    if (beats > SQ_MAX_BEATS)
+        return SQ_E_LONG;
+    for (t = 0; t < SQ_TRACKS; t++) {      /* the room first: every track or none */
+        uint32_t n = filtered_len(SQ_TRK(a, t), filter);
+        if (sq_len(SQ_TRK(b, t)) + n > SQ_SCRATCH)
+            return SQ_E_ROOM;
+        need += n;
+    }
+    if (need > sq_free())
+        return SQ_E_ROOM;
+    for (t = 0; t < SQ_TRACKS; t++) {
+        uint32_t la = sq_len(SQ_TRK(a, t)), lb = sq_len(SQ_TRK(b, t)), i, out = lb;
+        const uint8_t *da = sq_data(SQ_TRK(a, t));
+        copy(scratch, sq_data(SQ_TRK(b, t)), lb);
+        for (i = 0; i < la; i += sq_ev_len(da + i)) {   /* after b's last tick: still in order */
+            uint32_t l = sq_ev_len(da + i), tick = sq_ev_tick(da + i) + off;
+            if (!sq_filter_match(da + i, filter))
+                continue;
+            copy(scratch + out, da + i, l);
+            scratch[out] = (uint8_t)tick;
+            scratch[out + 1u] = (uint8_t)(tick >> 8);
+            out += l;
+        }
+        if (out != lb && sq_replace(SQ_TRK(b, t), scratch, out) != 0)
+            return SQ_E_ROOM;      /* (not after the check above) */
+    }
+    if (empty) {
+        for (k = 0; k < SQ_TRACKS; k++)
+            sq.part[b].chan[k] = sq.part[a].chan[k];
+        for (k = 0; k < SQ_NAME; k++)
+            sq.part[b].name[k] = sq.part[a].name[k];
+    }
+    sq.part[b].beats = (uint16_t)beats;
+    part_used_name(b);
+    return 0;
+}
+
+int sq_copy_track(uint32_t a, uint32_t ta, uint32_t b, uint32_t tb, uint32_t filter, uint8_t *scratch)
+{
+    uint32_t beats = sq.part[b].beats ? sq.part[b].beats : sq.part[a].beats, end = beats * SQ_PPQN;
+    uint32_t la = sq_len(SQ_TRK(a, ta)), lb = sq_len(SQ_TRK(b, tb)), i, out = 0;
+    const uint8_t *da = sq_data(SQ_TRK(a, ta));
+    if (!beats)
+        return SQ_E_NONE;
+    for (i = 0; i < la; i += sq_ev_len(da + i)) {
+        uint32_t l = sq_ev_len(da + i), tick = sq_ev_tick(da + i);
+        if (!sq_filter_match(da + i, filter) || tick >= end)
+            continue;              /* past b's end: cut */
+        if (out + l > SQ_SCRATCH)
+            return SQ_E_ROOM;
+        copy(scratch + out, da + i, l);
+        if (l == SQ_NOTE_LEN && tick + sq_ev_dur(da + i) > end) {
+            scratch[out + 5u] = (uint8_t)(end - tick);
+            scratch[out + 6u] = (uint8_t)((end - tick) >> 8);
+        }
+        out += l;
+    }
+    if (out > lb && out - lb > sq_free())
+        return SQ_E_ROOM;
+    if (sq_replace(SQ_TRK(b, tb), scratch, out) != 0)
+        return SQ_E_ROOM;
+    if (!lb)
+        sq.part[b].chan[tb] = sq.part[a].chan[ta];
+    sq.part[b].beats = (uint16_t)beats;
+    part_used_name(b);
+    return 0;
+}
+
+/* ------------------------------------------------------------------------------------- song edits --- */
+int sq_song_append(uint32_t a, uint32_t b, uint8_t *scratch)
+{
+    uint32_t na = sq_song_steps(a), nb = sq_song_steps(b);
+    if (!na)
+        return SQ_E_NONE;
+    if (na + nb > SQ_STEPS)
+        return SQ_E_LONG;
+    copy(scratch, sq_data(SQ_SONG(b)), 2u * nb);
+    copy(scratch + 2u * nb, sq_data(SQ_SONG(a)), 2u * na);
+    return sq_replace(SQ_SONG(b), scratch, 2u * (na + nb)) != 0 ? SQ_E_ROOM : 0;
+}
+
+void sq_song_erase(uint32_t s)
+{
+    static const char N[SQ_NAME] = "NO SONG NAME  ";
+    uint32_t k;
+    (void)sq_replace(SQ_SONG(s), 0, 0);
+    for (k = 0; k < SQ_NAME; k++)
+        sq.song[s].name[k] = N[k];
+}
+
+int sq_song_insert(uint32_t s, uint32_t i, uint8_t part, uint8_t mask, uint8_t *scratch)
+{
+    uint32_t n = sq_song_steps(s);
+    const uint8_t *d = sq_data(SQ_SONG(s));
+    if (i > n)
+        return SQ_E_NONE;
+    if (n >= SQ_STEPS)
+        return SQ_E_LONG;
+    copy(scratch, d, 2u * i);
+    scratch[2u * i] = part;
+    scratch[2u * i + 1u] = mask;
+    copy(scratch + 2u * i + 2u, d + 2u * i, 2u * (n - i));
+    return sq_replace(SQ_SONG(s), scratch, 2u * (n + 1u)) != 0 ? SQ_E_ROOM : 0;
+}
+
+int sq_song_delete(uint32_t s, uint32_t i, uint8_t *scratch)
+{
+    uint32_t n = sq_song_steps(s);
+    const uint8_t *d = sq_data(SQ_SONG(s));
+    if (i >= n)
+        return SQ_E_NONE;
+    copy(scratch, d, 2u * i);
+    copy(scratch + 2u * i, d + 2u * i + 2u, 2u * (n - i - 1u));
+    return sq_replace(SQ_SONG(s), scratch, 2u * (n - 1u));
+}
+
+/* ------------------------------------------------------------------------------------------- EDIT --- */
+/* event i's offset in the blob, or the blob's length */
+static uint32_t ev_at(uint32_t blob, uint32_t i)
+{
+    const uint8_t *d = sq_data(blob);
+    uint32_t len = sq_len(blob), a = 0;
+    while (i && a < len) {
+        a += sq_ev_len(d + a);
+        i--;
+    }
+    return a < len ? a : len;
+}
+
+uint32_t sq_events(uint32_t p, uint32_t t)
+{
+    const uint8_t *d = sq_data(SQ_TRK(p, t));
+    uint32_t len = sq_len(SQ_TRK(p, t)), a, n = 0;
+    for (a = 0; a < len; a += sq_ev_len(d + a))
+        n++;
+    return n;
+}
+
+const uint8_t *sq_event(uint32_t p, uint32_t t, uint32_t i)
+{
+    uint32_t a = ev_at(SQ_TRK(p, t), i);
+    return a < sq_len(SQ_TRK(p, t)) ? sq_data(SQ_TRK(p, t)) + a : 0;
+}
+
+int32_t sq_event_put(uint32_t p, uint32_t t, uint32_t i, const uint8_t *ev, uint8_t *scratch)
+{
+    uint32_t blob = SQ_TRK(p, t), len = sq_len(blob), at = ev_at(blob, i), lo, ln = sq_ev_len(ev), m, a, n = 0;
+    uint32_t tick = sq_ev_tick(ev);
+    const uint8_t *d = sq_data(blob);
+    lo = at < len ? sq_ev_len(d + at) : 0u;
+    m = len - lo;
+    if (m + ln > SQ_SCRATCH)
+        return -1;
+    /* the track without it, then it in after the last event at its tick or before: no sort (a turn a time) */
+    copy(scratch, d, at);
+    copy(scratch + at, d + at + lo, len - at - lo);
+    for (a = 0; a < m && sq_ev_tick(scratch + a) <= tick; a += sq_ev_len(scratch + a))
+        n++;
+    copy(scratch + a + ln, scratch + a, m - a);
+    copy(scratch + a, ev, ln);
+    if (sq_replace(blob, scratch, m + ln) != 0)
+        return -1;
+    return (int32_t)n;
+}
+
+int sq_event_delete(uint32_t p, uint32_t t, uint32_t i, uint8_t *scratch)
+{
+    uint32_t blob = SQ_TRK(p, t), len = sq_len(blob), at = ev_at(blob, i), l;
+    const uint8_t *d = sq_data(blob);
+    if (at >= len)
+        return -1;
+    l = sq_ev_len(d + at);
+    copy(scratch, d, at);
+    copy(scratch + at, d + at + l, len - at - l);
+    return sq_replace(blob, scratch, len - l);
 }

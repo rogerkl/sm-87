@@ -1,0 +1,109 @@
+# Recording takes from the panel's keys, as the MMT-8: REC arms the part's lowest empty track, so a second take goes
+# to track 2 and keeps the first; a track chosen with REC + its key stays until another part; a note a little early
+# lands on the one; stopped in the count-in, nothing is kept; SONG mode does not record. 120 BPM: a beat is 500 ms
+# (a tap holds its button 40 ms, then waits 40 more).
+wait 600
+tap SEQ
+wait 30
+tap REC
+wait 30
+expect armed 1
+expect rectrack 1
+tap PLAY
+wait 2100
+expect take 1
+key w2 down
+wait 200
+key w2 up
+wait 300
+key w4 down
+wait 200
+key w4 up
+wait 400
+tap PLAY
+wait 100
+expect beats 3
+expect tracks 1
+# the second take: track 2, the first kept
+tap REC
+wait 30
+expect rectrack 2
+tap PLAY
+wait 2100
+key w6 down
+wait 200
+key w6 up
+wait 300
+tap PLAY
+wait 100
+expect tracks 3
+expect armed 0
+# track 1 chosen (REC + its key): REC arms it again, until another part is chosen
+press REC
+key w0 down
+wait 40
+key w0 up
+wait 40
+release REC
+wait 30
+expect rectrack 1
+tap REC
+wait 30
+expect armed 0
+tap REC
+wait 30
+expect rectrack 1
+tap REC
+turn PRESET 1
+turn PRESET -1
+wait 30
+tap REC
+wait 30
+expect rectrack 3
+tap REC
+wait 30
+expect armed 0
+# SONG mode: REC does not arm (RECORD A PART)
+tap SEQ
+wait 30
+expect songmode 1
+tap REC
+wait 30
+expect armed 0
+tap SEQ
+wait 30
+expect songmode 0
+# part 02: a note 60 ms before the count-in ends lands on the one (a tap takes 80 ms: PLAY was pressed 1940 ms
+# before the key)
+turn PRESET 2
+wait 30
+tap REC
+wait 30
+tap PLAY
+wait 1860
+key w2 down
+wait 150
+key w2 up
+wait 1000
+tap PLAY
+wait 100
+expect beats 2
+expect tracks 1
+turn ALGO 9
+wait 30
+expect fn 9
+expect evtick 0
+turn ALGO -9
+wait 30
+# stopped in the count-in: nothing kept, the part as it was
+tap REC
+wait 30
+expect rectrack 2
+tap PLAY
+wait 500
+tap PLAY
+wait 100
+shot rec_nothing.png
+expect take 0
+expect armed 0
+expect tracks 1

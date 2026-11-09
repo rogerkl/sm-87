@@ -164,6 +164,126 @@ static void test_edits(void)
     CHECK(sq_part_empty(9) && sq_valid(), "erased");
 }
 
+/* the ticks of a track's events, for the checks */
+static uint32_t ticks_of(uint32_t p, uint32_t t, uint32_t *out, uint32_t max)
+{
+    uint32_t n = sq_events(p, t), i;
+    for (i = 0; i < n && i < max; i++)
+        out[i] = sq_ev_tick(sq_event(p, t, i));
+    return n;
+}
+
+/* part 1, track 1: a note at 0 (half a beat), a bend on channel 2 at 100, a program change at 150; two beats */
+static void two_beats(int bend)
+{
+    sq_raw_t t[4];
+    uint32_t n = 0;
+    sq_clear();
+    raw(&t[n++], 0, 0x90, 60, 100);
+    raw(&t[n++], 48, 0x80, 60, 0);
+    if (bend)
+        raw(&t[n++], 100, 0xE1, 0, 80);
+    raw(&t[n++], 150, 0xC0, 5, 0);
+    sq_commit(0, 0, t, n, 2, scratch);
+}
+
+static void test_panel_edits(void)
+{
+    uint32_t tk[8], n;
+    uint8_t part, mask, ev[SQ_NOTE_LEN];
+    int32_t at;
+    int r;
+    two_beats(1);
+    CHECK(!memcmp(sq.part[0].name, "NO PART NAME", 12), "a part once used: NO PART NAME");
+    /* ERASE with a filter: channel 2 only (the bend), then the notes only */
+    sq_erase_filter(0, 1, SQ_F_CHAN + 1u, scratch);
+    CHECK(sq_events(0, 0) == 2u && sq_len(SQ_TRK(0, 0)) == 12u, "channel 2 erased: %u events", sq_events(0, 0));
+    sq_erase_filter(0, 1, SQ_F_NOTES, scratch);
+    CHECK(sq_events(0, 0) == 1u && (sq_event(0, 0, 0)[2] & 0xF0u) == 0xC0u, "the notes erased: the program left");
+    sq_erase(0, 0xFFu);
+    CHECK(sq_part_empty(0) && !memcmp(sq.part[0].name, "EMPTY PART", 10), "the whole part: EMPTY PART again");
+
+    /* LENGTH at the top: two beats more (everything later), then three off (the note in them gone) */
+    two_beats(0);
+    sq_set_length_top(0, 4, scratch);
+    n = ticks_of(0, 0, tk, 8);
+    CHECK(sq.part[0].beats == 4u && n == 2u && tk[0] == 192u && tk[1] == 342u, "4 beats from the top: %u %u", tk[0],
+          tk[1]);
+    sq_set_length_top(0, 1, scratch);
+    n = ticks_of(0, 0, tk, 8);
+    CHECK(sq.part[0].beats == 1u && n == 1u && tk[0] == 54u, "1 beat: the program at %u, the note gone", tk[0]);
+
+    /* COPY a part: to an empty one (a copy, its channels and name), to itself (twice as long), notes only */
+    two_beats(0);
+    sq.part[0].chan[0] = 3;
+    memcpy(sq.part[0].name, "VERSE         ", SQ_NAME);
+    r = sq_append_part(0, 5, SQ_F_ALL, scratch);
+    CHECK(r == 0 && sq.part[5].beats == 2u && sq.part[5].chan[0] == 3u && !memcmp(sq.part[5].name, "VERSE", 5) &&
+              sq_len(SQ_TRK(5, 0)) == sq_len(SQ_TRK(0, 0)) &&
+              !memcmp(sq_data(SQ_TRK(5, 0)), sq_data(SQ_TRK(0, 0)), sq_len(SQ_TRK(0, 0))),
+          "part 1 to an empty part 6: a copy (%d)", r);
+    r = sq_append_part(0, 0, SQ_F_ALL, scratch);
+    n = ticks_of(0, 0, tk, 8);
+    CHECK(r == 0 && sq.part[0].beats == 4u && n == 4u && tk[0] == 0u && tk[1] == 150u && tk[2] == 192u &&
+              tk[3] == 342u,
+          "part 1 to itself: 4 beats, %u events", n);
+    r = sq_append_part(0, 5, SQ_F_NOTES, scratch);
+    n = ticks_of(5, 0, tk, 8);
+    CHECK(r == 0 && sq.part[5].beats == 6u && n == 4u && tk[2] == 192u && tk[3] == 384u,
+          "its notes after part 6's: 6 beats, %u events", n);
+    sq_set_length(7, 682, scratch);
+    CHECK(sq_append_part(0, 7, SQ_F_ALL, scratch) == SQ_E_LONG && sq.part[7].beats == 682u, "past 682 beats: refused");
+    CHECK(sq_append_part(20, 21, SQ_F_ALL, scratch) == SQ_E_NONE, "an empty part: nothing to copy");
+    /* COPY a track: to an empty part (its length), to a part of one beat (cut to it) */
+    r = sq_copy_track(0, 0, 9, 2, SQ_F_ALL, scratch);
+    CHECK(r == 0 && sq.part[9].beats == 4u && sq_events(9, 2) == 4u && sq.part[9].chan[2] == 3u,
+          "track 1 to part 10's track 3: %u events", sq_events(9, 2));
+    sq_set_length(10, 1, scratch);
+    r = sq_copy_track(0, 0, 10, 1, SQ_F_ALL, scratch);
+    CHECK(r == 0 && sq.part[10].beats == 1u && sq_events(10, 1) == 1u, "to a part of one beat: %u events",
+          sq_events(10, 1));
+    CHECK(sq_valid(), "the memory holds together after the copies");
+
+    /* songs: COPY to itself, a step in, a step out, COPY to an empty one, ERASE */
+    sq_song_set(0, 0, 1, 0xFFu, scratch);
+    sq_song_set(0, 1, 2, 0x0Fu, scratch);
+    r = sq_song_append(0, 0, scratch);
+    CHECK(r == 0 && sq_song_steps(0) == 4u, "a song to itself: %u steps", sq_song_steps(0));
+    sq_song_insert(0, 1, 7, 0x01u, scratch);
+    sq_song_step(0, 1, &part, &mask);
+    CHECK(sq_song_steps(0) == 5u && part == 7u && mask == 1u, "a step in at 2: part %u", part);
+    sq_song_step(0, 2, &part, &mask);
+    CHECK(part == 2u && mask == 0x0Fu, "the steps after it moved: part %u", part);
+    sq_song_delete(0, 0, scratch);
+    sq_song_step(0, 0, &part, &mask);
+    CHECK(sq_song_steps(0) == 4u && part == 7u, "the first step out: %u steps, part %u first", sq_song_steps(0), part);
+    r = sq_song_append(0, 3, scratch);
+    CHECK(r == 0 && sq_song_steps(3) == 4u, "to an empty song");
+    sq_song_erase(0);
+    CHECK(sq_song_steps(0) == 0u && sq_song_append(0, 3, scratch) == SQ_E_NONE, "erased: nothing to copy");
+
+    /* EDIT: an event moved (it goes where its tick is), one added, one taken out */
+    n = sq_events(0, 0);
+    memcpy(ev, sq_event(0, 0, 2), SQ_NOTE_LEN);  /* the note at 192 */
+    ev[0] = 10;
+    ev[1] = 0;
+    at = sq_event_put(0, 0, 2, ev, scratch);
+    n = ticks_of(0, 0, tk, 8);
+    CHECK(at == 1 && n == 4u && tk[0] == 0u && tk[1] == 10u && tk[2] == 150u && tk[3] == 342u,
+          "the note moved to tick 10: index %d, ticks %u %u %u %u", at, tk[0], tk[1], tk[2], tk[3]);
+    ev[0] = 0;
+    ev[2] = 0xB0;
+    ev[3] = 7;
+    ev[4] = 100;
+    at = sq_event_put(0, 0, 4, ev, scratch);
+    n = ticks_of(0, 0, tk, 8);
+    CHECK(at == 1 && n == 5u && sq_len(SQ_TRK(0, 0)) == 7u + 5u + 7u + 5u + 5u, "a controller added at 0: index %d",
+          at);
+    sq_event_delete(0, 0, 1, scratch);
+    n = ticks_of(0, 0, tk, 8);
+    CHECK(n == 4u && tk[1] == 10u && sq_valid(), "and taken out again: %u events", n);
+}
+
 static void test_play(void)
 {
     sq_raw_t t[4];
@@ -243,6 +363,34 @@ static void test_record(void)
     sqp_stop();
 }
 
+/* a note a little early, in the count-in's last sixteenth, lands on the one; earlier ones are not recorded; a take
+ * stopped in the count-in, or with nothing in it on an empty part, keeps nothing and says so */
+static void test_record_edges(void)
+{
+    sq_clear();
+    sqp_init(FS);
+    sqp.part = 0;
+    sqp.rec_armed = 1;
+    sqp.rec_track = 0;
+    sqp_play();
+    run(frames_for_ticks(2.0f * 96.0f));
+    sqp_input(0x90, 60, 100);
+    CHECK(sqp.state == SQP_COUNTIN && sqp.take_n == 0u, "halfway through the count-in: not recorded (%u)", sqp.take_n);
+    run(frames_for_ticks(2.0f * 96.0f - 12.0f));
+    sqp_input(0x90, 62, 100);
+    CHECK(sqp.state == SQP_COUNTIN && sqp.take_n == 1u && sqp_take[0].tick == 0u && sqp_take[0].d1 == 62u,
+          "in its last sixteenth (%d left): on the one", sqp.countin);
+    sqp_stop();
+    CHECK(sqp.take_state == SQP_TAKE_NONE && sqp.take_nothing == 1u, "stopped in the count-in: nothing kept, said");
+    sqp.take_nothing = 0;
+    sqp.rec_armed = 1;
+    sqp_play();
+    run(frames_for_ticks(4.0f * 96.0f + 150.0f));
+    sqp_stop();
+    CHECK(sqp.take_state == SQP_TAKE_NONE && sqp.take_nothing == 1u && sq_part_empty(0),
+          "nothing played into an empty part: nothing kept, said");
+}
+
 static void test_queue_and_song(void)
 {
     sq_raw_t t[2];
@@ -288,8 +436,10 @@ int main(void)
     test_arena();
     test_commit();
     test_edits();
+    test_panel_edits();
     test_play();
     test_record();
+    test_record_edges();
     test_queue_and_song();
     printf("seq: %d checks, %d failed\n", checks, fails);
     return fails != 0;

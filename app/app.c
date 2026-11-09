@@ -312,6 +312,12 @@ static void take_service(void)
 {
     char t[LCD_COLS + 1] = "TRACK ", n[4];
     int r;
+    if (sqp.take_nothing) {                  /* stopped in the count-in, or nothing played into an empty part */
+        uint32_t f = plat_lock();
+        sqp.take_nothing = 0;
+        plat_unlock(f);
+        app_say("NOTHING RECORDED", "PLAY FROM BEAT 1");
+    }
     if (sqp.take_state != SQP_TAKE_DONE)
         return;
     r = sq_commit(sqp.take_part, sqp.take_track, sqp_take, sqp.take_n, sqp.take_beats, sq_scratch);
@@ -510,6 +516,7 @@ static struct {
     uint8_t page;                 /* PG_* (ui/pages_s700.c), PG_SEQ */
     uint8_t slot;                 /* the slot the sampler's pages edit, 0..15 */
     uint8_t rec_used;             /* REC held: a track key chose the track (its release does not arm) */
+    uint8_t rec_manual;           /* the record track chosen (REC + its key): kept until another part */
 } ui;
 
 void app_say(const char *a, const char *b)
@@ -563,9 +570,11 @@ static void program_step(int32_t d)
 }
 
 /* the transport, any page: PLAY plays from the top or stops, SEL + PLAY continues; REC (released without a track
- * key) arms recording, or punches out a take that runs */
+ * key) arms recording, or punches out a take that runs. Armed, as the MMT-8: on the part's lowest empty track,
+ * unless one was chosen (REC + its key); a part with all eight recorded, none (choose one) */
 static void transport_button(uint32_t k, uint32_t btn)
 {
+    const char *say = 0;
     uint32_t f = plat_lock();
     if (k == B_PLAY) {
         if (sqp.state != SQP_STOPPED)
@@ -575,12 +584,29 @@ static void transport_button(uint32_t k, uint32_t btn)
         else
             sqp_play();
     } else if (k == B_REC) {
-        if (sqp.take_state == SQP_TAKE_RUNNING)
+        if (sqp.take_state == SQP_TAKE_RUNNING) {
             sqp_punch();
-        else
-            sqp.rec_armed = (uint8_t)!sqp.rec_armed;
+        } else if (sqp.rec_armed) {
+            sqp.rec_armed = 0;
+        } else if (sqp.song_mode) {
+            say = "RECORD A PART";        /* (the MMT-8 records parts; a song plays them) */
+        } else {
+            uint32_t used = sq_part_used(sqp.part), t = 0;
+            if (!ui.rec_manual) {
+                while (t < SQ_TRACKS && (used >> t & 1u))
+                    t++;
+                if (t < SQ_TRACKS)
+                    sqp.rec_track = (uint8_t)t;
+            }
+            if (t < SQ_TRACKS)
+                sqp.rec_armed = 1;
+            else
+                say = "NO EMPTY TRACK";
+        }
     }
     plat_unlock(f);
+    if (say)
+        app_say(say, say[0] == 'R' ? "SEQ: PART MODE" : "REC + KEY: TRACK");
     ui.redraw = 1;
 }
 
@@ -594,6 +620,7 @@ static void track_key(uint32_t t, uint32_t btn)
         sqp.rec_armed = 1;
         plat_unlock(f);
         ui.rec_used = 1;
+        ui.rec_manual = 1;
     } else {
         f = plat_lock();
         sqp.mask ^= (uint8_t)(1u << t);
@@ -621,8 +648,10 @@ static void seq_turn(uint32_t enc, int32_t e)
         else
             sqp_select_part((uint32_t)v);
         plat_unlock(f);
-        if (!sqp.song_mode)
+        if (!sqp.song_mode) {
             seq_last_part = (uint8_t)v;
+            ui.rec_manual = 0;               /* another part: its lowest empty track again */
+        }
         seq_song_step = 0;
     } else if (enc == EN_K1) {               /* the tempo (a song keeps its own) */
         f = plat_lock();
@@ -658,17 +687,20 @@ static void input(void)
 {
     uint32_t keys, btn = plat_buttons(), k, lit_keys, dim_keys = 0, lit_btn;
     int32_t e;
-    int tracks = ui.page == PG_SEQ && (btn & (1u << B_SEL | 1u << B_REC));
+    int tracks = ui.page == PG_SEQ && (ed.fn || (btn & (1u << B_SEL | 1u << B_REC)));
     touch_poll();
     keys = touch_keys();
     for (k = 0; k < NKEYS; k++) {            /* key 0 is F3 (MIDI 53) */
         uint32_t bit = 1u << k;
         if ((keys & bit) && !(ui.keys & bit)) {
             uint32_t note = (uint32_t)(53 + (int32_t)k + 12 * set.octave), v = touch_vel(k);
-            if (tracks) {                    /* the eight track buttons */
-                if (key_track(k) >= 0)
+            if (tracks && (key_track(k) >= 0 || !ed.fn)) {   /* the eight track buttons (a function's: the others play) */
+                if (key_track(k) >= 0 && ed.fn)
+                    ed_track((uint32_t)key_track(k));
+                else if (key_track(k) >= 0)
                     track_key((uint32_t)key_track(k), btn);
                 ui.key_note[k] = 0xFFu;
+                ui.redraw = 1;
                 continue;
             }
             ui.key_note[k] = (uint8_t)note;
@@ -697,8 +729,14 @@ static void input(void)
             save_all();
         } else if (k == B_PLAY) {
             transport_button(k, btn);
-        } else if (k == B_SEQ) {             /* the sequencer; again: PART or SONG */
-            if (ui.page == PG_SEQ && sqp.state == SQP_STOPPED) {
+        } else if (k == B_REC && ui.page == PG_SEQ && ed.fn) {   /* a function's page: REC does it */
+            ed_rec(btn);
+            ui.rec_used = 1;
+            ui.redraw = 1;
+        } else if (k == B_SEQ) {             /* the sequencer; again: PART or SONG (from a function: back to it) */
+            if (ui.page != PG_SEQ || ed.fn) {
+                ed.fn = F_PLAY;
+            } else if (sqp.state == SQP_STOPPED) {
                 uint32_t f = plat_lock();
                 sqp.song_mode = (uint8_t)!sqp.song_mode;
                 if (sqp.song_mode) {
@@ -733,7 +771,19 @@ static void input(void)
         if ((e = plat_enc((int)k)) == 0)
             continue;
         if (ui.page == PG_SEQ) {
-            seq_turn(k, e);
+            if (k == EN_ALGO) {              /* the MMT-8's functions */
+                uint32_t was = ed.fn;
+                ed_algo(e);
+                if (ed.fn != was && ann_on())
+                    ann_say(ed.fn ? F_TXT[ed.fn] : sqp.song_mode ? "SONG" : "PART", 0, ANN_NOW);
+            } else if (ed.fn && k != EN_PRESET) {
+                ed_turn(k, e, btn);
+            } else {
+                seq_turn(k, e);
+                if (ed.fn)
+                    ed_load();               /* another part (or song) */
+            }
+            ui.redraw = 1;
         } else if (k == EN_PRESET) {
             program_step(e);
         } else if (k == EN_SELECT) {         /* SELECT: the slot the sampler's pages edit */
@@ -754,7 +804,7 @@ static void input(void)
         lit_btn |= LED_PLAY_GREEN;
     lit_keys = keys;
     if (tracks) {
-        lit_keys = 0;
+        lit_keys = ed.fn ? keys & ~track_key_bits() : 0u;
         seq_track_lights(&lit_keys, &dim_keys);
     }
     plat_play_red(sqp.state == SQP_COUNTIN || sqp.take_state == SQP_TAKE_RUNNING);
@@ -850,6 +900,7 @@ void app_frame(void)
 {
     static uint32_t last_status;
     uint32_t now = plat_ms();
+    int32_t cursor = -1;
     input();
     s700_midi_service();
     take_service();
@@ -864,11 +915,13 @@ void app_frame(void)
         lcd_row(1, ui.msg[1]);
     } else if (ui.page == PG_SEQ) {
         seq_draw(ui.btn >> B_SEL & 1u);
+        cursor = ed_cursor_row();
     } else if (ui.page == PG_HOME) {
         page_home();
     } else {
         page_s700_draw(ui.page, ui.slot, s7_current_program());
     }
+    lcd_cursor(cursor, ed.cur);
     lcd_draw(ui.redraw);
     if (ui.redraw || now - last_status >= 250u) {
         last_status = now;
@@ -940,6 +993,41 @@ int app_expect(const char *what, int *got)
         *got = (int)sq_song_steps(sqp.song);
     else if (!strcmp(what, "songmode"))
         *got = sqp.song_mode;
+    else if (!strcmp(what, "fn"))           /* the MMT-8 function shown (ALGO): 0 none, 1 LENGTH .. 9 EDIT */
+        *got = ed.fn;
+    else if (!strcmp(what, "sel"))          /* the tracks it takes, a bit each */
+        *got = ed.sel;
+    else if (!strcmp(what, "evi"))          /* EDIT: the event shown (from 1; past the last: the count + 1) */
+        *got = ed.ev + 1;
+    else if (!strcmp(what, "evn"))          /* EDIT: the track's events */
+        *got = (int)sq_events(sqp.part, ed.trk);
+    else if (!strncmp(what, "ev", 2) && strncmp(what, "events", 6) && sq_event(sqp.part, ed.trk, ed.ev)) {   /* evkey, evvel, evtick, evdur, evst */
+        const uint8_t *e = sq_event(sqp.part, ed.trk, ed.ev);
+        if (!strcmp(what, "evkey"))
+            *got = e[3];
+        else if (!strcmp(what, "evvel"))
+            *got = e[4];
+        else if (!strcmp(what, "evtick"))
+            *got = (int)sq_ev_tick(e);
+        else if (!strcmp(what, "evdur"))
+            *got = sq_ev_len(e) == SQ_NOTE_LEN ? (int)sq_ev_dur(e) : -1;
+        else if (!strcmp(what, "evst"))
+            *got = e[2];
+        else
+            return 0;
+    } else if (!strncmp(what, "chan", 4))   /* chanN: track N's channel in the part (0 UNCHANGED) */
+        *got = sq.part[sqp.part].chan[(atoi(what + 4) - 1) & 7];
+    else if (!strncmp(what, "beats", 5))    /* beatsN: part N's length (N as the LCD shows it, 00..99) */
+        *got = sq.part[atoi(what + 5) % SQ_PARTS].beats;
+    else if (!strncmp(what, "used", 4))     /* usedN: part N's tracks with data */
+        *got = (int)sq_part_used((uint32_t)atoi(what + 4) % SQ_PARTS);
+    else if (!strncmp(what, "events", 6))   /* eventsN: track N's events in the part */
+        *got = (int)sq_events(sqp.part, (uint32_t)(atoi(what + 6) - 1) & 7u);
+    else if (!strncmp(what, "step", 4))     /* stepN: the song's step N's part (from 1) */
+        *got = atoi(what + 4) - 1 < (int)sq_song_steps(sqp.song) ? sq_data(SQ_SONG(sqp.song))[2 * (atoi(what + 4) - 1)]
+                                                                  : -1;
+    else if (!strncmp(what, "name", 4))     /* nameN: the part's name, its character N (from 1) */
+        *got = sq.part[sqp.part].name[(atoi(what + 4) - 1) % SQ_NAME];
     else
         return 0;
     return 1;

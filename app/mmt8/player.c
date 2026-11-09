@@ -126,7 +126,8 @@ static void take_end(uint32_t beats)
     if (sqp.take_state != SQP_TAKE_RUNNING)
         return;
     if (!beats || (!sq.part[sqp.take_part].beats && !sqp.take_n)) {
-        sqp.take_state = SQP_TAKE_NONE;   /* nothing played into an empty part: nothing to keep */
+        sqp.take_state = SQP_TAKE_NONE;   /* stopped in the count-in, or nothing played into an empty part */
+        sqp.take_nothing = 1;
     } else {
         sqp.take_beats = beats;
         sqp.take_state = SQP_TAKE_DONE;
@@ -307,16 +308,21 @@ void sqp_advance(uint32_t frames)
 void sqp_input(uint32_t st, uint32_t d1, uint32_t d2)
 {
     sq_raw_t *r;
-    uint32_t kind = st & 0xF0u;
-    if (sqp.take_state != SQP_TAKE_RUNNING || sqp.state != SQP_PLAYING || st >= 0xF0u || kind == 0xA0u)
+    uint32_t kind = st & 0xF0u, tick;
+    if (sqp.take_state != SQP_TAKE_RUNNING || st >= 0xF0u || kind == 0xA0u)
         return;                   /* (poly pressure: the MMT-8 does not record it) */
+    if (sqp.state == SQP_COUNTIN && sqp.countin <= (int32_t)(SQ_PPQN / 4u))
+        tick = 0;                 /* in the count-in's last sixteenth: a little early, on the one */
+    else if (sqp.state != SQP_PLAYING)
+        return;
+    else                          /* between two ticks: the nearer one (the tick just played, or the next) */
+        tick = sqp.tick && to_next > 0.5f * frames_per_tick ? sqp.tick - 1u : sqp.tick;
     if (sqp.take_n >= SQP_TAKE_MAX) {
         sqp.take_full = 1;
         return;
     }
     r = &sqp_take[sqp.take_n];
-    /* between two ticks: the nearer one (the tick just played, or the next) */
-    r->tick = sqp.tick && to_next > 0.5f * frames_per_tick ? sqp.tick - 1u : sqp.tick;
+    r->tick = tick;
     r->st = (uint8_t)st;
     r->d1 = (uint8_t)d1;
     r->d2 = (uint8_t)d2;

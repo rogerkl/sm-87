@@ -1,7 +1,8 @@
 /* SM-87: the MMT-8's page. The LCD as the MMT-8 shows a part or a song playing; the first eight white keys are its
  * eight track buttons while SEL is held (mutes), and choose the record track with REC held; PRESET picks the part (or
  * the song), queued while playing; K1 the tempo, K2 the record track's channel; in a song, SELECT its step and K3 the
- * step's part (past 99: the song ends there). Part of the unity build (app.c). */
+ * step's part (past 99: the song ends there). ALGO turns to the MMT-8's functions (seq_edit.c). Part of the unity
+ * build (app.c). */
 
 static const uint8_t WHITE[16] = PLAT_WHITE_KEYS;
 
@@ -18,11 +19,26 @@ static int32_t key_track(uint32_t k)
 static uint32_t seq_song_step;    /* the step the song page edits */
 static uint8_t seq_last_part;     /* the part last chosen in PART: a new song step starts with it */
 
+/* the first eight white keys' bits: the track buttons */
+static uint32_t track_key_bits(void)
+{
+    uint32_t i, m = 0;
+    for (i = 0; i < SQ_TRACKS; i++)
+        m |= 1u << WHITE[i];
+    return m;
+}
+
+#include "seq_edit.c"             /* the MMT-8's functions (ALGO) */
+
 static void seq_draw(int sel_held)
 {
     char t[LCD_COLS + 1], n[8];
     uint32_t i, used = sq_part_used(sqp.part);
     const char *state = sqp.state == SQP_STOPPED ? " " : sqp.take_state == SQP_TAKE_RUNNING ? CH_REC : CH_PLAY;
+    if (ed.fn) {
+        ed_draw();
+        return;
+    }
     t[0] = 0;
     if (sqp.song_mode) {
         str_cat(t, "SONG ");
@@ -99,11 +115,14 @@ static void seq_draw(int sel_held)
 static void seq_status(void)
 {
     char t[24], n[8];
-    uint32_t i, used = sq_part_used(sqp.part), pct = (uint32_t)sq.used * 100u / SQ_ARENA;
+    uint32_t i, used = sq_part_used(sqp.part), pct = (uint32_t)sq.used * 100u / SQ_ARENA, sel, to;
+    ed_lights(&sel, &to);
     cv_begin(240, STATUS_H, C_BLACK);
     for (i = 0; i < SQ_TRACKS; i++) {
         int32_t x = 6 + (int32_t)i * 29;
         uint16_t c = !(used >> i & 1u) ? C_LINE : (sqp.mask >> i & 1u) ? C_HI : C_DIM;
+        if (ed.fn)                /* a function's page: the tracks it takes (lit), the one it goes to */
+            c = (to >> i & 1u) ? RGB(230, 60, 40) : (sel >> i & 1u) ? C_HI : (used >> i & 1u) ? C_DIM : C_LINE;
         cv_rect(x, 2, 26, 20, c);
         if ((sqp.rec_armed || sqp.take_state == SQP_TAKE_RUNNING) && sqp.rec_track == i) {
             cv_rect(x, 2, 26, 3, RGB(230, 50, 40));
@@ -111,7 +130,7 @@ static void seq_status(void)
         }
         n[0] = (char)('1' + i);
         n[1] = 0;
-        cv_text(x + 10, 5, &FONT_XS, n, (used >> i & 1u) ? C_BLACK : C_GRAY);
+        cv_text(x + 10, 5, &FONT_XS, n, c == C_HI || c == C_DIM || (to >> i & 1u) ? C_BLACK : C_GRAY);
     }
     t[0] = 0;
     str_cat(t, sqp.song_mode ? "SONG" : "PART");
@@ -130,6 +149,19 @@ static void seq_status(void)
     fmt_uint(n, plat_cpu_pct(), 0, ' ');
     str_cat(n, "%");
     cv_text(162, 44, &FONT_XS, n, C_HI);
+    /* the function (ALGO); in EDIT the event of how many */
+    cv_text(8, 58, &FONT_XS, ed.fn ? F_TXT[ed.fn] : "ALGO: FUNCTIONS", ed.fn ? C_HI : C_GRAY);
+    if (ed.fn == F_EDIT && !sqp.song_mode) {
+        uint32_t ne = sq_events(sqp.part, ed.trk);
+        t[0] = 0;
+        str_cat(t, "EVENT ");
+        fmt_uint(n, ed.ev < ne ? ed.ev + 1u : ne, 0, ' ');
+        str_cat(t, n);
+        str_cat(t, "/");
+        fmt_uint(n, ne, 0, ' ');
+        str_cat(t, n);
+        cv_text(130, 58, &FONT_XS, t, C_HI);
+    }
     cv_blit(0, LCD_Y + LCD_H + 10);
 }
 
@@ -137,6 +169,17 @@ static void seq_status(void)
 static void seq_track_lights(uint32_t *lit, uint32_t *dim)
 {
     uint32_t i, used = sq_part_used(sqp.part);
+    if (ed.fn) {                  /* a function's: what it takes lit, where it goes flashing, the others with data dim */
+        uint32_t sel, to;
+        ed_lights(&sel, &to);
+        for (i = 0; i < SQ_TRACKS; i++) {
+            if ((sel >> i & 1u) || ((to >> i & 1u) && (plat_ms() / 200u & 1u)))
+                *lit |= 1u << WHITE[i];
+            else if (used >> i & 1u)
+                *dim |= 1u << WHITE[i];
+        }
+        return;
+    }
     for (i = 0; i < SQ_TRACKS; i++) {
         if (!(used >> i & 1u) && !(sqp.rec_armed && sqp.rec_track == i))
             continue;
