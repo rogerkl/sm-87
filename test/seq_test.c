@@ -431,6 +431,174 @@ static void test_queue_and_song(void)
     sqp.song_mode = 0;
 }
 
+/* SONG QUANTIZE: track 1 ten clocks late, track 2 ten early (its first beat can't be: at once), the early note of the
+ * second step before the step changes, and not cut there */
+static void test_song_offsets(void)
+{
+    sq_raw_t t[2];
+    uint32_t i, f60 = 0, f70 = 0, f72 = 0, off72 = 0, n60 = 0, n72 = 0;
+    sq_clear();
+    raw(&t[0], 0, 0x90, 60, 100);
+    raw(&t[1], 20, 0x80, 60, 0);
+    sq_commit(0, 0, t, 2, 1, scratch);
+    raw(&t[0], 0, 0x90, 70, 100);
+    raw(&t[1], 20, 0x80, 70, 0);
+    sq_commit(0, 1, t, 2, 1, scratch);
+    raw(&t[0], 0, 0x90, 72, 100);
+    raw(&t[1], 20, 0x80, 72, 0);
+    sq_commit(1, 1, t, 2, 1, scratch);
+    sq_song_set(6, 0, 0, 0xFF, scratch);
+    sq_song_set(6, 1, 1, 0xFF, scratch);
+    sq.song[6].tempo = 120;
+    sq.offset[0] = 10;
+    sq.offset[1] = -10;
+    sqp_init(FS);
+    sqp.song_mode = 1;
+    sqp_select_song(6);
+    n_out = frame_now = 0;
+    sqp_play();
+    run(frames_for_ticks(3.0f * 96.0f));
+    for (i = 0; i < n_out; i++) {
+        if (out[i].st == 0x90u && out[i].d1 == 60u)
+            f60 = out[i].frame, n60++;
+        if (out[i].st == 0x90u && out[i].d1 == 70u)
+            f70 = out[i].frame;
+        if (out[i].st == 0x90u && out[i].d1 == 72u)
+            f72 = out[i].frame, n72++;
+        if (out[i].st == 0x80u && out[i].d1 == 72u && !off72)
+            off72 = out[i].frame;
+    }
+    CHECK(n60 == 1u && fabsf((float)f60 - (float)frames_for_ticks(10.0f)) <= 2.0f, "late: clock 10 (frame %u, want %u)",
+          f60, frames_for_ticks(10.0f));
+    CHECK(f70 == 0u, "early on the song's first beat: at once (frame %u)", f70);
+    CHECK(n72 == 1u && fabsf((float)f72 - (float)frames_for_ticks(86.0f)) <= 2.0f,
+          "early from step 2: clock 86, before the step (frame %u, want %u)", f72, frames_for_ticks(86.0f));
+    CHECK(fabsf((float)off72 - (float)frames_for_ticks(106.0f)) <= 2.0f, "and not cut at the step: off at %u, want %u",
+          off72, frames_for_ticks(106.0f));
+    CHECK(sqp.state == SQP_STOPPED, "the song over");
+    sqp.song_mode = 0;
+}
+
+/* a memory saved before the song offsets (version 1: its tables 8 + 512 bytes shorter) loads, with none */
+static void test_image_versions(void)
+{
+    static uint8_t img[sizeof(sq_mem_t)];
+    uint32_t t1 = sq_image_tables(1), t2 = sq_image_tables(SQ_VERSION), used;
+    sq_raw_t t[2];
+    CHECK(t2 == (uint32_t)(sq.arena - (uint8_t *)&sq) && t1 == t2 - SQ_TRACKS - SQ_MMT8_HDR &&
+              sq_image_tables(2) == t2 - SQ_MMT8_HDR && !sq_image_tables(9),
+          "tables: %u, version 1 %u", t2, t1);
+    sq_clear();
+    raw(&t[0], 0, 0x90, 60, 100);
+    raw(&t[1], 20, 0x80, 60, 0);
+    sq_commit(4, 2, t, 2, 3, scratch);
+    used = sq.used;
+    memcpy(img, &sq, t1);         /* as version 1 saved it: the tables up to the offsets, then the arena */
+    img[4] = 1;
+    img[5] = 0;
+    memcpy(img + t1, sq.arena, used);
+    memset(&sq, 0x55, sizeof sq);
+    memcpy(&sq, img, t1);
+    memcpy(sq.arena, img + t1, used);
+    sq_image_upgrade();
+    CHECK(sq.version == SQ_VERSION && sq_valid() && sq.offset[0] == 0 && sq.offset[7] == 0 && sq.part[4].beats == 3u &&
+              sq_events(4, 2) == 1u,
+          "version 1 loaded: version %u, valid %d", sq.version, sq_valid());
+}
+
+/* MIDI clock in, as app_render has it: the clocks that came during a block given at its start (midi_in) */
+static float clk_next, clk_per;
+static uint32_t clk_at[512], n_clk;
+static void run_clocked(uint32_t frames)
+{
+    uint32_t done = 0;
+    while (done < frames) {
+        uint32_t blk = frames - done < 128u ? frames - done : 128u, k = 0;
+        while (clk_next <= (float)frame_now) {
+            sqp_rt_in(0xF8, 0, frame_now);
+            if (n_clk < 512u)
+                clk_at[n_clk++] = frame_now;
+            clk_next += clk_per;
+        }
+        while (k < blk) {
+            uint32_t seg = sqp_frames_to_tick();
+            if (seg > blk - k)
+                seg = blk - k;
+            k += seg;
+            frame_now += seg;
+            sqp_advance(seg);
+        }
+        done += blk;
+    }
+}
+
+/* the frame note key went on at, from the i-th on (0: none) */
+static uint32_t note_frame(uint32_t key, uint32_t from_i, uint32_t *i_out)
+{
+    uint32_t i;
+    for (i = from_i; i < n_out; i++)
+        if (out[i].st == 0x90u && out[i].d1 == key) {
+            *i_out = i + 1u;
+            return out[i].frame;
+        }
+    *i_out = n_out;
+    return 0;
+}
+
+static void test_clock_in(void)
+{
+    sq_raw_t t[6];
+    uint32_t c0, i = 0, f60, f62, f64, f60b, c1;
+    sq_clear();
+    raw(&t[0], 0, 0x90, 60, 100);
+    raw(&t[1], 10, 0x80, 60, 0);
+    raw(&t[2], 48, 0x90, 62, 100);
+    raw(&t[3], 58, 0x80, 62, 0);
+    raw(&t[4], 96, 0x90, 64, 100);
+    raw(&t[5], 106, 0x80, 64, 0);
+    sq_commit(0, 0, t, 6, 2, scratch);
+    sqp_init(FS);
+    sqp.clock_in = 1;
+    sqp.part = 0;
+    n_out = frame_now = n_clk = 0;
+    clk_next = 0.0f;
+    clk_per = FS * 60.0f / (100.0f * 24.0f);  /* 100 BPM */
+    run_clocked((uint32_t)(clk_per * 48.0f));
+    CHECK(n_out == 0u && sqp.state == SQP_STOPPED, "stopped: the clocks play nothing (%u out)", n_out);
+    CHECK(sqp.ext_tempo >= 99u && sqp.ext_tempo <= 101u, "their tempo: %u BPM", sqp.ext_tempo);
+    sqp_rt_in(0xFA, 0, frame_now);
+    c0 = n_clk;                   /* the first clock after the start plays the first tick */
+    run_clocked((uint32_t)(clk_per * 30.0f));
+    f60 = note_frame(60, 0, &i);
+    f62 = note_frame(62, i, &i);
+    f64 = note_frame(64, i, &i);
+    CHECK(f60 == clk_at[c0] && f62 == clk_at[c0 + 12u] && f64 == clk_at[c0 + 24u],
+          "on the clocks: %u %u %u, the clocks %u %u %u", f60, f62, f64, clk_at[c0], clk_at[c0 + 12u],
+          clk_at[c0 + 24u]);
+    /* faster, 140 BPM: the part's next time round on its clock too */
+    clk_per = FS * 60.0f / (140.0f * 24.0f);
+    run_clocked((uint32_t)(clk_per * 60.0f));
+    f60b = note_frame(60, i, &c1);
+    CHECK(f60b == clk_at[c0 + 48u] && sqp.ext_tempo >= 138u && sqp.ext_tempo <= 142u,
+          "140 BPM: round again on clock 48 (%u, the clock %u), tempo %u", f60b, clk_at[c0 + 48u], sqp.ext_tempo);
+    /* stop, the song position at beat 2 (four 16ths), continue: the next clock plays beat 2 */
+    sqp_rt_in(0xFC, 0, frame_now);
+    CHECK(sqp.state == SQP_STOPPED, "FC stops");
+    sqp_rt_in(0xF2, 4, frame_now);
+    CHECK(sqp.tick == 96u, "F2: beat 2 (tick %u)", sqp.tick);
+    n_out = 0;
+    sqp_rt_in(0xFB, 0, frame_now);
+    c1 = n_clk;
+    run_clocked((uint32_t)(clk_per * 4.0f));
+    f64 = note_frame(64, 0, &i);
+    CHECK(f64 && f64 == clk_at[c1], "FB: E3 (beat 2) on the next clock (%u, the clock %u)", f64, clk_at[c1]);
+    sqp_stop();
+    /* its own clock: the clocks in change nothing */
+    sqp.clock_in = 0;
+    sqp_rt_in(0xFA, 0, frame_now);
+    CHECK(sqp.state == SQP_STOPPED, "clock in off: FA does nothing");
+}
+
 int main(void)
 {
     test_arena();
@@ -441,6 +609,9 @@ int main(void)
     test_record();
     test_record_edges();
     test_queue_and_song();
+    test_song_offsets();
+    test_image_versions();
+    test_clock_in();
     printf("seq: %d checks, %d failed\n", checks, fails);
     return fails != 0;
 }

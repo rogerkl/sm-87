@@ -1,6 +1,7 @@
 /* SM-87: the MMT-8's functions on the panel (documentation/MMT-8_Manual.pdf, 4-16). On the sequencer's page ALGO
  * turns from the part (or song) playing through them, as the MMT-8's buttons: LENGTH, ERASE, COPY, MERGE, QUANTIZE,
- * TRANSPOSE, MIDI CHANNEL, NAME and EDIT (in SONG: ERASE, COPY, NAME, EDIT). The first eight white keys are the
+ * TRANSPOSE, MIDI CHANNEL, NAME and EDIT (in SONG: ERASE, COPY, QUANTIZE, NAME, EDIT), then CLOCK (its own or MIDI's)
+ * and MIDI DUMP (the memory out, as an MMT-8's SysEx dump). The first eight white keys are the
  * track buttons, K1..K4 the function's values (the MMT-8's +/- and page buttons), REC does it (RECORD, with the
  * function held). SEQ goes back to the part playing. Part of the unity build (app.c, after ui/pages_seq.c).
  *
@@ -8,10 +9,12 @@
  * away; COPY and MERGE take a track from (lit) and a track to (flashing); nothing happens until REC, and LENGTH,
  * ERASE, COPY, MERGE, QUANTIZE and TRANSPOSE wait for the sequencer to stop. */
 
-enum { F_PLAY, F_LENGTH, F_ERASE, F_COPY, F_MERGE, F_QUANT, F_TRANSP, F_CHAN, F_NAME, F_EDIT, F_N };
-#define F_IN_SONG (1u << F_PLAY | 1u << F_ERASE | 1u << F_COPY | 1u << F_NAME | 1u << F_EDIT)
-static const char *const F_TXT[F_N] = {"",         "LENGTH",    "ERASE",        "COPY", "MERGE",
-                                       "QUANTIZE", "TRANSPOSE", "MIDI CHANNEL", "NAME", "EDIT"};
+enum { F_PLAY, F_LENGTH, F_ERASE, F_COPY, F_MERGE, F_QUANT, F_TRANSP, F_CHAN, F_NAME, F_EDIT, F_CLOCK, F_DUMP, F_N };
+#define F_IN_SONG                                                                                                     \
+    (1u << F_PLAY | 1u << F_ERASE | 1u << F_COPY | 1u << F_QUANT | 1u << F_NAME | 1u << F_EDIT | 1u << F_CLOCK |      \
+     1u << F_DUMP)
+static const char *const F_TXT[F_N] = {"",          "LENGTH",       "ERASE", "COPY", "MERGE", "QUANTIZE", "TRANSPOSE",
+                                       "MIDI CHANNEL", "NAME",      "EDIT",  "CLOCK", "MIDI DUMP"};
 
 static const char *const FILTER_TXT[SQ_F_CHAN] = {"ALL EVENTS",  "NOTES ONLY",      "PITCH BEND",
                                                   "CONTROLLERS", "PROGRAM CHANGES", "AFTER TOUCH"};
@@ -26,7 +29,7 @@ static struct {
     uint8_t fn;
     uint8_t sel, fresh;           /* ERASE, QUANTIZE, TRANSPOSE: the tracks; fresh: all eight, no key yet */
     int8_t src, dst;              /* COPY: the track from (-1: the whole part), to (-1: the same); MERGE: from, to */
-    uint8_t trk;                  /* MIDI CHANNEL, EDIT: the track */
+    uint8_t trk;                  /* MIDI CHANNEL, EDIT, a song's QUANTIZE: the track */
     uint8_t to;                   /* COPY: the part or song to */
     uint8_t filter, grid, qmode, top, add;
     int8_t semis;
@@ -94,7 +97,7 @@ static void ed_enter(uint32_t fn)
     ed.filter = SQ_F_ALL;         /* (ERASE starts at everything, as the MMT-8's) */
     ed.top = 0;
     ed.to = sqp.song_mode ? sqp.song : sqp.part;
-    ed.trk = sqp.rec_track;
+    ed.trk = sqp.song_mode ? 0u : sqp.rec_track;   /* (a song's QUANTIZE: track 1 first, as the MMT-8's) */
     ed.cur = 0;
     ed_load();
 }
@@ -139,8 +142,13 @@ static void ed_track(uint32_t t)
 {
     uint8_t part, mask;
     switch (ed.fn) {
-    case F_ERASE:
     case F_QUANT:
+        if (sqp.song_mode) {      /* a song's: the track whose offset K1 sets */
+            ed.trk = (uint8_t)t;
+            break;
+        }
+        /* fall through */
+    case F_ERASE:
     case F_TRANSP:
         if (ed.fresh)
             ed.sel = (uint8_t)(1u << t), ed.fresh = 0;
@@ -296,11 +304,17 @@ static void ed_turn(uint32_t enc, int32_t d, uint32_t btn)
         else if (enc == EN_K2 && !song)
             ed.filter = (uint8_t)ed_clamp((int32_t)ed.filter + d, 0, SQ_F_N - 1);
         break;
-    case F_QUANT:                 /* K1 the grid, K2 how */
-        if (enc == EN_K1)
+    case F_QUANT:                 /* K1 the grid, K2 how; in a song K1 the track's offset (at once, every song's) */
+        if (song) {
+            if (enc == EN_K1) {
+                sq.offset[ed.trk] = (int8_t)ed_clamp(sq.offset[ed.trk] + d, -SQ_OFFSET_MAX, SQ_OFFSET_MAX);
+                sq_dirty = 1;
+            }
+        } else if (enc == EN_K1) {
             ed.grid = (uint8_t)ed_clamp((int32_t)ed.grid + d, 0, 9);
-        else if (enc == EN_K2)
+        } else if (enc == EN_K2) {
             ed.qmode = (uint8_t)ed_clamp((int32_t)ed.qmode + d, 0, 3);
+        }
         break;
     case F_TRANSP:                /* K1 semitones (SEL: octaves) */
         if (enc == EN_K1)
@@ -329,6 +343,20 @@ static void ed_turn(uint32_t enc, int32_t d, uint32_t btn)
             ed_turn_step(enc, d);
         else
             ed_turn_event(enc, d, sel);
+        break;
+    case F_CLOCK:                 /* K1 the clock in (its own, MIDI's), K2 the clock out; at once, kept with SAVE */
+        if (enc == EN_K1 && (uint32_t)(d > 0) != sqp.clock_in) {
+            uint32_t f = plat_lock();
+            sqp_stop();           /* (a change of clock: from the top again) */
+            sqp.clock_in = (uint8_t)(d > 0);
+            plat_unlock(f);
+            set.clock_in = sqp.clock_in;
+            set_dirty = 1;
+        } else if (enc == EN_K2 && (uint32_t)(d > 0) != sqp.clock_out) {
+            sqp.clock_out = (uint8_t)(d > 0);
+            set.clock_out_off = (uint8_t)!sqp.clock_out;
+            set_dirty = 1;
+        }
         break;
     default:
         break;
@@ -413,6 +441,14 @@ static void ed_rec(uint32_t btn)
 {
     int sel = (int)(btn >> B_SEL & 1u), r = 0;
     uint32_t p = sqp.part, i;
+    if (ed.fn == F_QUANT && sqp.song_mode)
+        return;                   /* (a song's offsets are set as K1 turns) */
+    if (ed.fn == F_CLOCK)
+        return;                   /* (set as K1 and K2 turn) */
+    if (ed.fn == F_DUMP) {        /* the memory out, as an MMT-8's dump (it goes on while playing) */
+        md_send();
+        return;
+    }
     if (ed.fn != F_CHAN && ed.fn != F_NAME && ed.fn != F_EDIT && sqp.state != SQP_STOPPED) {
         app_say("STOP FIRST", "");
         return;
@@ -591,6 +627,23 @@ static void ed_draw_event(char *a, char *b)
     }
 }
 
+/* EDIT while playing, as the MMT-8: the events as they happen (the last one played on the track), in a song the
+ * step playing. Stopped, it stays on the last, to be edited */
+static void ed_follow(void)
+{
+    uint32_t p = sqp.part, t = ed.trk, len = sq_len(SQ_TRK(p, t)), a = 0, i = 0;
+    const uint8_t *d = sq_data(SQ_TRK(p, t));
+    if (sqp.song_mode) {
+        seq_song_step = sqp.step;
+        return;
+    }
+    while (a < len && sq_ev_tick(d + a) < sqp.tick) {
+        a += sq_ev_len(d + a);
+        i++;
+    }
+    ed.ev = (uint16_t)(i ? i - 1u : 0u);
+}
+
 /* a function's page on the LCD */
 static void ed_draw(void)
 {
@@ -598,6 +651,8 @@ static void ed_draw(void)
     uint32_t i, song = sqp.song_mode;
     uint8_t part, mask;
     a[0] = b[0] = 0;
+    if (ed.fn == F_EDIT && sqp.state == SQP_PLAYING)
+        ed_follow();
     ed_num(x, song ? "SONG " : "PART ", song ? sqp.song : sqp.part, 2);
     switch (ed.fn) {
     case F_LENGTH:
@@ -667,6 +722,19 @@ static void ed_draw(void)
         }
         break;
     case F_QUANT:
+        if (song) {               /* "QUANTIZE TRACK 1" / "OFFSET +10 LATE": clocks (384ths) */
+            int32_t o = sq.offset[ed.trk];
+            ed_num(x, "TRACK ", ed.trk + 1u, 1);
+            ed_lr(a, "QUANTIZE", x);
+            x[0] = 0;
+            str_cat(x, "OFFSET ");
+            if (o)
+                fmt_signed(n, o, 2), str_cat(x, n);
+            else
+                str_cat(x, "00");
+            ed_lr(b, x, o > 0 ? "LATE" : o < 0 ? "EARLY" : "");
+            break;
+        }
         ed_lr(a, "QUANTIZE", GRID_TXT[ed.grid]);
         str_cat(b, QMODE_TXT[ed.qmode]);
         break;
@@ -695,6 +763,20 @@ static void ed_draw(void)
                 b[i] = ed.name[i];
             b[SQ_NAME] = 0;
         }
+        break;
+    case F_CLOCK:                 /* "CLOCK   120 BPM" (MIDI's, as it comes) / "IN MIDI   OUT ON" */
+        if (sqp.clock_in && sqp.ext_tempo) {
+            fmt_uint(x, sqp.ext_tempo, 0, ' ');
+            str_cat(x, " BPM");
+        } else {
+            x[0] = 0;
+        }
+        ed_lr(a, "CLOCK", x);
+        ed_lr(b, sqp.clock_in ? "IN MIDI" : "IN INTERNAL", sqp.clock_out ? "OUT ON" : "OUT OFF");
+        break;
+    case F_DUMP:                  /* "MIDI DUMP  MMT-8" / "REC SENDS ALL" */
+        ed_lr(a, "MIDI DUMP", "MMT-8");
+        str_cat(b, "REC SENDS ALL");
         break;
     case F_EDIT:
         if (!song) {
@@ -734,8 +816,13 @@ static void ed_lights(uint32_t *sel, uint32_t *to)
     uint8_t part, mask;
     *sel = *to = 0;
     switch (ed.fn) {
-    case F_ERASE:
     case F_QUANT:
+        if (sqp.song_mode) {
+            *sel = 1u << ed.trk;
+            break;
+        }
+        /* fall through */
+    case F_ERASE:
     case F_TRANSP:
         if (!sqp.song_mode)
             *sel = ed.sel;

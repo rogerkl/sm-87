@@ -1,0 +1,314 @@
+# MIDI clock in: made by test/gen_sysex_test.py, do not edit. CLOCK (ALGO) to MIDI; the clocks' tempo; FA starts
+# at the next clock, FC stops, F2 sets the place, FB goes on from it; PLAY waits for the clocks; kept with SAVE.
+wait 600
+tap SEQ
+wait 30
+# part 00 four beats long
+turn ALGO 1
+turn K1 4 20
+tap REC
+wait 30
+expect beats0 4
+turn ALGO 9
+wait 30
+expect fn 10
+expect clockin 0
+turn K1 1
+wait 30
+expect clockin 1
+shot clock.png
+turn ALGO -10
+wait 30
+expect fn 0
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+expect exttempo >123
+expect exttempo <127
+expect seq 0
+midi FA
+wait 5
+expect seq 2
+expect beat 1
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+expect beat 2
+midi FC
+wait 5
+expect seq 0
+# the song position: eight 16ths, beat 3; FB goes on from there
+midi F2 08 00
+wait 5
+expect beat 3
+midi FB
+wait 5
+expect seq 2
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+expect beat 4
+midi FC
+wait 5
+# PLAY with MIDI's clock: playing, at beat 1 until clocks come
+tap PLAY
+wait 300
+expect seq 2
+expect beat 1
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+midi F8
+wait 18
+expect beat 2
+tap PLAY
+wait 30
+tap SAVE
+wait 300
+reboot
+wait 600
+expect clockin 1

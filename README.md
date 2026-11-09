@@ -34,10 +34,12 @@ on an FM-1 yet** (see *On the device*).
   - A part chosen while playing starts at the end of the current one.
   - Per-track MIDI channel, or UNCHANGED.
   - MIDI echo to the record track's channel.
-  - MIDI clock and song position out.
+  - MIDI clock and song position out, and MIDI clock in: the sequencer can follow another's clock and transport.
+  - The MMT-8's memory dump over USB, both ways: an MMT-8's dump replaces the sequencer's memory, and ours goes out
+    in the same format.
   - The MMT-8's functions: LENGTH (at the end or the top), ERASE and COPY with its 22 filters, MERGE, QUANTIZE (10
-    grids, 4 modes), TRANSPOSE, MIDI CHANNEL, NAME, and EDIT, the event list editor; in a song ERASE, COPY, NAME and
-    EDIT, its steps put in and taken out.
+    grids, 4 modes), TRANSPOSE, MIDI CHANNEL, NAME, and EDIT, the event list editor; in a song ERASE, COPY,
+    QUANTIZE (each track's clock offset, ±48), NAME and EDIT, its steps put in and taken out.
 - **The screen** is a 2 × 16 character LCD, drawn dot by dot, with a status strip under it.
 
 ## Controls
@@ -91,10 +93,13 @@ track key chooses only its own, then the keys add and take away. COPY and MERGE 
 | COPY | The part (song) to | What, as ERASE | All tracks: the part goes after the other's end (an empty one gets a copy; itself: twice as long). One track (and one to): over that track, cut to the other part's length. In a song: after the other song's steps |
 | MERGE | | | The track lit onto the flashing one, both channels baked in, the merged track UNCHANGED |
 | QUANTIZE | 1/2 ... 1/64 | Note start / start & end / note end / keep duration | The notes of the tracks lit |
+| QUANTIZE (SONG) | The track's offset, ±48 clocks (384ths), at once | | |
 | TRANSPOSE | Semitones, ±99 (SEL: octaves) | | The tracks lit; out of range folds back by octaves |
 | MIDI CHANNEL | The track's channel, UNCHANGED or 1-16, at once | | |
 | NAME | The cursor | The character | Stores the 14-character name (a part once used) |
 | EDIT | The event's place (SEL: by beats) | Key, controller, program, bend (SEL: the channel) | Adds a C3 note where the event shown is; SEL + REC erases the event |
+| CLOCK | In: INTERNAL or MIDI | Out: ON or OFF | (at once; SAVE keeps it) |
+| MIDI DUMP | | | Sends the whole memory as an MMT-8's SysEx dump, over USB |
 
 **EDIT** shows one track's events (the track key chooses which), as the MMT-8: `1 001.05 E3  100` is track 1, beat
 1, clock 5, E3 at velocity 100, and `DUR 001.00 CH01` its duration (a beat) and channel (in brackets when the track
@@ -102,7 +107,36 @@ plays on a channel of its own). SELECT goes from event to event; K3 is the veloc
 fine), K4 the duration (SEL: by beats; not a note: the channel). Past the last is END OF TRACK: K1 is where REC adds,
 K2 what (a note, a program change, a controller, bend, aftertouch). In a **song**, EDIT shows its steps: SELECT the
 step, K1 its part, the track keys its tracks, REC puts a step in before it (at the end: the part K1 chose), SEL + REC
-takes it out.
+takes it out. While playing, EDIT follows: the last event played on the track (in a song, the step playing); stopped,
+it stays on it, ready to edit.
+
+**QUANTIZE in a song** sets each track's clock offset, as the MMT-8's: the track key chooses the track (track 1
+first), K1 moves it up to 48 clocks (half a beat) late (+) or early (-), to make up for a slow attack or MIDI delay.
+The offsets are every song's, kept with the sequencer's memory, and take effect from the next PLAY. An early track
+reads into the next step's part; at the song's start its first clocks play at once (the MMT-8's first beat can't be
+advanced), and a late track's last clocks are cut when the song ends.
+
+**MIDI clock in** (CLOCK, K1 to MIDI): the sequencer follows MIDI clock from USB or the TRS jack. F8 moves it on
+(each plays 4 of its 96 clocks a beat, spaced by the last beat's clocks); FA starts from the top at the next clock,
+FC stops, F2 (song position) sets the place while stopped and FB goes on from there. PLAY still plays, but waits
+for clocks. The strip shows the tempo the clocks come at (`MIDI 120`). MIDI clock out (K2) goes on as it was, so
+the FM-1 passes the clock on. Clocks are timed in rendered frames, to a block (2.9 ms); the notes land on them.
+
+**The MMT-8's memory dump**, as `documentation/MMT-8 SYSEX.odt` has it:
+- **In:** send a dump to the FM-1 over USB (from a SysEx librarian; an MMT-8 sends one with TAPE held, PAGE DOWN,
+  RECORD, through a computer's MIDI interface). The LCD counts the bytes; the dump replaces the sequencer's memory
+  (parts, songs, names, channels; the song offsets stay ours) and SAVE keeps it. Its SysEx events aren't kept. The
+  sequencer's 64 KB holds a little less than an MMT-8's: a note sharing a clock takes 7 bytes here, 5 there, so a
+  full memory of chords may not fit, and the LCD says from which part on it didn't.
+- **Out:** MIDI DUMP (the last function), REC: the whole memory goes out over USB, as an MMT-8 sends it. The FM-1
+  takes it back the same, byte for byte.
+- **To a real MMT-8:** two things the document leaves out come from
+  [polluxsynth's mmt8utils](https://github.com/polluxsynth/mmt8utils), a librarian that writes dumps MMT-8s take:
+  the BCD beats are the beats + 1, and a dump made from nothing confuses an MMT-8, because the header's other
+  bytes have to come from one of its own dumps. So the FM-1 keeps the header of the last dump it took in and sends
+  it back in its own: **send the FM-1 one of your MMT-8's dumps first** (MIDI DUMP's strip says `HEADER: AN MMT-8'S`
+  then). mmt8utils' own librarian reads the FM-1's dumps right (each part's name, beats and length, each song's name,
+  tempo and length); a real MMT-8 taking one is untested.
 
 **A slot into a program:** PRESET to the program, EDIT to the KEYS page, SELECT to the slot. LO and HI show `--`
 while the slot isn't in the program (the strip says OUT). One detent of K1 (LO) or K2 (HI) puts it in with the whole
@@ -118,7 +152,7 @@ goes quiet.
 |---|---|
 | `app/` | The firmware: `app.c` (glue, routing, render, pages), `fm1.toml`, `app.h` (contract, flash map) |
 | `app/s700/` | The sampler: `s7engine.c` (voices), `s7mem.c` (flash pool, directory), `sds.c` (sample dump, SPRM, OVS) |
-| `app/mmt8/` | The sequencer: `seq.c` (memory, takes, edits), `player.c` (clock, playback, recording, songs) |
+| `app/mmt8/` | The sequencer: `seq.c` (memory, takes, edits), `player.c` (clock, MIDI clock in, playback, recording, songs), `mmtdump.c` (the MMT-8's SysEx dump) |
 | `app/ui/` | The LCD (`lcd.c`, a 5 × 7 font) and the pages; `seq_edit.c` the MMT-8's functions |
 | `app/tests/` | Scripts for the host simulator (`sysex.txt` is generated by `test/gen_sysex_test.py`) |
 | `test/` | C unit tests against the X7000 measurements, Axs7's fixtures and the MMT-8's behaviour; `run.sh` runs all |
@@ -222,5 +256,5 @@ The first things to measure on a device, before more is built on these assumptio
 
 ## Next
 
-- The MMT-8's song QUANTIZE (a clock offset for each track, ±48) and a part's events shown as it plays in EDIT.
-- MIDI clock in, MMT-8 sysex memory dumps in and out (`documentation/MMT-8 SYSEX.odt`), and the HR-16 drum machine.
+- The HR-16 drum machine.
+- A dump sent to a real MMT-8, and MIDI clock in with `midi_stamp` (fm1.toml) for timing finer than a block.

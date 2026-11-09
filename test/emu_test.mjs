@@ -84,4 +84,57 @@ midi([0x90, 60, 100]);
 const peak = emu.run(300);
 midi([0x80, 60, 64]);
 check(peak > 0.01, `it sounds (peak ${peak.toFixed(3)})`);
+
+// an MMT-8's memory dump, nearly full (documentation/MMT-8 SYSEX.odt; the BCD beats + 1): eight parts of 1,000 notes
+// on track 1, 64 beats each; it replaces the sequencer's memory, and MIDI DUMP (ALGO) sends it back the same
+const mem = new Uint8Array(0xff00 - 0x400);
+let at = 0x200;
+const le = (v) => { mem[at++] = v & 255; mem[at++] = v >> 8; };
+for (let p = 0; p < 8; p++) {
+  const part = at;
+  mem[2 * p] = (part + 0x400) >> 8; mem[2 * p + 1] = (part + 0x400) & 255;
+  at += 0x2a;
+  mem[part + 0x12] = 0x65; mem[part + 0x13] = 0x00;     // 64 beats: BCD 65
+  "PART " .concat(String(p)).padEnd(14).split("").forEach((c, i) => { mem[part + 0x1c + i] = c.charCodeAt(0); });
+  for (let j = 0; j < 8; j++) {                        // tracks 8 .. 1
+    mem[part + 2 + 2 * j] = (at - part) & 255; mem[part + 3 + 2 * j] = (at - part) >> 8;
+    if (j === 7)
+      for (let i = 0; i < 1000; i++) {                 // track 1: a note every 6 clocks
+        mem[at++] = 0x80 | (36 + (i % 48)); le(i * 6); mem[at++] = 1 + (i % 127); mem[at++] = 0; mem[at++] = 0; mem[at++] = 5;
+      }
+    mem[at++] = 0x80; le(64 * 96); mem[at++] = 0; mem[at++] = 0x80; mem[at++] = 0; mem[at++] = 0;
+  }
+  mem[part] = (at - part) & 255; mem[part + 1] = (at - part) >> 8;
+}
+mem[0xcf] = (at + 0x400) & 255; mem[0xd0] = (at + 0x400) >> 8;
+mem[0xd3] = (0xff00 - at - 0x400) & 255; mem[0xd4] = (0xff00 - at - 0x400) >> 8;
+mem[0xd5] = 0x5a;                                      // a byte not to alter: sent back as it came
+const used = mem.subarray(0, at);
+const bits = [];
+for (const x of used) for (let b = 7; b >= 0; b--) bits.push((x >> b) & 1);
+while (bits.length % 7) bits.push(0);
+const mdump = [0xf0, 0x00, 0x00, 0x0e, 0x00];
+for (let i = 0; i < bits.length; i += 7) mdump.push(bits.slice(i, i + 7).reduce((a, b) => (a << 1) | b, 0));
+mdump.push(0xf7);
+check(mdump.length > 65000, `the MMT-8 dump: ${at} bytes, ${mdump.length} sent`);
+midi(mdump);
+emu.run(500);
+out();
+// SEQ, ALGO to MIDI DUMP (the last function), REC
+const tap = (b) => { emu.send({ type: "buttons", mask: 1 << b }); emu.run(60); emu.send({ type: "buttons", mask: 0 }); emu.run(60); };
+tap(9);
+emu.send({ type: "enc", role: 1, n: 11 });
+emu.run(100);
+tap(11);
+let mback = [];
+for (let t = 0; t < 60 && !mback.length; t++) {
+  emu.run(100);
+  mback = out().filter((m) => m[0] === 0xf0 && m[1] === 0x00 && m[2] === 0x00 && m[3] === 0x0e);
+}
+check(mback.length === 1 && mback[0].length === mdump.length, `MIDI DUMP: ${mback[0] ? mback[0].length : 0} bytes back`);
+if (mback.length) {
+  let bad = 0;
+  for (let i = 0; i < mdump.length; i++) if (mback[0][i] !== mdump[i]) bad++;
+  check(bad === 0, `the same dump, byte for byte (${bad} differ)`);
+}
 done();

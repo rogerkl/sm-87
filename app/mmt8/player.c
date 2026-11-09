@@ -7,6 +7,23 @@ sq_raw_t sqp_take[SQP_TAKE_MAX] __attribute__((section(".pool")));
 static float fs_now = 44117.647f, frames_per_tick, to_next;
 static uint16_t cur[SQ_TRACKS];   /* each track's next event, a byte offset in its blob */
 
+/* In a song each track has a place of its own: the song's, its offset (SONG QUANTIZE, sq.offset) behind it (late)
+ * or ahead (early, into the next step's part). Its next event in tcur */
+static struct {
+    uint16_t wait;                /* clocks before it starts: late, at the song's start */
+    uint16_t lead;                /* clocks it plays at once on the first: early at the start (the MMT-8's first beat
+                                   * can't be advanced) */
+    uint16_t tick;                /* in its step's part */
+    uint8_t step, done;           /* done: past the song's end */
+} tp[SQ_TRACKS];
+static uint16_t tcur[SQ_TRACKS];
+
+/* MIDI clock in: each F8 lets 4 ticks play (96 a beat, 24 clocks); their spacing from the last beat's clocks' */
+#define EXT_N 24u
+static uint32_t ext_at[EXT_N + 1u], ext_w, ext_n;   /* the last clocks' frames */
+static uint32_t ext_budget;       /* ticks the clocks have let play and not yet played */
+static float ext_fpt;             /* frames a tick at the clocks' rate */
+
 #define OFFS 64u
 static struct {
     uint32_t at;                  /* the clock it is due at */
@@ -44,15 +61,96 @@ void sqp_all_notes_off(void)
     n_offs = 0;
 }
 
+/* the first event of track t in part p at tick or after it: a byte offset */
+static uint16_t find_tick(uint32_t p, uint32_t t, uint32_t tick)
+{
+    uint32_t b = SQ_TRK(p, t), len = sq_len(b), a = 0;
+    const uint8_t *d = sq_data(b);
+    while (a < len && sq_ev_tick(d + a) < tick)
+        a += sq_ev_len(d + a);
+    return (uint16_t)a;
+}
+
+/* a song step's part (one not there: the first) and its tracks, and the part's clocks */
+static uint32_t step_part(uint32_t s, uint8_t *mask)
+{
+    uint8_t part, m;
+    sq_song_step(sqp.song, s, &part, &m);
+    if (mask)
+        *mask = m;
+    return part < SQ_PARTS ? part : 0u;
+}
+
 void sqp_resync(void)
 {
     uint32_t t;
     for (t = 0; t < SQ_TRACKS; t++) {
-        uint32_t b = SQ_TRK(sqp.part, t), len = sq_len(b), a = 0;
-        const uint8_t *d = sq_data(b);
-        while (a < len && sq_ev_tick(d + a) < sqp.tick)
-            a += sq_ev_len(d + a);
-        cur[t] = (uint16_t)a;
+        cur[t] = find_tick(sqp.part, t, sqp.tick);
+        if (sqp.song_mode && !tp[t].done && tp[t].step < sq_song_steps(sqp.song))
+            tcur[t] = find_tick(step_part(tp[t].step, 0), t, tp[t].tick);
+    }
+}
+
+/* a track's place past its part's end: on in the next step with something in it (empty parts skipped), the clocks
+ * past the end carried; past the song's end the first step again (LOOP) or done */
+static void tp_settle(uint32_t t)
+{
+    uint32_t n = sq_song_steps(sqp.song), guard = 0, ticks;
+    while (!tp[t].done) {
+        ticks = tp[t].step < n ? sq_part_ticks(step_part(tp[t].step, 0)) : 0u;
+        if (tp[t].step < n && tp[t].tick < ticks)
+            break;
+        tp[t].tick = (uint16_t)(tp[t].tick - ticks);
+        tcur[t] = 0;
+        if (++guard > n + 1u || (tp[t].step + 1u >= n && !sqp.loop)) {
+            tp[t].done = 1;      /* (a song of empty parts: done too) */
+            break;
+        }
+        tp[t].step = (uint8_t)(tp[t].step + 1u >= n ? 0u : tp[t].step + 1u);
+    }
+}
+
+/* every track at the song's start: a late one waits, an early one plays its first clocks at once */
+static void tp_start(void)
+{
+    uint32_t t;
+    for (t = 0; t < SQ_TRACKS; t++) {
+        int32_t o = sq.offset[t];
+        tp[t].step = 0;
+        tp[t].tick = 0;
+        tp[t].done = !sq_song_steps(sqp.song);
+        tp[t].wait = (uint16_t)(o > 0 ? o : 0);
+        tp[t].lead = (uint16_t)(o < 0 ? -o : 0);
+        tcur[t] = 0;
+        tp_settle(t);
+    }
+}
+
+/* every track where the song is now (CONTINUE): its offset behind or ahead of the song's step and tick */
+static void tp_place(void)
+{
+    uint32_t t;
+    for (t = 0; t < SQ_TRACKS; t++) {
+        int32_t o = sq.offset[t], tick = (int32_t)sqp.tick, step = sqp.step;
+        tp[t].wait = tp[t].lead = 0;
+        tp[t].done = 0;
+        while (o > 0) {           /* behind: back over the steps before, waiting if it passes the song's start */
+            if (tick >= o) {
+                tick -= o;
+                o = 0;
+            } else if (step == 0) {
+                tp[t].wait = (uint16_t)(o - tick);
+                tick = 0;
+                o = 0;
+            } else {
+                o -= tick;
+                step--;
+                tick = (int32_t)sq_part_ticks(step_part((uint32_t)step, 0));
+            }
+        }
+        tp[t].step = (uint8_t)step;
+        tp[t].tick = (uint16_t)(tick - o);   /* ahead: on, tp_settle carries it into the steps after */
+        tp_settle(t);
     }
 }
 
@@ -103,7 +201,10 @@ void sqp_play(void)
     sqp.tick = 0;
     sqp.clock = 0;
     sqp.next_part = 0xFFu;
-    to_next = 0.0f;               /* the first tick at once */
+    to_next = 0.0f;               /* the first tick at once (following MIDI clock: at the next clock) */
+    ext_budget = 0;
+    if (sqp.song_mode)
+        tp_start();
     sqp_resync();
     if (sqp.rec_armed && !sqp.song_mode && sqp.take_state != SQP_TAKE_DONE) {
         sqp.take_n = 0;
@@ -167,6 +268,9 @@ void sqp_continue(void)
     if (sqp.state != SQP_STOPPED)
         return;
     sqp.tick = sqp.tick / SQ_PPQN * SQ_PPQN;   /* from the start of the beat */
+    ext_budget = 0;
+    if (sqp.song_mode)
+        tp_place();
     sqp_resync();
     to_next = 0.0f;
     sqp.state = SQP_PLAYING;
@@ -227,11 +331,44 @@ static void tracks_play(void)
     }
 }
 
+/* a song's tracks, each at its own place: its events up to it (an early one's first clocks at once), then a clock on */
+static void tracks_play_song(void)
+{
+    uint32_t t, n;
+    for (t = 0; t < SQ_TRACKS; t++) {
+        if (tp[t].wait) {
+            tp[t].wait--;
+            continue;
+        }
+        for (n = tp[t].lead + 1u, tp[t].lead = 0; n && !tp[t].done; n--) {
+            uint8_t mask;
+            uint32_t p = step_part(tp[t].step, &mask), b = SQ_TRK(p, t), len = sq_len(b), a = tcur[t];
+            uint32_t ch = sq.part[p].chan[t];
+            const uint8_t *d = sq_data(b);
+            if (tp[t].step == sqp.step)
+                mask = sqp.mask;  /* the step playing: its mutes as they are now (SEL + a key) */
+            while (a < len && sq_ev_tick(d + a) <= tp[t].tick) {
+                if (mask >> t & 1u) {
+                    uint32_t st = ch ? (d[a + 2u] & 0xF0u) | (ch - 1u) : d[a + 2u];
+                    sqp_emit(st, d[a + 3u], d[a + 4u]);
+                    if (sq_ev_len(d + a) == SQ_NOTE_LEN)
+                        off_add(sqp.clock + sq_ev_dur(d + a), 0x80u | (st & 0x0Fu), d[a + 3u]);
+                }
+                a += sq_ev_len(d + a);
+            }
+            tcur[t] = (uint16_t)a;
+            tp[t].tick++;
+            tp_settle(t);
+        }
+    }
+}
+
 static void part_end(void)
 {
     if (sqp.take_state == SQP_TAKE_RUNNING)   /* punch out at the part's end; the part plays on */
         take_end(sq.part[sqp.take_part].beats);
-    sqp_all_notes_off();
+    if (!sqp.song_mode)           /* (in a song the notes end as they are long: an early track's next ones sound) */
+        sqp_all_notes_off();
     if (sqp.song_mode) {
         if (++sqp.step >= sq_song_steps(sqp.song)) {
             if (!sqp.loop) {
@@ -270,7 +407,10 @@ static void do_tick(void)
     if (sqp.state != SQP_PLAYING)
         return;
     offs_due();
-    tracks_play();
+    if (sqp.song_mode)
+        tracks_play_song();
+    else
+        tracks_play();
     if (sqp.tick % SQ_PPQN == 0u &&
         ((sqp.take_state == SQP_TAKE_RUNNING && sqp.click_rec) || sqp.click_play))
         sqp_click(sqp.tick % (4u * SQ_PPQN) == 0u);
@@ -289,8 +429,8 @@ static void do_tick(void)
 
 uint32_t sqp_frames_to_tick(void)
 {
-    if (sqp.state == SQP_STOPPED)
-        return 0xFFFFFFFFu;
+    if (sqp.state == SQP_STOPPED || (sqp.clock_in && !ext_budget))
+        return 0xFFFFFFFFu;       /* (following MIDI clock: none until the next clock) */
     return to_next <= 0.0f ? 0u : (uint32_t)to_next + ((float)(uint32_t)to_next < to_next ? 1u : 0u);
 }
 
@@ -300,8 +440,103 @@ void sqp_advance(uint32_t frames)
         return;
     to_next -= (float)frames;
     while (to_next <= 0.0f && sqp.state != SQP_STOPPED) {
+        if (sqp.clock_in) {
+            if (!ext_budget) {
+                to_next = 0.0f;   /* ahead of the clocks: waiting for the next */
+                return;
+            }
+            ext_budget--;
+        }
         do_tick();
-        to_next += frames_per_tick;
+        to_next += sqp.clock_in ? ext_fpt : frames_per_tick;
+        if (sqp.clock_in && ext_budget >= 4u)
+            to_next = 0.0f;       /* a clock's first tick still to play: behind the clocks, caught up at once */
+    }
+}
+
+/* the song position (F2): ticks from the song's (the part's) start, stopped */
+static void ext_locate(uint32_t ticks)
+{
+    if (sqp.song_mode) {
+        uint32_t n = sq_song_steps(sqp.song), s;
+        for (s = 0; s < n; s++) {
+            uint32_t t = sq_part_ticks(step_part(s, 0));
+            if (ticks < t)
+                break;
+            ticks -= t;
+        }
+        if (s >= n)
+            s = 0, ticks = 0;     /* past the end: the start */
+        sqp.step = (uint8_t)s;
+        if (n)
+            load_step();
+        sqp.tick = ticks;
+    } else {
+        uint32_t t = sq_part_ticks(sqp.part);
+        sqp.tick = t ? ticks % t : 0u;
+    }
+    sqp_resync();
+}
+
+static void ext_clock(uint32_t frame)
+{
+    uint32_t i;
+    if (ext_n && frame - ext_at[(ext_w - 1u) % (EXT_N + 1u)] > (uint32_t)fs_now)
+        ext_n = 0;                /* a second without one: measured again */
+    ext_at[ext_w++ % (EXT_N + 1u)] = frame;
+    if (ext_n < EXT_N + 1u)
+        ext_n++;
+    if (ext_n >= 2u) {
+        i = (ext_w - ext_n) % (EXT_N + 1u);
+        if (frame != ext_at[i]) {
+            float per = (float)(frame - ext_at[i]) / (float)(ext_n - 1u);   /* frames a clock */
+            ext_fpt = per / 4.0f;
+            sqp.ext_tempo = (uint16_t)(fs_now * 60.0f / (per * 24.0f) + 0.5f);
+        }
+    } else if (ext_fpt <= 0.0f) {
+        ext_fpt = frames_per_tick;   /* (the first: the tempo's, until there are two) */
+    }
+    if (sqp.state != SQP_STOPPED) {
+        to_next = 0.0f;           /* the clock's first tick on it (any owed before it first) */
+        ext_budget += 4u;
+    }
+}
+
+void sqp_rt_in(uint32_t st, uint32_t d, uint32_t frame)
+{
+    if (!sqp.clock_in)
+        return;
+    switch (st) {
+    case 0xF8:
+        ext_clock(frame);
+        break;
+    case 0xFA:                    /* start: from the top, at the next clock */
+        if (sqp.state != SQP_STOPPED)
+            sqp_stop();
+        sqp_play();
+        ext_budget = 0;
+        break;
+    case 0xFB:                    /* continue: from where it is (stopped, or the song position) */
+        if (sqp.state == SQP_STOPPED) {
+            if (sqp.song_mode)
+                tp_place();
+            sqp_resync();
+            ext_budget = 0;
+            to_next = 0.0f;
+            sqp.state = SQP_PLAYING;
+            if (sqp.clock_out)
+                sqp_midi_rt(0xFB);
+        }
+        break;
+    case 0xFC:
+        sqp_stop();
+        break;
+    case 0xF2:
+        if (sqp.state == SQP_STOPPED)
+            ext_locate(d * 24u);  /* 16ths: 24 ticks */
+        break;
+    default:
+        break;
     }
 }
 

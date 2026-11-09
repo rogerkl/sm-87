@@ -20,6 +20,8 @@ typedef struct {
     uint8_t take_state;
     uint8_t click_rec, click_play;
     uint8_t clock_out;            /* MIDI clock (F8, FA, FB, FC) out */
+    uint8_t clock_in;             /* the clock: 0 its own (the tempo), 1 MIDI's (F8 in; FA, FB, FC, F2 the transport) */
+    uint16_t ext_tempo;           /* MIDI clock in: the tempo it comes at, BPM (0: none yet) */
     uint8_t loop;                 /* a song plays again from its first step */
     uint16_t tempo;               /* BPM */
     uint32_t tick;                /* in the part */
@@ -54,3 +56,6 @@ uint32_t sqp_frames_to_tick(void);   /* frames until the next tick (the render's
 void sqp_advance(uint32_t frames);   /* the stretch rendered: a tick due is played */
 void sqp_input(uint32_t st, uint32_t d1, uint32_t d2);   /* MIDI in and the keys: into a take that runs */
 uint32_t sqp_beat(void);          /* the beat now, from 1 (count-in: 0) */
+/* MIDI clock in (sqp.clock_in): a realtime message or the song position (F2: d its 16ths) from MIDI in, frame the
+ * render's frame count when it came. The audio interrupt (the render, before the block) */
+void sqp_rt_in(uint32_t st, uint32_t d, uint32_t frame);

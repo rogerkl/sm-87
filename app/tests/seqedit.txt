@@ -203,14 +203,14 @@ expect beats1 9
 turn ALGO 8
 wait 30
 expect evtick 96
-# SONG: SEQ back to the part, SEQ again the song; its functions are ERASE, COPY, NAME, EDIT
+# SONG: SEQ back to the part, SEQ again the song; its functions are ERASE, COPY, QUANTIZE, NAME, EDIT
 tap SEQ
 wait 30
 expect fn 0
 tap SEQ
 wait 30
 expect songmode 1
-turn ALGO 4
+turn ALGO 5
 wait 30
 expect fn 9
 # REC at the end adds the part last chosen (01), K1 there another (00); SEL + REC takes the step shown out
@@ -235,7 +235,7 @@ expect steps 1
 expect step1 0
 shot fn_song_edit.png
 # COPY the song to itself, then ERASE it
-turn ALGO -2
+turn ALGO -3
 wait 30
 expect fn 3
 tap REC
@@ -247,6 +247,19 @@ expect fn 2
 tap REC
 wait 30
 expect steps 0
+# a song's QUANTIZE: each track's offset, every song's, at once (REC does nothing more): track 2 ten clocks early
+turn ALGO 2
+wait 30
+expect fn 5
+tapkey w1
+turn K1 -10 20
+wait 30
+shot fn_song_quantize.png
+expect off2 -10
+expect off1 0
+tap REC
+wait 30
+expect off2 -10
 # kept
 tap SAVE
 wait 300
@@ -255,3 +268,4 @@ reboot
 wait 600
 expect beats1 9
 expect beats0 0
+expect off2 -10

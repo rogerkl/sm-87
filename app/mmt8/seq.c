@@ -42,6 +42,30 @@ void sq_clear(void)
     }
     for (i = 0; i < SQ_BLOBS; i++)
         sq.blob[i].off = sq.blob[i].len = 0;
+    for (i = 0; i < SQ_TRACKS; i++)
+        sq.offset[i] = 0;
+    for (i = 0; i < SQ_MMT8_HDR; i++)
+        sq.mmt8[i] = 0;
+}
+
+/* the fields each version added, at the tables' end: 2 the offsets, 3 the MMT-8 header */
+uint32_t sq_image_tables(uint32_t version)
+{
+    uint32_t t = (uint32_t)(sq.arena - (uint8_t *)&sq);
+    return version == SQ_VERSION ? t : version == 2u ? t - SQ_MMT8_HDR : version == 1u ? t - SQ_MMT8_HDR - SQ_TRACKS : 0u;
+}
+
+void sq_image_upgrade(void)
+{
+    uint32_t i;
+    if (sq.version == 1u)
+        for (i = 0; i < SQ_TRACKS; i++)
+            sq.offset[i] = 0;
+    if (sq.version == 1u || sq.version == 2u) {
+        for (i = 0; i < SQ_MMT8_HDR; i++)
+            sq.mmt8[i] = 0;
+        sq.version = SQ_VERSION;
+    }
 }
 
 int sq_valid(void)
@@ -56,6 +80,9 @@ int sq_valid(void)
     }
     for (i = 0; i < SQ_PARTS; i++)
         if (sq.part[i].beats > SQ_MAX_BEATS)
+            return 0;
+    for (i = 0; i < SQ_TRACKS; i++)
+        if (sq.offset[i] > SQ_OFFSET_MAX || sq.offset[i] < -SQ_OFFSET_MAX)
             return 0;
     return sum == sq.used;        /* every byte someone's, none twice */
 }

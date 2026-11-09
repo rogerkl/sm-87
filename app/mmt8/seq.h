@@ -24,6 +24,7 @@
 #define SQ_SCRATCH 16384u        /* a track is made in a scratch this long: at most 2,340 notes a track */
 #define SQ_NOTE_LEN 7u
 #define SQ_EV_LEN 5u
+#define SQ_MMT8_HDR 0x200u        /* an MMT-8 dump's header (its pointers and settings) */
 
 typedef struct {
     uint16_t beats;               /* 0: an empty part (no length yet) */
@@ -48,6 +49,9 @@ typedef struct {
     sq_part_t part[SQ_PARTS];
     sq_song_t song[SQ_SONGS];
     sq_blob_t blob[SQ_BLOBS];     /* part p track t: p * 8 + t; song s's steps: 800 + s */
+    int8_t offset[SQ_TRACKS];     /* SONG QUANTIZE: each track's clocks late (+) or early (-) in every song, +-48 */
+    uint8_t mmt8[SQ_MMT8_HDR];    /* the header of the last MMT-8 dump taken in (mmtdump.h): the bytes of it we don't
+                                   * know, sent back in ours (zeros: none came yet) */
     uint8_t arena[SQ_ARENA];
 } sq_mem_t;
 
@@ -56,7 +60,8 @@ extern sq_mem_t sq;
 #define SQ_TRK(p, t) ((p) * SQ_TRACKS + (t))
 #define SQ_SONG(s) (SQ_PARTS * SQ_TRACKS + (s))
 #define SQ_MAGIC 0x38544D4Du      /* "MMT8" */
-#define SQ_VERSION 1u
+#define SQ_VERSION 3u             /* 2: the song offsets; 3: an MMT-8 dump's header */
+#define SQ_OFFSET_MAX 48          /* a track's song offset, clocks (384ths: half a beat) */
 
 static inline uint32_t sq_ev_len(const uint8_t *e) { return (e[2] & 0xF0u) == 0x90u ? SQ_NOTE_LEN : SQ_EV_LEN; }
 static inline uint32_t sq_ev_tick(const uint8_t *e) { return e[0] | (uint32_t)e[1] << 8; }
@@ -72,6 +77,11 @@ void sq_unlock(void);
 
 void sq_clear(void);              /* every part and song empty */
 int sq_valid(void);               /* a memory loaded from the flash holds together */
+/* the saved image (app.c sq_save, sq_load): the tables (sq up to its arena), then the arena's used bytes. Its tables'
+ * length for the version an image says (0: not one known); after loading an older one, what it lacked set (before
+ * version 2: no song offsets; before 3: no MMT-8 header) and the version now */
+uint32_t sq_image_tables(uint32_t version);
+void sq_image_upgrade(void);
 uint32_t sq_free(void);           /* the arena's free bytes */
 /* a blob's bytes replaced by data (len bytes); -1: no room (nothing changed) */
 int sq_replace(uint32_t blob, const uint8_t *data, uint32_t len);

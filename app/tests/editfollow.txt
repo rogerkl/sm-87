@@ -1,0 +1,68 @@
+# EDIT while playing, as the MMT-8: the event shown follows the part as it plays (the last one played on the
+# track); stopped, it stays there to be edited. In a song, EDIT shows the step playing. 120 BPM: a beat is 500 ms,
+# 5.2 ms a clock (a tap takes 80 ms).
+wait 600
+tap SEQ
+wait 30
+# part 00: four beats, a note on each of the first three
+turn ALGO 1
+turn K1 4 20
+tap REC
+wait 30
+turn ALGO 8
+wait 30
+expect fn 9
+tap REC
+turn SELECT 1
+press SEL
+turn K1 1
+release SEL
+tap REC
+turn SELECT 1
+press SEL
+turn K1 1
+release SEL
+tap REC
+wait 30
+expect evn 3
+turn SELECT -2
+wait 30
+expect evi 1
+# playing: beat 1's note, then beat 2's, then beat 3's
+tap PLAY
+wait 100
+expect evi 1
+wait 500
+expect evi 2
+shot edit_follow.png
+wait 500
+expect evi 3
+expect evtick 192
+# stopped: it stays, and SELECT moves again
+tap PLAY
+wait 30
+expect seq 0
+expect evi 3
+turn SELECT -1
+wait 30
+expect evi 2
+# a song of part 00 twice: EDIT shows the step playing
+tap SEQ
+tap SEQ
+wait 30
+expect songmode 1
+turn ALGO 5
+wait 30
+expect fn 9
+tap REC
+turn SELECT 1
+tap REC
+wait 30
+expect steps 2
+turn SELECT -2
+wait 30
+expect songstep 1
+tap PLAY
+wait 2100
+expect seq 2
+expect songstep 2

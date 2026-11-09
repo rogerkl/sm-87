@@ -8,6 +8,7 @@
 #include "s700/sds.h"
 #include "mmt8/seq.h"
 #include "mmt8/player.h"
+#include "mmt8/mmtdump.h"
 #include "ui/lcd.c"
 #include "ui/pages_s700.c"
 
@@ -24,7 +25,9 @@ typedef struct {
     uint8_t s7_channel;           /* the sampler's MIDI channel, 0..15 (the X7000 received on 1) */
     uint8_t bend_range;           /* semitones (PWRNGE) */
     int8_t octave;                /* the keys: -2 .. +2 */
-    uint8_t rsv[5];
+    uint8_t clock_in;             /* the sequencer's clock: 0 its own, 1 MIDI's */
+    uint8_t clock_out_off;        /* MIDI clock out off (on unless) */
+    uint8_t rsv[3];
 } settings_t;
 static settings_t set;
 static uint8_t set_dirty;
@@ -147,6 +150,8 @@ static void played_in(uint32_t st, uint32_t d1, uint32_t d2, uint32_t to)
     play_out(st, d1, d2, to);
 }
 
+static uint32_t frames_now;       /* frames rendered: MIDI clock in's time */
+
 static void midi_in(void)         /* audio interrupt: the packets that came in */
 {
     uint32_t pkt;
@@ -157,6 +162,8 @@ static void midi_in(void)         /* audio interrupt: the packets that came in *
             played_in(st, d1, d2, TO_USB & ~plat_midi_in_from());
             midi_in_count++;
             midi_in_last = st;
+        } else if (st == 0xF8u || st == 0xFAu || st == 0xFBu || st == 0xFCu || st == 0xF2u) {
+            sqp_rt_in(st, d1 | d2 << 7, frames_now);   /* MIDI clock in (when the sequencer follows it) */
         }
     }
 }
@@ -203,6 +210,7 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
         lr[2 * i] = v;
         lr[2 * i + 1] = v;        /* the S700 is mono */
     }
+    frames_now += n;
 }
 
 void app_panic(void)
@@ -231,7 +239,7 @@ static uint8_t sq_dirty;
 #define SQS_SECTORS ((PLAT_XDATA1_HI - PLAT_XDATA1_LO) / 4096u)
 #define SQS_PER 0xF00u
 #define SQS_MAGIC 0x56535153u     /* "SQSV" */
-#define SQS_TABLES ((uint32_t)(sizeof sq - SQ_ARENA))
+#define SQS_TABLES sq_image_tables(SQ_VERSION)   /* (sq up to its arena) */
 
 static uint32_t sqs_sum(const uint8_t *p, uint32_t n, uint32_t h)
 {
@@ -280,7 +288,7 @@ static int sq_save(void)
 
 static void sq_load(void)
 {
-    uint32_t hdr[3], i, total;
+    uint32_t hdr[3], i, total, tables;
     uint8_t *dst = (uint8_t *)&sq;
     const uint8_t *b;
     for (i = 0; i < sizeof hdr; i++) {
@@ -289,18 +297,24 @@ static void sq_load(void)
         ((uint8_t *)hdr)[i] = *b;
     }
     total = hdr[1];
-    if (hdr[0] != SQS_MAGIC || total < SQS_TABLES || total > sizeof sq)
+    if (hdr[0] != SQS_MAGIC || !(b = sqs_byte_at(sizeof hdr + 4u)) || !sqs_byte_at(sizeof hdr + 5u))
+        goto empty;
+    /* the tables as long as the image's version has them (sq.version, after sq.magic): an older one's upgraded */
+    tables = sq_image_tables(b[0] | (uint32_t)sqs_byte_at(sizeof hdr + 5u)[0] << 8);
+    if (!tables || total < tables || total - tables > SQ_ARENA)
         goto empty;
     for (i = 0; i < total; i++) {
         uint32_t j = i;
         b = sqs_byte_at(i + sizeof hdr);
-        if (j < SQS_TABLES)
+        if (j < tables)
             dst[j] = *b;
         else
-            sq.arena[j - SQS_TABLES] = *b;
+            sq.arena[j - tables] = *b;
     }
-    if (sqs_sum(sq.arena, total - SQS_TABLES, sqs_sum(dst, SQS_TABLES, 2166136261u)) != hdr[2] || !sq_valid() ||
-        sq.used != total - SQS_TABLES)
+    if (sqs_sum(sq.arena, total - tables, sqs_sum(dst, tables, 2166136261u)) != hdr[2])
+        goto empty;
+    sq_image_upgrade();
+    if (!sq_valid() || sq.used != total - tables)
         goto empty;
     return;
 empty:
@@ -343,6 +357,8 @@ void app_init(void)
     sds_init(stage[0], stage[1]);
     sq_load();
     sqp_init(SM_FS);
+    sqp.clock_in = set.clock_in ? 1u : 0u;
+    sqp.clock_out = set.clock_out_off ? 0u : 1u;
     sqp_select_part(0);
 }
 
@@ -354,7 +370,14 @@ static uint8_t sx_autosave;       /* parameters came over MIDI: saved once it is
 static int32_t dump_request = -1; /* RSD: the slot to send, from the main loop */
 static void say_slot(const char *a, const char *b, uint32_t slot);
 
-void app_sysex_byte(uint8_t b) { sds_rx_byte(b); }
+static md_rx_t mdrx;              /* an MMT-8 dump coming in (mmt8/mmtdump.h) */
+static uint8_t *md_take(uint32_t *max);
+
+void app_sysex_byte(uint8_t b)
+{
+    sds_rx_byte(b);
+    md_rx_byte(&mdrx, b, md_take);
+}
 
 /* the dumps received, into the flash, in the order they came (before any SPRM after them is taken) */
 static void dumps_flush(void)
@@ -503,9 +526,141 @@ static void s700_midi_service(void)
     }
 }
 
+/* ------------------------------------------------------------------------------------------- the MMT-8's MIDI --- */
+/* its memory dump (mmt8/mmtdump.h), in and out over USB, in the sample dumps' staging buffers (98 KB, lent while
+ * neither holds a dump): one coming in replaces the sequencer's memory; MIDI DUMP (ALGO on the SEQ page) sends ours */
+static uint8_t *md_take(uint32_t *max)    /* the USB interrupt: the buffers, when free */
+{
+    if (!sds_hold())
+        return 0;
+    *max = MD_MAX;
+    return &stage[0][0];
+}
+
+static struct {
+    uint8_t on;
+    uint32_t n, k, m;             /* the dump's bytes; the MIDI bytes sent, of m */
+} mdtx;
+
+#define MD_TX_A_FRAME 2048u       /* MIDI bytes a frame */
+
+/* MIDI DUMP: ours, as an MMT-8's, out over USB */
+static void md_send(void)
+{
+    static const uint8_t PRE[MD_PREFIX] = {0xF0, 0x00, 0x00, 0x0E, 0x00};
+    int32_t n;
+    uint32_t f;
+    int ok;
+    if (mdtx.on || tx.on) {
+        app_say("SENDING ALREADY", "");
+        return;
+    }
+    f = plat_lock();
+    ok = mdrx.st != MD_RX_DATA && mdrx.st != MD_RX_DONE && sds_hold();
+    plat_unlock(f);
+    if (!ok) {
+        app_say("BUSY", "A DUMP COMING IN");
+        return;
+    }
+    n = md_export(&stage[0][0], MD_MAX);
+    if (n < 0) {
+        sds_release();
+        app_say("TOO BIG", "FOR AN MMT-8");
+        return;
+    }
+    if (plat_sysex_begin() != 0 || plat_sysex_put(PRE, MD_PREFIX) != 0) {
+        (void)plat_sysex_end();
+        sds_release();
+        app_say("USB NOT READY", "");
+        return;
+    }
+    mdtx.on = 1;
+    mdtx.n = (uint32_t)n;
+    mdtx.k = 0;
+    mdtx.m = md_packed_len((uint32_t)n);
+}
+
+static void md_send_service(void)
+{
+    uint8_t chunk[256], f7 = 0xF7;
+    uint32_t sent = 0;
+    if (!mdtx.on)
+        return;
+    while (sent < MD_TX_A_FRAME && mdtx.k < mdtx.m) {
+        uint32_t c = 0;
+        while (c < sizeof chunk && mdtx.k < mdtx.m)
+            chunk[c++] = md_packed_byte(&stage[0][0], mdtx.n, mdtx.k++);
+        if (plat_sysex_put(chunk, c) != 0) {   /* nobody reading: given up */
+            (void)plat_sysex_end();
+            mdtx.on = 0;
+            sds_release();
+            app_say("SEND CUT SHORT", "");
+            return;
+        }
+        sent += c;
+    }
+    if (mdtx.k == mdtx.m) {
+        char t[LCD_COLS + 1] = "", n[8];
+        (void)plat_sysex_put(&f7, 1);
+        (void)plat_sysex_end();
+        mdtx.on = 0;
+        sds_release();
+        fmt_uint(n, mdtx.n, 0, ' ');
+        str_cat(t, n);
+        str_cat(t, " BYTES");
+        app_say("MMT-8 DUMP SENT", t);
+    }
+}
+
 /* ------------------------------------------------------------------------------------------------------ UI --- */
 #include "ui/pages_seq.c"
 #define PG_SEQ PG_N               /* the sequencer's page, after the sampler's */
+
+/* a dump in: the sequencer stopped, its memory replaced */
+static void md_service(void)
+{
+    if (mdrx.st == MD_RX_DONE) {
+        md_report_t r;
+        uint32_t f;
+        if (mdrx.over || mdrx.n < MD_HDR) {
+            app_say("MMT-8 DUMP", mdrx.over ? "NOT TAKEN" : "TOO SHORT");
+        } else {
+            char t[LCD_COLS + 1] = "", n[8];
+            f = plat_lock();
+            sqp_stop();
+            plat_unlock(f);
+            (void)md_import(&stage[0][0], mdrx.n, sq_scratch, &r);
+            f = plat_lock();
+            if (sqp.song_mode)
+                sqp_select_song(0);
+            else
+                sqp_select_part(0);
+            plat_unlock(f);
+            seq_last_part = 0;
+            seq_song_step = 0;
+            ed_load();
+            sq_dirty = 1;
+            if (r.lost_parts) {   /* the sequencer full: from this part on not taken */
+                fmt_uint(n, (uint32_t)r.first_lost, 2, '0');
+                str_cat(t, "FROM PART ");
+                str_cat(t, n);
+                app_say("MEMORY FULL", t);
+            } else {
+                fmt_uint(n, r.parts, 0, ' ');
+                str_cat(t, n);
+                str_cat(t, " PTS ");
+                fmt_uint(n, r.songs, 0, ' ');
+                str_cat(t, n);
+                str_cat(t, " SONGS");
+                app_say("MMT-8 DUMP IN", t);
+            }
+        }
+        sds_release();
+        mdrx.st = MD_RX_IDLE;
+    }
+    md_send_service();
+}
+
 
 static struct {
     uint32_t keys, btn;           /* held at the last input */
@@ -903,8 +1058,15 @@ void app_frame(void)
     int32_t cursor = -1;
     input();
     s700_midi_service();
+    md_service();
     take_service();
-    if (sds_rx_progress()) {                 /* a dump coming in: its progress, as the sampler shows it */
+    if (mdrx.st == MD_RX_DATA || mdtx.on) {  /* an MMT-8 dump coming in or going out: its bytes */
+        char t[LCD_COLS + 1] = "BYTES ", n[8];
+        fmt_uint(n, mdtx.on ? mdtx.k * 7u / 8u : mdrx.n, 5, ' ');
+        str_cat(t, n);
+        lcd_row(0, mdtx.on ? "SENDING MMT-8" : "MMT-8 DUMP IN");
+        lcd_row(1, t);
+    } else if (sds_rx_progress()) {          /* a dump coming in: its progress, as the sampler shows it */
         char t[LCD_COLS + 1] = "WORDS ", n[8];
         fmt_uint(n, sds_rx_progress(), 5, ' ');
         str_cat(t, n);
@@ -1015,7 +1177,19 @@ int app_expect(const char *what, int *got)
             *got = e[2];
         else
             return 0;
-    } else if (!strncmp(what, "chan", 4))   /* chanN: track N's channel in the part (0 UNCHANGED) */
+    } else if (!strcmp(what, "clockin"))   /* the clock: 0 its own, 1 MIDI's */
+        *got = sqp.clock_in;
+    else if (!strcmp(what, "clockout"))
+        *got = sqp.clock_out;
+    else if (!strcmp(what, "exttempo"))     /* MIDI clock in's tempo */
+        *got = sqp.ext_tempo;
+    else if (!strcmp(what, "mmt8hdr"))      /* an MMT-8's dump header kept */
+        *got = md_has_header();
+    else if (!strncmp(what, "off", 3))    /* offN: track N's song offset (SONG QUANTIZE), clocks */
+        *got = sq.offset[(atoi(what + 3) - 1) & 7];
+    else if (!strcmp(what, "songstep"))     /* the step the song pages show (from 1) */
+        *got = (int)seq_song_step + 1;
+    else if (!strncmp(what, "chan", 4))     /* chanN: track N's channel in the part (0 UNCHANGED) */
         *got = sq.part[sqp.part].chan[(atoi(what + 4) - 1) & 7];
     else if (!strncmp(what, "beats", 5))    /* beatsN: part N's length (N as the LCD shows it, 00..99) */
         *got = sq.part[atoi(what + 5) % SQ_PARTS].beats;

@@ -17,7 +17,7 @@
 #define OVS_LEN 33u
 #define AKAI_ID 0x41u             /* the S700's identifier (Akai's "65", decimal) */
 
-enum { SDS_FREE, SDS_FILLING, SDS_READY };
+enum { SDS_FREE, SDS_FILLING, SDS_READY, SDS_HELD };   /* HELD: lent (sds_hold) */
 
 /* a dump received, into one of the staging buffers */
 typedef struct {
@@ -38,6 +38,11 @@ extern volatile uint8_t sds_enabled;    /* SECRE / SECRD */
 
 void sds_init(uint8_t *mem0, uint8_t *mem1);
 void sds_rx_byte(uint8_t b);      /* every byte of a SysEx, F0 and F7 too (realtime bytes left out) */
+/* both staging buffers lent, one after the other in memory (the MMT-8's dump, 64 KB): 1 = lent, 0 = one in use (a
+ * dump coming or not yet in the flash). A sample dump meanwhile is refused. In the interrupt, or the main loop inside
+ * plat_lock */
+int sds_hold(void);
+void sds_release(void);
 uint32_t sds_rx_progress(void);   /* words of the dump coming in now (0: none) */
 /* the length a received dump plays: to its loop end (the sampler takes it as the end), within what came */
 uint32_t sds_length(const sds_dump_t *d);

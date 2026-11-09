@@ -28,6 +28,25 @@ void sds_init(uint8_t *mem0, uint8_t *mem1)
     rx.d = 0;
 }
 
+int sds_hold(void)
+{
+    uint32_t i;
+    for (i = 0; i < SDS_BUFS; i++)
+        if (sds_buf[i].state != SDS_FREE)
+            return 0;
+    for (i = 0; i < SDS_BUFS; i++)
+        sds_buf[i].state = SDS_HELD;
+    return 1;
+}
+
+void sds_release(void)
+{
+    uint32_t i;
+    for (i = 0; i < SDS_BUFS; i++)
+        if (sds_buf[i].state == SDS_HELD)
+            sds_buf[i].state = SDS_FREE;
+}
+
 static void rx_drop(void)         /* a dump that did not finish: its buffer free again */
 {
     if (rx.d && rx.d->state == SDS_FILLING)

@@ -135,9 +135,9 @@ static void seq_status(void)
     t[0] = 0;
     str_cat(t, sqp.song_mode ? "SONG" : "PART");
     cv_text(8, 30, &FONT_XS, t, C_GRAY);
-    cv_text(50, 30, &FONT_XS, "TEMPO", C_GRAY);
-    fmt_uint(n, sqp.tempo, 0, ' ');
-    cv_text(92, 30, &FONT_XS, n, C_HI);
+    cv_text(50, 30, &FONT_XS, sqp.clock_in ? "MIDI" : "TEMPO", C_GRAY);   /* (MIDI clock in: its tempo) */
+    fmt_uint(n, sqp.clock_in ? sqp.ext_tempo : sqp.tempo, 0, ' ');
+    cv_text(92, 30, &FONT_XS, sqp.clock_in && !sqp.ext_tempo ? "--" : n, C_HI);
     cv_text(130, 30, &FONT_XS, "MEM", C_GRAY);
     fmt_uint(n, pct, 0, ' ');
     str_cat(n, "%");
@@ -151,6 +151,8 @@ static void seq_status(void)
     cv_text(162, 44, &FONT_XS, n, C_HI);
     /* the function (ALGO); in EDIT the event of how many */
     cv_text(8, 58, &FONT_XS, ed.fn ? F_TXT[ed.fn] : "ALGO: FUNCTIONS", ed.fn ? C_HI : C_GRAY);
+    if (ed.fn == F_DUMP)          /* what an MMT-8 takes: ours with the header of one of its dumps */
+        cv_text(100, 58, &FONT_XS, md_has_header() ? "HEADER: AN MMT-8'S" : "NO MMT-8 HEADER YET", C_HI);
     if (ed.fn == F_EDIT && !sqp.song_mode) {
         uint32_t ne = sq_events(sqp.part, ed.trk);
         t[0] = 0;

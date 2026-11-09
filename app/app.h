@@ -10,7 +10,8 @@
 #define APP_TOUCH                        /* velocity and pressure from the keys (lib/touch.h) */
 #define APP_SYSEX                        /* SysEx to the computer (sample dumps out) */
 #define APP_SYSEX_BYTE                   /* every byte of a SysEx in: sample dumps longer than a frame */
-#define APP_WEB_SX_IN 67584u             /* the browser emulator takes a whole sample dump (66,632 bytes) in one frame */
+#define APP_WEB_SX_IN 73728u             /* the browser emulator takes a whole dump in one frame: a sample (66,632 bytes),
+                                          * an MMT-8's memory (73,442 at most) */
 
 /* the store: the app's objects and their flash offsets (each an A/B pair of sectors). The sample pool is the flash
  * below 0xDC000 (s700/s7mem.h) */
