@@ -106,6 +106,20 @@ void s7_kill_slot(uint32_t slot); /* the voices playing a slot silent now (befor
 void s7_render(float *out, uint32_t n);   /* adds n samples (mono) to out */
 uint32_t s7_voices_active(void);
 
+/* ---- the drum machine's voices (hr16/): the sampler's, from any sound in its format (a slot, or one of the drum
+ * kit's built in), played once from START to END without the filter, bend or vibrato, and panned. Audio interrupt.
+ * The voice to use is the caller's choice (hr16/hrkit.c: one per pad, the hats sharing) ---- */
+#define S7_DRUM_VOICES 8u
+/* voice v starts sound s (slot: its slot, for s7_kill_slot; 0xFF none of them) semis from its own pitch, its gains
+ * left and right (level and pan) */
+void s7_drum_start(uint32_t v, const s7_slot_t *s, uint32_t slot, float semis, float gl, float gr);
+void s7_drum_choke(uint32_t v);   /* gone in about 20 ms (a closed hat over an open one) */
+int s7_drum_active(uint32_t v);
+int s7_drum_released(uint32_t v);   /* choked, fading */
+uint32_t s7_drum_age(uint32_t v); /* notes started since it was (the oldest: the largest) */
+void s7_drum_kill(void);
+void s7_drum_render(float *l, float *r, uint32_t n);   /* adds n samples, left and right */
+
 /* for tests: a voice's index mapping (voice.rs index()) and the level and release the engine computes */
 typedef struct {
     uint32_t mode, len, loop_start, loop_end;

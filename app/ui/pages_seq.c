@@ -1,7 +1,8 @@
 /* SM-87: the MMT-8's page. The LCD as the MMT-8 shows a part or a song playing; the first eight white keys are its
- * eight track buttons while SEL is held (mutes), and choose the record track with REC held; PRESET picks the part (or
- * the song), queued while playing; K1 the tempo, K2 the record track's channel; in a song, SELECT its step and K3 the
- * step's part (past 99: the song ends there). ALGO turns to the MMT-8's functions (seq_edit.c). Part of the unity
+ * eight track buttons while SEL is held (mutes; the ninth the drums), and choose the record track with REC held;
+ * PRESET picks the part (or the song), queued while playing; K1 the tempo, K2 the record track's channel, K4 the
+ * drum pattern that plays with the parts; in a song, SELECT its step, K3 the step's part (past 99: the song ends
+ * there) and K4 its drum pattern (or none). ALGO turns to the MMT-8's functions (seq_edit.c). Part of the unity
  * build (app.c). */
 
 static const uint8_t WHITE[16] = PLAT_WHITE_KEYS;
@@ -57,8 +58,8 @@ static void seq_draw(int sel_held)
     str_cat(t, state);
     lcd_row(0, t);
     t[0] = 0;
-    if (sel_held) {                          /* the tracks: on, muted, empty */
-        str_cat(t, "TRACKS  ");
+    if (sel_held) {                          /* the tracks: on, muted, empty; the drums on or muted */
+        str_cat(t, "TRK ");
         for (i = 0; i < SQ_TRACKS; i++) {
             char c[2] = {(char)('1' + i), 0};
             if (!(used >> i & 1u))
@@ -67,6 +68,7 @@ static void seq_draw(int sel_held)
                 c[0] = '-';
             str_cat(t, c);
         }
+        str_cat(t, hrp.mute ? "  --" : "  DR");
     } else if (sqp.state == SQP_COUNTIN) {
         str_cat(t, "COUNT IN    ");
         fmt_uint(n, (uint32_t)(sqp.countin + (int32_t)SQ_PPQN - 1) / SQ_PPQN, 1, ' ');
@@ -149,8 +151,24 @@ static void seq_status(void)
     fmt_uint(n, plat_cpu_pct(), 0, ' ');
     str_cat(n, "%");
     cv_text(162, 44, &FONT_XS, n, C_HI);
-    /* the function (ALGO); in EDIT the event of how many */
+    /* the function (ALGO); in EDIT the event of how many; else the drums with it */
     cv_text(8, 58, &FONT_XS, ed.fn ? F_TXT[ed.fn] : "ALGO: FUNCTIONS", ed.fn ? C_HI : C_GRAY);
+    if (!ed.fn) {
+        uint32_t d = !sqp.song_mode ? hrp.pattern
+                     : sq_song_drums(sqp.song, sqp.state == SQP_STOPPED ? seq_song_step : sqp.step);
+        t[0] = 0;
+        str_cat(t, "DRUMS ");
+        if (hrp.mute) {
+            str_cat(t, "MUTED");
+        } else if (d >= SQ_PATTERNS) {
+            str_cat(t, "NONE");
+        } else {
+            str_cat(t, "PATT ");
+            fmt_uint(n, d, 2, '0');
+            str_cat(t, n);
+        }
+        cv_text(130, 58, &FONT_XS, t, C_HI);
+    }
     if (ed.fn == F_DUMP)          /* what an MMT-8 takes: ours with the header of one of its dumps */
         cv_text(100, 58, &FONT_XS, md_has_header() ? "HEADER: AN MMT-8'S" : "NO MMT-8 HEADER YET", C_HI);
     if (ed.fn == F_EDIT && !sqp.song_mode) {

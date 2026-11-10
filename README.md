@@ -1,7 +1,7 @@
 # SM-87
 
 A firmware for the M-VAVE FM-1 that recreates a 1986/87 studio: an **Alesis MMT-8** style part/song sequencer
-driving an **Akai S700 / X7000** style sampler, with an **Alesis HR-16** style drum machine planned. It is built on
+driving an **Akai S700 / X7000** style sampler and an **Alesis HR-16** style drum machine. It is built on
 [fm1-base](https://github.com/charlesvestal/fm1-base) (MPL-2.0, a git submodule here) and felucca-bsp.
 
 **Status: works in fm1-base's host simulator, and builds for the FM-1 (`app/build/sm87.fwsc`). It hasn't run
@@ -40,6 +40,16 @@ on an FM-1 yet** (see *On the device*).
   - The MMT-8's functions: LENGTH (at the end or the top), ERASE and COPY with its 22 filters, MERGE, QUANTIZE (10
     grids, 4 modes), TRANSPOSE, MIDI CHANNEL, NAME, and EDIT, the event list editor; in a song ERASE, COPY,
     QUANTIZE (each track's clock offset, ±48), NAME and EDIT, its steps put in and taken out.
+- **The drum machine** is a cut-down HR-16:
+  - 16 pads on the white keys and on MIDI channel 10, each with its own sound, tuning (±24 semitones), level, pan
+    (the HR-16's seven places) and note. The hats cut each other (a group); the crash and ride ring over themselves
+    (two voices).
+  - The sounds are the sampler's format (12 bits, at its rates) and play on its voices, without the filter: a kit
+    built into the firmware (`tools/mkkit.py`), or any of the sampler's 16 slots.
+  - 100 patterns of up to 682 beats, in the sequencer's memory. Recorded as they loop, each hit quantized (1/4 ..
+    1/64, or off) and swung (50-75%) as it goes in, the HR-16's way.
+  - With the MMT-8: one clock and tempo. A song step chooses the drum pattern that plays with it (or none). Playing
+    a part, the drums loop their own pattern beside it. On their own page they play alone.
 - **The screen** is a 2 × 16 character LCD, drawn dot by dot, with a status strip under it.
 
 ## Controls
@@ -50,18 +60,62 @@ on an FM-1 yet** (see *On the device*).
 | SEQ | The sequencer's page; again (stopped): PART ↔ SONG |
 | PLAY | Play from the top / stop; SEL + PLAY continues from the beat |
 | REC | Arm recording on the part's lowest empty track (or the one chosen with REC + its key); again: disarm; while a take runs: punch out |
-| SEL + first 8 white keys | Track mutes (on the SEQ page; in a song: the step's mutes) |
+| SEL + first 8 white keys | Track mutes (on the SEQ page; in a song: the step's mutes); the 9th: the drums on or muted |
 | REC + first 8 white keys | The record track |
 | PRESET | The part or song (SEQ page), else the sampler's program |
 | K1 / K2 (SEQ) | Tempo / the record track's channel (UNCHANGED, 1-16) |
+| K4 (SEQ) | The drum pattern that plays with the parts; in a song (stopped): the step's drum pattern, or none |
 | ALGO (SEQ) | The MMT-8's functions, below; SEQ goes back to the part or song |
 | SELECT / K3 (SONG, stopped) | The step / its part (at the END: appends the last part; past 99: the song ends there) |
+| ARP | The drum machine's page (below); from one of its functions: back to the pattern |
 | EDIT | The sampler's pages round: POINTS (START, END), LOOP (LOOP, MODE), TUNE (ROOT, FINE, RATE), KEYS (LO, HI, TRANSPOSE, CONSTANT) |
 | ENV | OUT (FILTER, RELEASE, LEVEL), then the velocity amounts |
 | LFO | SPEED, DEPTH, DELAY, PRESSURE |
 | SELECT / K1-K4 (sampler pages) | The slot / the page's values. The strip under the LCD shows the slot, its sample and the program |
 | HOME | The sampler's overview |
 | SAVE | Lit when something isn't saved: settings, the sample parameters, the sequencer (stopped) |
+
+### The drum machine (ARP)
+
+The LCD shows the pattern and its beat (`PATT 05  BT 003`, `PATT 05>07` with 07 queued), then its length and hits,
+or while recording the quantize and swing. The strip shows the 16 pads, lit as they sound.
+
+| | |
+|---|---|
+| White keys | The 16 pads, by velocity (the black keys do nothing here) |
+| PLAY | The drums alone, from the top / stop; SEL + PLAY: on from the beat |
+| PRESET | The pattern; while playing, queued for the end of the one playing |
+| K1 / K2 / K3 | Tempo / quantize (1/4, 1/8, 1/12, 1/16, 1/24, 1/32, 1/48, 1/64, off) / swing, 50-75% |
+| REC | Recording on or off: the hits played (pads, or MIDI in on the drums' channel) go into the pattern as it loops |
+| SEL + a pad, recording | Erases that pad's hits as they come by, while held (the HR-16's ERASE + a pad) |
+| ALGO | The functions below; ARP goes back to the pattern |
+
+A new pattern is 8 beats long, as on the HR-16. A hit is placed on the nearest step of the quantize grid. It's heard
+as it's played, and played back from the next time round. Recording counts the beats with the click. It records
+when the drums play alone, or beside a part; it doesn't record in a song.
+
+| Function | K1 | K2 | K3 | K4 | REC |
+|---|---|---|---|---|---|
+| LENGTH | Beats, 1-682 (SEL: tens) | | | | Sets the pattern's length (stopped): hits past the end go |
+| ERASE | A pad, or all (a pad's key chooses it) | | | | Erases that pad's hits, or the whole pattern |
+| COPY | The pattern to | | | | Appends the pattern to the other (an empty one gets a copy; itself: twice as long) |
+| PAD SOUND | The sound: the kit's, then SLOT01-16 | Tuning, ±24 | Level | Pan, <3 .. 3> | The pad as the kit sets it; SEL + REC: all of them |
+| PAD MIDI | Its note | Its group (pads that cut each other) | Voices, 1 or 2 | The drums' channel | As PAD SOUND |
+
+On a pad's function, a pad's key chooses it (and plays it); so does SELECT.
+
+**With the sequencer**, the two share one clock, one tempo and one transport. Which pattern plays depends on how
+PLAY was started:
+
+- **From the SEQ page, in PART mode:** the sequencer's PLAY plays the part, and the drums loop their pattern beside
+  it, each on its own length. K4 chooses the drum pattern, queued while playing. SEL + the 9th white key mutes the
+  drums.
+- **From the SEQ page, in SONG mode:** each step's drum pattern (K4 on the step) starts with the step, and is cut
+  at the step's end. A step without one is quiet. A new step takes the drums of the step before.
+- **From the drum page:** PLAY plays the drums alone, as pressing PLAY on an HR-16 would.
+
+The drums' hits go out over USB on the drums' channel (10 unless set), and notes coming in on that channel play the
+pads. So an MMT-8 track on channel 10 plays them too.
 
 ### Recording a part
 
@@ -153,10 +207,12 @@ goes quiet.
 | `app/` | The firmware: `app.c` (glue, routing, render, pages), `fm1.toml`, `app.h` (contract, flash map) |
 | `app/s700/` | The sampler: `s7engine.c` (voices), `s7mem.c` (flash pool, directory), `sds.c` (sample dump, SPRM, OVS) |
 | `app/mmt8/` | The sequencer: `seq.c` (memory, takes, edits), `player.c` (clock, MIDI clock in, playback, recording, songs), `mmtdump.c` (the MMT-8's SysEx dump) |
-| `app/ui/` | The LCD (`lcd.c`, a 5 × 7 font) and the pages; `seq_edit.c` the MMT-8's functions |
+| `app/hr16/` | The drum machine: `hrkit.c` (the kit, the pads, their voices), `hrpat.c` (patterns, their player, recording) |
+| `app/ui/` | The LCD (`lcd.c`, a 5 × 7 font) and the pages; `seq_edit.c` the MMT-8's functions, `pages_drum.c` the HR-16's page |
 | `app/tests/` | Scripts for the host simulator (`sysex.txt` is generated by `test/gen_sysex_test.py`) |
 | `test/` | C unit tests against the X7000 measurements, Axs7's fixtures and the MMT-8's behaviour; `run.sh` runs all |
 | `tools/mkrom.py` | Samples built into the firmware, from WAV files and `.qd` images (`app/rom/`, not in the repository) |
+| `tools/mkkit.py`, `tools/kit.txt` | The drum kit built into the firmware, from the list's WAV files (`app/rom/hr_kit.h`, not in the repository) |
 | `documentation/` | The manuals and the S700/X7000 reference |
 
 ### Flash
@@ -165,7 +221,7 @@ goes quiet.
 |---|---|
 | 0x93000-0xDC000 | Sample pool (73 sectors of 4 KB), packed 12-bit |
 | 0xDC000, 0xDE000 | Store objects: settings; sample directory and parameters (A/B pairs) |
-| 0xE5000-0xFC000 | Sequencer memory (3,840 bytes a sector: the update loader's bytes at 0xF00 kept erased) |
+| 0xE5000-0xFC000 | Sequencer memory, the drum patterns too (3,840 bytes a sector: the update loader's bytes at 0xF00 kept erased) |
 | 0xFC000 | Store object: the panel calibration (fm1-base's) |
 
 ## Building and testing
@@ -194,8 +250,29 @@ without a sampler or computer sending any:
 
 That example is a piano split over 5 samples, the double bass on keys 36-52 in program 1, and a disk in slot 16.
 Don't take the disk images in Axs7's `web/test/fixtures` for one: their audio is a test ramp through every 12-bit
-value, a buzz that follows the pitch. The firmware with them is 447 KB of the 581 KB slot. `test/run.sh` sets your
+value, a buzz that follows the pitch. `mkrom.py` refuses more than the slot has room for (see *The drum kit*). `test/run.sh` sets your
 file aside while it runs and puts it back.
+
+### The drum kit
+
+`tools/mkkit.py` builds the drum machine's sounds into the firmware, from the list in `tools/kit.txt`:
+- `sound` lines name a WAV file (in `sounds/` unless `--dir` says otherwise).
+- `pad` lines set up the pads in order: a sound, tuning, level, pan, note, group and voices.
+
+It writes `app/rom/hr_kit.h`, which isn't in the repository (the sounds are yours) and is built in while it exists.
+Without it, the pads play only the sampler's slots.
+
+    .venv/bin/python tools/mkkit.py
+
+The kit's sounds share the firmware's slot with the samples `tools/mkrom.py` builds in. `mkrom.py`'s default budget
+is what's left beside the firmware (about 150 KB) and the kit, and `mkkit.py` says whether the samples already built
+in still fit.
+
+The kit is designed to grow:
+- A pad keeps its sound by number, so add new sounds at the end of the list.
+- A pad saved with a sampler slot keeps it when the kit grows.
+
+`test/run.sh` sets your kit aside, like your samples, and tests with one it makes (`test/make_test_kit.py`).
 
 ### In the browser (fm1-base's emulator, with SysEx both ways)
 
@@ -214,8 +291,12 @@ To talk to Axs7, make two virtual MIDI cables, e.g. "to SM87" and "from SM87" wi
 Axs7 finds it as it finds an X7000, on channel 1, and sends and fetches samples (open loop: the FM-1 doesn't wait for
 ACKs and ignores them).
 
-`node test/emu_test.mjs` drives the built `app.wasm` as a browser runs it (fm1-base's harness): ROVS, a whole
-32,752-word dump in, RSPRM, RSD back word for word, then the slot played. `test/run.sh` runs it when there is a build.
+`node test/emu_test.mjs` drives the built `app.wasm` as a browser runs it (fm1-base's harness):
+- ROVS, a whole 32,752-word dump in, RSPRM, RSD back word for word, then the slot played.
+- An MMT-8 memory dump in, and back out.
+- A drum pattern recorded from MIDI and played out.
+
+`test/run.sh` runs it when there is a build.
 
 Two small changes to the fm1-base submodule make whole dumps work in the emulator. They're in
 `patches/fm1-base-emu-sysex.patch` (the submodule stays at upstream's commit); apply them after cloning, before
@@ -241,8 +322,13 @@ its gitee repository has the revision fm1-base pins, and `get_sdk.sh` checks the
         ../.venv/bin/python tools/build.py ../app --no-ble
     python3 tools/fm1_install.py ../app/build/sm87.fwsc     # over USB MIDI (or fm1-base's web installer)
 
-The build's checks pass: no 64-bit multiply beside a load (the chip's erratum), no soft doubles, the image 108 KB of
-the 581 KB slot, RAM 46 of 96 KB, the pool 274 of 344 KB.
+The build's checks pass with the drum kit and no samples built in:
+- No 64-bit multiply beside a load (the chip's erratum), and no soft doubles.
+- Image: 183,300 of the slot's 581,564 bytes.
+- RAM: 51,388 of 98,304 bytes.
+- Pool: 274,676 of 344,064 bytes.
+
+The kit takes 38,000 of them.
 
 For recovery if an install goes wrong:
 - Felucca's boot-loop guard: hold OCT- + OCT+ for 5 s.
@@ -250,11 +336,12 @@ For recovery if an install goes wrong:
 - MvaveFM1Unbricker.
 
 The first things to measure on a device, before more is built on these assumptions:
-- `plat_cpu_pct()` with 6 voices playing from the flash (the status strip shows CPU).
+- `plat_cpu_pct()` with 6 voices playing from the flash, and the 8 drum voices (the status strip shows CPU).
 - `plat_xruns()`.
 - A full 66 KB dump from Axs7 over USB, checked bit for bit with RSD.
 
 ## Next
 
-- The HR-16 drum machine.
+- More of the HR-16: step edit, its own songs, OFFSET (moving a pad's hits by clocks), FILL, and a pattern's
+  sounds kept with it.
 - A dump sent to a real MMT-8, and MIDI clock in with `midi_stamp` (fm1.toml) for timing finer than a block.

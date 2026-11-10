@@ -3,6 +3,7 @@
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
+#include <stddef.h>
 #include "player.h"
 
 static int fails, checks;
@@ -39,6 +40,7 @@ void sqp_emit(uint32_t st, uint32_t d1, uint32_t d2)
         n_out++;
     }
 }
+void sqp_on_tick(void) {}
 void sqp_click(int accent)
 {
     clicks++;
@@ -85,15 +87,15 @@ static void test_arena(void)
     sq_clear();
     CHECK(sq_valid() && sq_free() == SQ_ARENA - 1u, "empty");
     CHECK(sq_replace(SQ_TRK(0, 0), a, 5) == 0 && sq_replace(SQ_TRK(3, 2), a + 5, 5) == 0 &&
-              sq_replace(SQ_SONG(7), a, 10) == 0,
+              sq_replace(SQ_SONG(7), a, 9) == 0,
           "three blobs");
     CHECK(sq_replace(SQ_TRK(0, 0), a, 10) == 0, "grown");
-    CHECK(!memcmp(sq_data(SQ_TRK(3, 2)), a + 5, 5) && !memcmp(sq_data(SQ_SONG(7)), a, 10) &&
+    CHECK(!memcmp(sq_data(SQ_TRK(3, 2)), a + 5, 5) && !memcmp(sq_data(SQ_SONG(7)), a, 9) &&
               !memcmp(sq_data(SQ_TRK(0, 0)), a, 10),
           "the others moved with it");
-    CHECK(sq_replace(SQ_TRK(3, 2), 0, 0) == 0 && sq_len(SQ_TRK(3, 2)) == 0u && sq.used == 20u && sq_valid(),
+    CHECK(sq_replace(SQ_TRK(3, 2), 0, 0) == 0 && sq_len(SQ_TRK(3, 2)) == 0u && sq.used == 19u && sq_valid(),
           "deleted: used %u", sq.used);
-    CHECK(!memcmp(sq_data(SQ_SONG(7)), a, 10), "after the delete");
+    CHECK(!memcmp(sq_data(SQ_SONG(7)), a, 9), "after the delete");
     sq_clear();
 }
 
@@ -249,7 +251,7 @@ static void test_panel_edits(void)
     sq_song_set(0, 1, 2, 0x0Fu, scratch);
     r = sq_song_append(0, 0, scratch);
     CHECK(r == 0 && sq_song_steps(0) == 4u, "a song to itself: %u steps", sq_song_steps(0));
-    sq_song_insert(0, 1, 7, 0x01u, scratch);
+    sq_song_insert(0, 1, 7, 0x01u, SQ_NO_DRUMS, scratch);
     sq_song_step(0, 1, &part, &mask);
     CHECK(sq_song_steps(0) == 5u && part == 7u && mask == 1u, "a step in at 2: part %u", part);
     sq_song_step(0, 2, &part, &mask);
@@ -483,11 +485,13 @@ static void test_song_offsets(void)
 static void test_image_versions(void)
 {
     static uint8_t img[sizeof(sq_mem_t)];
-    uint32_t t1 = sq_image_tables(1), t2 = sq_image_tables(SQ_VERSION), used;
+    uint32_t t1 = sq_image_tables(1), t3 = sq_image_tables(3), t4 = sq_image_tables(SQ_VERSION), used, i;
     sq_raw_t t[2];
-    CHECK(t2 == (uint32_t)(sq.arena - (uint8_t *)&sq) && t1 == t2 - SQ_TRACKS - SQ_MMT8_HDR &&
-              sq_image_tables(2) == t2 - SQ_MMT8_HDR && !sq_image_tables(9),
-          "tables: %u, version 1 %u", t2, t1);
+    uint8_t part, mask;
+    CHECK(t4 == (uint32_t)(sq.arena - (uint8_t *)&sq) && t1 == t3 - SQ_TRACKS - SQ_MMT8_HDR &&
+              sq_image_tables(2) == t3 - SQ_MMT8_HDR && t4 == t3 + SQ_PATTERNS * 4u + SQ_PATTERNS * 2u &&
+              !sq_image_tables(9),
+          "tables: %u, version 3 %u, version 1 %u", t4, t3, t1);
     sq_clear();
     raw(&t[0], 0, 0x90, 60, 100);
     raw(&t[1], 20, 0x80, 60, 0);
@@ -500,10 +504,42 @@ static void test_image_versions(void)
     memset(&sq, 0x55, sizeof sq);
     memcpy(&sq, img, t1);
     memcpy(sq.arena, img + t1, used);
-    sq_image_upgrade();
-    CHECK(sq.version == SQ_VERSION && sq_valid() && sq.offset[0] == 0 && sq.offset[7] == 0 && sq.part[4].beats == 3u &&
-              sq_events(4, 2) == 1u,
+    CHECK(sq_image_upgrade(scratch) == 0 && sq.version == SQ_VERSION && sq_valid() && sq.offset[0] == 0 &&
+              sq.offset[7] == 0 && sq.part[4].beats == 3u && sq_events(4, 2) == 1u,
           "version 1 loaded: version %u, valid %d", sq.version, sq_valid());
+
+    /* version 3, as it was saved: its blobs (parts and songs), the offsets, the header; a song's steps two bytes */
+    sq_clear();
+    sq_commit(4, 2, t, 2, 3, scratch);
+    sq.offset[3] = -7;
+    sq.mmt8[0xCF] = 0x42;
+    memcpy(img, &sq, t1);
+    img[4] = 3;
+    {
+        uint8_t steps[6] = {4, 0xFF, 9, 0x05, 4, 0x01};   /* song 2: part 4, part 9 (tracks 1 and 3), part 4 */
+        used = sq.used;
+        memcpy(img + t1, &sq.offset, SQ_TRACKS);
+        memcpy(img + t1 + SQ_TRACKS, sq.mmt8, SQ_MMT8_HDR);
+        /* the song's blob after the track's: blob 802 in version 3's table */
+        ((sq_blob_t *)(img + offsetof(sq_mem_t, blob)))[SQ_SONG(2)].off = (uint16_t)used;
+        ((sq_blob_t *)(img + offsetof(sq_mem_t, blob)))[SQ_SONG(2)].len = 6;
+        memcpy(img + t3, sq.arena, used);
+        memcpy(img + t3 + used, steps, 6);
+        ((uint16_t *)(img + 4))[1] = (uint16_t)(used + 6u);   /* sq.used */
+        memset(&sq, 0x55, sizeof sq);
+        memcpy(&sq, img, t3);
+        memcpy(sq.arena, img + t3, used + 6u);
+    }
+    CHECK(sq_image_upgrade(scratch) == 0 && sq.version == SQ_VERSION && sq_valid(), "version 3 loaded: valid %d",
+          sq_valid());
+    sq_song_step(2, 1, &part, &mask);
+    CHECK(sq_song_steps(2) == 3u && part == 9u && mask == 0x05u && sq_song_drums(2, 1) == SQ_NO_DRUMS &&
+              sq_song_drums(2, 2) == SQ_NO_DRUMS,
+          "its song: %u steps, step 2 part %u tracks %02X drums %u", sq_song_steps(2), part, mask, sq_song_drums(2, 1));
+    for (i = 0, used = 0; i < SQ_PATTERNS; i++)
+        used += sq_len(SQ_PAT(i)) + sq.pattern[i].beats;
+    CHECK(sq.offset[3] == -7 && sq.mmt8[0xCF] == 0x42 && used == 0 && sq_events(4, 2) == 1u,
+          "its offsets and header moved, no drum patterns: offset %d, header %02X", sq.offset[3], sq.mmt8[0xCF]);
 }
 
 /* MIDI clock in, as app_render has it: the clocks that came during a block given at its start (midi_in) */

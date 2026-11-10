@@ -1,7 +1,7 @@
-/* SM-87: an MMT-8 style sequencer and an Akai S700 / X7000 style sampler on the M-VAVE FM-1.
- * The app's glue: the sound (app_render), MIDI in, the panel and the screen. Part of fm1-base's unity build
- * (device/unity.c, host/plat_host.c), after the platform: gfx.c and announce.c are in scope. The sampler (s700/) is
- * compiled apart, at -O2. */
+/* SM-87: an MMT-8 style sequencer, an Akai S700 / X7000 style sampler and an HR-16 style drum machine on the M-VAVE
+ * FM-1. The app's glue: the sound (app_render), MIDI in, the panel and the screen. Part of fm1-base's unity build
+ * (device/unity.c, host/plat_host.c), after the platform: gfx.c and announce.c are in scope. The sampler (s700/), the
+ * sequencer (mmt8/) and the drums (hr16/) are compiled apart, at -O2. */
 #include "fastmath.h"
 #include "s700/s7.h"
 #include "s700/s7mem.h"
@@ -9,6 +9,7 @@
 #include "mmt8/seq.h"
 #include "mmt8/player.h"
 #include "mmt8/mmtdump.h"
+#include "hr16/hr.h"
 #include "ui/lcd.c"
 #include "ui/pages_s700.c"
 
@@ -28,9 +29,25 @@ typedef struct {
     uint8_t clock_in;             /* the sequencer's clock: 0 its own, 1 MIDI's */
     uint8_t clock_out_off;        /* MIDI clock out off (on unless) */
     uint8_t rsv[3];
+    /* the drums' (a settings object saved before them is shorter: these take their defaults) */
+    uint8_t dr_channel;           /* their MIDI channel, 0..15 (10: 9) */
+    uint8_t dr_quant, dr_swing;   /* recording's quantize (hr16/hr.h HR_GRID's index) and swing, % */
+    uint8_t dr_kit_n;             /* the kit's sounds when the pads were saved (hr_pads_rekit) */
+    hr_pad_t pads[HR_PADS];
 } settings_t;
+#define SET_V1_LEN 12u            /* (to rsv) */
 static settings_t set;
 static uint8_t set_dirty;
+
+static void drums_defaults(void)
+{
+    uint32_t i;
+    set.dr_channel = 9;
+    set.dr_quant = 3;             /* 1/16 */
+    set.dr_swing = 50;
+    for (i = 0; i < HR_PADS; i++)
+        hr_pad_default(i);
+}
 
 static void settings_defaults(void)
 {
@@ -38,6 +55,38 @@ static void settings_defaults(void)
     set.s7_channel = 0;
     set.bend_range = 2;
     set.octave = 0;
+    set.clock_in = 0;
+    set.clock_out_off = 0;
+    drums_defaults();
+}
+
+/* the settings as they load: an older (shorter) object's drums the defaults, the pads as the kit is now */
+static void settings_load(void)
+{
+    int n = plat_store_load(OBJ_SETTINGS, &set, sizeof set);
+    uint32_t i;
+    if (n < (int)SET_V1_LEN || set.magic != SET_MAGIC || set.s7_channel > 15u || set.bend_range > 12u ||
+        set.octave < -2 || set.octave > 2) {
+        settings_defaults();
+        return;
+    }
+    if (n < (int)sizeof set || set.dr_channel > 15u || set.dr_quant >= HR_GRIDS || set.dr_swing < 50u ||
+        set.dr_swing > HR_SWING_MAX) {
+        drums_defaults();
+        return;
+    }
+    for (i = 0; i < HR_PADS; i++)
+        hr_pad[i] = set.pads[i];
+    hr_pads_rekit(set.dr_kit_n);
+}
+
+static int settings_save(void)
+{
+    uint32_t i;
+    for (i = 0; i < HR_PADS; i++)
+        set.pads[i] = hr_pad[i];
+    set.dr_kit_n = (uint8_t)hr_kit_sounds();
+    return plat_store_save(OBJ_SETTINGS, &set, sizeof set);
 }
 
 /* the sample dumps' staging: one taken while the last is written to the flash (s700/sds.h) */
@@ -93,14 +142,25 @@ static void s7_message(uint32_t st, uint32_t d1, uint32_t d2)
 
 static volatile uint32_t midi_in_count, midi_in_last;
 
+/* one message to the drums (audio interrupt): a note plays the pads on it (its off: nothing, they play out) */
+static void hr_message(uint32_t st, uint32_t d1, uint32_t d2)
+{
+    if ((st & 0xF0u) == 0x90u && d2)
+        hr_note(d1, d2);
+    else if ((st & 0xF0u) == 0xB0u && d1 == 120u)
+        hr_kill();
+}
+
 /* ------------------------------------------------------------------------------------------ the routing --- */
-/* everything played, by the sequencer, the keys or MIDI in, goes here: the sampler on its channel, and out over USB
- * (to (TO_USB): where it may go; MIDI in does not go back where it came from) */
+/* everything played, by the sequencer, the keys or MIDI in, goes here: the sampler on its channel, the drums on
+ * theirs, and out over USB (to (TO_USB): where it may go; MIDI in does not go back where it came from) */
 static void play_out(uint32_t st, uint32_t d1, uint32_t d2, uint32_t to)
 {
     if (st < 0xF0u) {
         if ((st & 0x0Fu) == set.s7_channel)
             s7_message(st, d1, d2);
+        if ((st & 0x0Fu) == set.dr_channel)
+            hr_message(st, d1, d2);
         if (to) {
             uint32_t len = (st & 0xE0u) == 0xC0u ? 2u : 3u;
             plat_midi_send((st >> 4) | st << 8 | d1 << 16 | (len == 3u ? d2 << 24 : 0u), to);
@@ -113,6 +173,25 @@ static void play_out(uint32_t st, uint32_t d1, uint32_t d2, uint32_t to)
 /* the sequencer's (mmt8/player.h) */
 void sqp_emit(uint32_t st, uint32_t d1, uint32_t d2) { play_out(st, d1, d2, TO_USB); }
 void sqp_midi_rt(uint32_t b) { plat_midi_send(0x0Fu | b << 8, TO_USB); }
+
+/* the drums' (hr16/hr.h): a pattern's hit sounds its pad, and goes out on its note (off a 32nd later) */
+#define HR_OFF_TICKS 12u
+void hr_emit(uint32_t pad, uint32_t vel)
+{
+    uint32_t ch = set.dr_channel, note = hr_pad[pad].note;
+    hr_hit(pad, vel);
+    plat_midi_send(0x09u | (0x90u | ch) << 8 | note << 16 | vel << 24, TO_USB);
+    sqp_off_after(HR_OFF_TICKS, 0x80u | ch, note);
+}
+
+/* each tick of the clock: the drums; recording on their own, a click on their beats (unless the sequencer's) */
+void sqp_on_tick(void)
+{
+    hrp_tick();
+    if (hrp_recording() && sqp.click_rec && hrp.at % SQ_PPQN == 0u &&
+        !(sqp.state == SQP_PLAYING && (sqp.take_state == SQP_TAKE_RUNNING || sqp.click_play)))
+        sqp_click(hrp.at % (4u * SQ_PPQN) == 0u);
+}
 
 /* the click: a short blip, higher on the bar's first beat */
 static float click_env, click_ph, click_inc;
@@ -142,6 +221,11 @@ static void played_in(uint32_t st, uint32_t d1, uint32_t d2, uint32_t to)
     if (st >= 0xF0u)
         return;
     sqp_input(st, d1, d2);
+    if ((st & 0xF0u) == 0x90u && d2 && (st & 0x0Fu) == set.dr_channel && hrp_recording()) {
+        int32_t pad = hr_pad_of(d1);   /* the drums recording: into the pattern */
+        if (pad >= 0)
+            hrp_record((uint32_t)pad, d2);
+    }
     if (sqp.rec_armed || sqp.take_state == SQP_TAKE_RUNNING) {
         uint32_t ch = sq.part[sqp.part].chan[sqp.rec_track];
         if (ch)
@@ -169,7 +253,7 @@ static void midi_in(void)         /* audio interrupt: the packets that came in *
 }
 
 /* ------------------------------------------------------------------------------------------------- sound --- */
-static float mix[APP_BLOCK];
+static float mix[APP_BLOCK], drl[APP_BLOCK], drr[APP_BLOCK];
 static float gain_now;
 
 void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
@@ -177,18 +261,14 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
     uint32_t i, done = 0;
     /* a voice at its loudest (LEVEL 99, velocity 127) peaks at -6 dBFS: room for a few at once */
     float gain = (float)master_q12 / 4096.0f * (8388607.0f * 0.5f / 2048.0f);
-    while (evq_r != evq_w) {                 /* the keys, played on the sampler's channel */
+    while (evq_r != evq_w) {                 /* the keys: the sampler's channel, or (the pads) the drums' */
         uint32_t e = evq[evq_r % EVQ];
-        uint32_t st = e & 0xFFu;
-        if (st >= 0xF0u)
-            s7_message(st, e >> 8 & 0xFFu, e >> 16 & 0xFFu);
-        else
-            played_in(st | set.s7_channel, e >> 8 & 0xFFu, e >> 16 & 0xFFu, TO_USB);
+        played_in(e & 0xFFu, e >> 8 & 0xFFu, e >> 16 & 0xFFu, TO_USB);
         evq_r = evq_r + 1u;
     }
     midi_in();
     for (i = 0; i < n; i++)
-        mix[i] = 0.0f;
+        mix[i] = drl[i] = drr[i] = 0.0f;
     /* in stretches to the sequencer's next tick, so its events land on their frame */
     while (done < n) {
         uint32_t seg = sqp_frames_to_tick();
@@ -196,19 +276,19 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
             seg = n - done;
         if (seg) {
             s7_render(mix + done, seg);
+            hr_render(drl + done, drr + done, seg);
             click_render(mix + done, seg);
         }
         done += seg;
         sqp_advance(seg);
     }
-    for (i = 0; i < n; i++) {
-        float s;
-        int32_t v;
+    for (i = 0; i < n; i++) {     /* the S700 is mono, the drums panned */
+        float l, r;
         gain_now += (gain - gain_now) * 0.004f;   /* MASTER glides: no zipper */
-        s = mix[i] * gain_now;
-        v = s > 8388607.0f ? 8388607 : s < -8388607.0f ? -8388607 : (int32_t)s;
-        lr[2 * i] = v;
-        lr[2 * i + 1] = v;        /* the S700 is mono */
+        l = (mix[i] + drl[i]) * gain_now;
+        r = (mix[i] + drr[i]) * gain_now;
+        lr[2 * i] = l > 8388607.0f ? 8388607 : l < -8388607.0f ? -8388607 : (int32_t)l;
+        lr[2 * i + 1] = r > 8388607.0f ? 8388607 : r < -8388607.0f ? -8388607 : (int32_t)r;
     }
     frames_now += n;
 }
@@ -216,6 +296,7 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
 void app_panic(void)
 {
     s7_kill();
+    hr_kill();
 }
 
 /* ------------------------------------------------------------------------------------ the sequencer's memory --- */
@@ -225,6 +306,7 @@ void sq_lock(void) { sq_lock_flags = plat_lock(); }
 void sq_unlock(void)
 {
     sqp_resync();
+    hrp_resync();
     plat_unlock(sq_lock_flags);
 }
 
@@ -313,12 +395,30 @@ static void sq_load(void)
     }
     if (sqs_sum(sq.arena, total - tables, sqs_sum(dst, tables, 2166136261u)) != hdr[2])
         goto empty;
-    sq_image_upgrade();
-    if (!sq_valid() || sq.used != total - tables)
+    if (sq.used != total - tables || sq_image_upgrade(sq_scratch) != 0 || !sq_valid())
         goto empty;
     return;
 empty:
     sq_clear();
+}
+
+/* the drums' recording: its hits into the pattern (or out of it, held to erase) */
+static void hr_service(void)
+{
+    hr_rec_t r;
+    int full = 0;
+    while (hrp_take(&r)) {
+        if (r.erase) {
+            full |= hr_remove(r.pattern, r.tick, r.pad, sq_scratch) != 0;
+        } else {
+            if (!sq.pattern[r.pattern].beats)   /* (its length now its own: the default it played at) */
+                sq.pattern[r.pattern].beats = HR_DEFAULT_BEATS;
+            full |= hr_add(r.pattern, r.tick, r.pad, r.vel, sq_scratch) != 0;
+        }
+        sq_dirty = 1;
+    }
+    if (full)
+        app_say("MEMORY FULL", "");
 }
 
 /* a take done: made into its track (the sorting outside the lock, the move inside) */
@@ -348,9 +448,9 @@ static void take_service(void)
 
 void app_init(void)
 {
-    if (plat_store_load(OBJ_SETTINGS, &set, sizeof set) != (int)sizeof set || set.magic != SET_MAGIC ||
-        set.s7_channel > 15u || set.bend_range > 12u || set.octave < -2 || set.octave > 2)
-        settings_defaults();
+    settings_load();
+    hrp.quant = set.dr_quant;
+    hrp.swing = set.dr_swing;
     s7_init(SM_FS);
     s7_bend_range(set.bend_range);
     s7mem_init();
@@ -614,7 +714,9 @@ static void md_send_service(void)
 
 /* ------------------------------------------------------------------------------------------------------ UI --- */
 #include "ui/pages_seq.c"
+#include "ui/pages_drum.c"
 #define PG_SEQ PG_N               /* the sequencer's page, after the sampler's */
+#define PG_DRUM (PG_N + 1u)       /* the drums' */
 
 /* a dump in: the sequencer stopped, its memory replaced */
 static void md_service(void)
@@ -664,7 +766,9 @@ static void md_service(void)
 
 static struct {
     uint32_t keys, btn;           /* held at the last input */
-    uint8_t key_note[NKEYS];      /* the note each held key plays (the octave may change while held) */
+    uint8_t key_note[NKEYS];      /* the note each held key plays (the octave may change while held); 0xFF none,
+                                   * 0xFE a pad held to erase */
+    uint8_t key_ch[NKEYS];        /* its channel */
     char msg[2][LCD_COLS + 1];    /* a message over the page for a moment */
     uint32_t msg_until;
     uint8_t redraw;
@@ -704,7 +808,7 @@ static void save_all(void)
         return;
     }
     if (set_dirty) {
-        if (plat_store_save(OBJ_SETTINGS, &set, sizeof set) == 0)
+        if (settings_save() == 0)
             set_dirty = 0;
         else
             ok = 0;
@@ -720,7 +824,7 @@ static void program_step(int32_t d)
 {
     int32_t p = (int32_t)s7_current_program() + d;
     p = p < 0 ? 0 : p > 31 ? 31 : p;
-    ev_push(0xC0u, (uint32_t)p, 0);
+    ev_push(0xC0u | set.s7_channel, (uint32_t)p, 0);
     ui.redraw = 1;
 }
 
@@ -732,12 +836,16 @@ static void transport_button(uint32_t k, uint32_t btn)
     const char *say = 0;
     uint32_t f = plat_lock();
     if (k == B_PLAY) {
-        if (sqp.state != SQP_STOPPED)
+        if (sqp.state != SQP_STOPPED || sqp.aux)
             sqp_stop();
+        else if (ui.page == PG_DRUM)        /* the drums alone (SEL: on from their beat) */
+            sqp_aux_play((int)(btn >> B_SEL & 1u));
         else if (btn >> B_SEL & 1u)
             sqp_continue();
         else
             sqp_play();
+    } else if (k == B_REC && ui.page == PG_DRUM) {
+        dr_rec_arm();
     } else if (k == B_REC) {
         if (sqp.take_state == SQP_TAKE_RUNNING) {
             sqp_punch();
@@ -816,6 +924,15 @@ static void seq_turn(uint32_t enc, int32_t e)
             sq.song[sqp.song].tempo = (uint8_t)sqp.tempo;
             sq_dirty = 1;
         }
+    } else if (enc == EN_K4 && !sqp.song_mode) {   /* the drums' pattern with the part */
+        dr_pattern_turn(e);
+    } else if (enc == EN_K4 && sqp.state == SQP_STOPPED) {   /* the song step's drum pattern: none, 00..99 */
+        if (seq_song_step < sq_song_steps(sqp.song)) {
+            uint32_t d = sq_song_drums(sqp.song, seq_song_step);
+            int32_t v = clamp((d >= SQ_PATTERNS ? -1 : (int32_t)d) + e, -1, (int32_t)SQ_PATTERNS - 1);
+            sq_song_set_drums(sqp.song, seq_song_step, v < 0 ? SQ_NO_DRUMS : (uint32_t)v);
+            sq_dirty = 1;
+        }
     } else if (enc == EN_K2) {               /* the record track's channel: UNCHANGED, 1..16 */
         int32_t c = (int32_t)sq.part[sqp.part].chan[sqp.rec_track] + e;
         sq.part[sqp.part].chan[sqp.rec_track] = (uint8_t)(c < 0 ? 0 : c > 16 ? 16 : c);
@@ -845,23 +962,50 @@ static void input(void)
     int tracks = ui.page == PG_SEQ && (ed.fn || (btn & (1u << B_SEL | 1u << B_REC)));
     touch_poll();
     keys = touch_keys();
+    dr_lights_take();
     for (k = 0; k < NKEYS; k++) {            /* key 0 is F3 (MIDI 53) */
         uint32_t bit = 1u << k;
         if ((keys & bit) && !(ui.keys & bit)) {
             uint32_t note = (uint32_t)(53 + (int32_t)k + 12 * set.octave), v = touch_vel(k);
+            ui.key_note[k] = 0xFFu;
             if (tracks && (key_track(k) >= 0 || !ed.fn)) {   /* the eight track buttons (a function's: the others play) */
                 if (key_track(k) >= 0 && ed.fn)
                     ed_track((uint32_t)key_track(k));
                 else if (key_track(k) >= 0)
                     track_key((uint32_t)key_track(k), btn);
-                ui.key_note[k] = 0xFFu;
+                else if (k == WHITE[SQ_TRACKS] && (btn >> B_SEL & 1u))
+                    hrp.mute = (uint8_t)!hrp.mute;   /* the ninth: the drums with the parts */
                 ui.redraw = 1;
                 continue;
             }
+            if (ui.page == PG_DRUM) {        /* the white keys: the pads; the black ones nothing */
+                int32_t pad = key_pad(k);
+                uint32_t f;
+                if (pad < 0)
+                    continue;
+                if ((btn >> B_SEL & 1u) && hrp.rec) {   /* SEL + a pad, recording: its hits out as they come */
+                    f = plat_lock();
+                    hrp.erase |= (uint16_t)(1u << pad);
+                    plat_unlock(f);
+                    ui.key_note[k] = 0xFEu;
+                    ui.redraw = 1;
+                    continue;
+                }
+                dr_pad_key((uint32_t)pad);
+                note = hr_pad[pad].note;
+                ui.key_ch[k] = set.dr_channel;
+                ui.redraw = 1;
+            } else {
+                ui.key_ch[k] = set.s7_channel;
+            }
             ui.key_note[k] = (uint8_t)note;
-            ev_push(0x90u, note, v ? v : 1u);
+            ev_push(0x90u | ui.key_ch[k], note, v ? v : 1u);
+        } else if (!(keys & bit) && (ui.keys & bit) && ui.key_note[k] == 0xFEu) {
+            uint32_t f = plat_lock();
+            hrp.erase &= (uint16_t)~(1u << key_pad(k));
+            plat_unlock(f);
         } else if (!(keys & bit) && (ui.keys & bit) && ui.key_note[k] != 0xFFu) {
-            ev_push(0x80u, ui.key_note[k], 64u);
+            ev_push(0x80u | ui.key_ch[k], ui.key_note[k], 64u);
         }
     }
     for (k = 0; k < NB; k++) {
@@ -887,6 +1031,15 @@ static void input(void)
         } else if (k == B_REC && ui.page == PG_SEQ && ed.fn) {   /* a function's page: REC does it */
             ed_rec(btn);
             ui.rec_used = 1;
+            ui.redraw = 1;
+        } else if (k == B_REC && ui.page == PG_DRUM && dr.fn) {
+            dr_rec(btn);
+            ui.rec_used = 1;
+            ui.redraw = 1;
+        } else if (k == B_ARP) {             /* the drums (from a function of theirs: back to the pattern) */
+            if (ui.page == PG_DRUM)
+                dr.fn = DF_PLAY;
+            ui.page = PG_DRUM;
             ui.redraw = 1;
         } else if (k == B_SEQ) {             /* the sequencer; again: PART or SONG (from a function: back to it) */
             if (ui.page != PG_SEQ || ed.fn) {
@@ -925,7 +1078,17 @@ static void input(void)
     for (k = 0; k < NE; k++) {
         if ((e = plat_enc((int)k)) == 0)
             continue;
-        if (ui.page == PG_SEQ) {
+        if (ui.page == PG_DRUM) {
+            if (k == EN_ALGO) {              /* the HR-16's functions */
+                uint32_t was = dr.fn;
+                dr_algo(e);
+                if (dr.fn != was && ann_on())
+                    ann_say(dr.fn ? DF_TXT[dr.fn] : "PATTERN", 0, ANN_NOW);
+            } else {
+                dr_turn(k, e, btn);
+            }
+            ui.redraw = 1;
+        } else if (ui.page == PG_SEQ) {
             if (k == EN_ALGO) {              /* the MMT-8's functions */
                 uint32_t was = ed.fn;
                 ed_algo(e);
@@ -953,16 +1116,20 @@ static void input(void)
     ui.keys = keys;
     ui.btn = btn;
     /* the lights: the held, SAVE while something is not saved, the transport, the page's button */
-    lit_btn = btn | (unsaved() ? 1u << B_SAVE : 0u) | (sqp.rec_armed ? 1u << B_REC : 0u);
-    lit_btn |= ui.page == PG_SEQ ? 1u << B_SEQ : 0u;
-    if (sqp.state != SQP_STOPPED)
+    lit_btn = btn | (unsaved() ? 1u << B_SAVE : 0u) | (sqp.rec_armed || hrp.rec ? 1u << B_REC : 0u);
+    lit_btn |= ui.page == PG_SEQ ? 1u << B_SEQ : ui.page == PG_DRUM ? 1u << B_ARP : 0u;
+    if (sqp.state != SQP_STOPPED || sqp.aux)
         lit_btn |= LED_PLAY_GREEN;
     lit_keys = keys;
     if (tracks) {
         lit_keys = ed.fn ? keys & ~track_key_bits() : 0u;
         seq_track_lights(&lit_keys, &dim_keys);
+        if (!ed.fn && (btn >> B_SEL & 1u) && !hrp.mute)
+            lit_keys |= 1u << WHITE[SQ_TRACKS];   /* the ninth: the drums on */
+    } else if (ui.page == PG_DRUM) {
+        dr_key_lights(&lit_keys, &dim_keys);
     }
-    plat_play_red(sqp.state == SQP_COUNTIN || sqp.take_state == SQP_TAKE_RUNNING);
+    plat_play_red(sqp.state == SQP_COUNTIN || sqp.take_state == SQP_TAKE_RUNNING || hrp_recording());
     plat_lights(lit_btn, lit_keys, 0, dim_keys, 1);
 }
 
@@ -1060,6 +1227,7 @@ void app_frame(void)
     s700_midi_service();
     md_service();
     take_service();
+    hr_service();
     if (mdrx.st == MD_RX_DATA || mdtx.on) {  /* an MMT-8 dump coming in or going out: its bytes */
         char t[LCD_COLS + 1] = "BYTES ", n[8];
         fmt_uint(n, mdtx.on ? mdtx.k * 7u / 8u : mdrx.n, 5, ' ');
@@ -1078,6 +1246,8 @@ void app_frame(void)
     } else if (ui.page == PG_SEQ) {
         seq_draw(ui.btn >> B_SEL & 1u);
         cursor = ed_cursor_row();
+    } else if (ui.page == PG_DRUM) {
+        dr_draw((int)(ui.btn >> B_SEL & 1u));
     } else if (ui.page == PG_HOME) {
         page_home();
     } else {
@@ -1085,10 +1255,12 @@ void app_frame(void)
     }
     lcd_cursor(cursor, ed.cur);
     lcd_draw(ui.redraw);
-    if (ui.redraw || now - last_status >= 250u) {
+    if (ui.redraw || now - last_status >= (ui.page == PG_DRUM ? 50u : 250u)) {   /* (the pads light as they sound) */
         last_status = now;
         if (ui.page == PG_SEQ)
             seq_status();
+        else if (ui.page == PG_DRUM)
+            dr_status();
         else
             draw_status();
     }
@@ -1103,6 +1275,54 @@ int app_expect(const char *what, int *got)
         *got = (int)s7_current_program() + 1;
     else if (!strcmp(what, "voices"))
         *got = (int)s7_voices_active();
+    else if (!strcmp(what, "drpat"))        /* the drums: their own pattern */
+        *got = hrp.pattern;
+    else if (!strcmp(what, "drnext"))       /* the one queued (-1 none) */
+        *got = hrp.next == 0xFFu ? -1 : hrp.next;
+    else if (!strcmp(what, "drplaying"))    /* the pattern sounding (a song step's), -1 none */
+        *got = hrp.playing == 0xFFu ? -1 : hrp.playing;
+    else if (!strcmp(what, "drhits"))       /* the hits in their pattern */
+        *got = (int)hr_hits(hrp.pattern);
+    else if (!strncmp(what, "drhits", 6))   /* drhitsN: pattern N's */
+        *got = (int)hr_hits((uint32_t)atoi(what + 6) % SQ_PATTERNS);
+    else if (!strcmp(what, "drbeats"))
+        *got = (int)hr_beats(hrp.pattern);
+    else if (!strcmp(what, "drrec"))        /* recording armed */
+        *got = hrp.rec;
+    else if (!strcmp(what, "drrecording"))  /* hits going in now */
+        *got = hrp_recording();
+    else if (!strcmp(what, "drvoices"))
+        *got = (int)hr_voices_active();
+    else if (!strcmp(what, "drmute"))
+        *got = hrp.mute;
+    else if (!strcmp(what, "drch"))         /* the drums' channel, 1..16 */
+        *got = set.dr_channel + 1;
+    else if (!strcmp(what, "drquant"))      /* HR_GRID's index */
+        *got = hrp.quant;
+    else if (!strcmp(what, "drswing"))
+        *got = hrp.swing;
+    else if (!strcmp(what, "drfn"))         /* the drums' function shown: 0 none, 1 LENGTH .. 5 PAD MIDI */
+        *got = dr.fn;
+    else if (!strcmp(what, "drpad"))        /* the pad a function has (from 1; 17: the whole pattern) */
+        *got = dr.pad + 1;
+    else if (!strcmp(what, "aux"))          /* the drums running alone */
+        *got = sqp.aux;
+    else if (!strcmp(what, "kit"))          /* the kit's sounds built in */
+        *got = (int)hr_kit_sounds();
+    else if (!strncmp(what, "padsnd", 6))   /* padsndN: pad N's sound (-1 none) */
+        *got = hr_pad[(atoi(what + 6) - 1) & 15].sound == HR_NO_SOUND ? -1 : hr_pad[(atoi(what + 6) - 1) & 15].sound;
+    else if (!strncmp(what, "padnote", 7))
+        *got = hr_pad[(atoi(what + 7) - 1) & 15].note;
+    else if (!strncmp(what, "padtune", 7))
+        *got = hr_pad[(atoi(what + 7) - 1) & 15].tune;
+    else if (!strncmp(what, "padlevel", 8))
+        *got = hr_pad[(atoi(what + 8) - 1) & 15].level;
+    else if (!strncmp(what, "padpan", 6))
+        *got = hr_pad[(atoi(what + 6) - 1) & 15].pan;
+    else if (!strncmp(what, "stepdr", 6))   /* stepdrN: the song's step N's drum pattern (-1 none) */
+        *got = sq_song_drums(sqp.song, (uint32_t)atoi(what + 6) - 1u) == SQ_NO_DRUMS
+                   ? -1
+                   : (int)sq_song_drums(sqp.song, (uint32_t)atoi(what + 6) - 1u);
     else if (!strcmp(what, "octave"))
         *got = set.octave;
     else if (!strcmp(what, "free"))
@@ -1198,8 +1418,9 @@ int app_expect(const char *what, int *got)
     else if (!strncmp(what, "events", 6))   /* eventsN: track N's events in the part */
         *got = (int)sq_events(sqp.part, (uint32_t)(atoi(what + 6) - 1) & 7u);
     else if (!strncmp(what, "step", 4))     /* stepN: the song's step N's part (from 1) */
-        *got = atoi(what + 4) - 1 < (int)sq_song_steps(sqp.song) ? sq_data(SQ_SONG(sqp.song))[2 * (atoi(what + 4) - 1)]
-                                                                  : -1;
+        *got = atoi(what + 4) - 1 < (int)sq_song_steps(sqp.song)
+                   ? sq_data(SQ_SONG(sqp.song))[SQ_STEP * (uint32_t)(atoi(what + 4) - 1)]
+                   : -1;
     else if (!strncmp(what, "name", 4))     /* nameN: the part's name, its character N (from 1) */
         *got = sq.part[sqp.part].name[(atoi(what + 4) - 1) % SQ_NAME];
     else

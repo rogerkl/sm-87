@@ -215,18 +215,13 @@ static int md_part_in(const uint8_t *img, uint32_t len, uint32_t at, uint32_t p,
 
 int md_import(const uint8_t *img, uint32_t len, uint8_t *scratch, md_report_t *r)
 {
-    int8_t off[SQ_TRACKS];
     uint32_t p, s, i;
     r->parts = r->songs = r->lost_parts = 0;
     r->first_lost = -1;
     r->skipped = 0;
     if (len < MD_HDR)
         return -1;
-    for (i = 0; i < SQ_TRACKS; i++)
-        off[i] = sq.offset[i];
-    sq_clear();                   /* (the song offsets are ours: kept) */
-    for (i = 0; i < SQ_TRACKS; i++)
-        sq.offset[i] = off[i];
+    sq_clear_mmt8();              /* (the song offsets and the drum patterns are ours: kept) */
     for (i = 0; i < MD_HDR; i++)
         sq.mmt8[i] = img[i];
     for (p = 0; p < SQ_PARTS; p++) {
@@ -254,12 +249,13 @@ int md_import(const uint8_t *img, uint32_t len, uint8_t *scratch, md_report_t *r
         if (end > len)
             end = len;
         for (k = at + MD_SONG_HDR; k + 1u < end && img[k] < SQ_PARTS && n < SQ_STEPS; k += 2u, n++) {
-            scratch[2u * n] = img[k];
-            scratch[2u * n + 1u] = img[k + 1u];
+            scratch[SQ_STEP * n] = img[k];
+            scratch[SQ_STEP * n + 1u] = img[k + 1u];
+            scratch[SQ_STEP * n + 2u] = SQ_NO_DRUMS;
         }
         sq.song[s].tempo = img[at + 2u] >= 30u && img[at + 2u] <= 250u ? img[at + 2u] : 120u;
         md_name(sq.song[s].name, img + at + 3u);
-        if (n && sq_replace(SQ_SONG(s), scratch, 2u * n) == 0)
+        if (n && sq_replace(SQ_SONG(s), scratch, SQ_STEP * n) == 0)
             r->songs++;
     }
     return 0;
@@ -374,8 +370,10 @@ int32_t md_export(uint8_t *img, uint32_t max)
         img[at + 2u] = (uint8_t)sq.song[s].tempo;
         for (i = 0; i < SQ_NAME; i++)
             img[at + 3u + i] = (uint8_t)sq.song[s].name[i];
-        for (i = 0; i < 2u * n; i++)
-            img[at + MD_SONG_HDR + i] = d[i];
+        for (i = 0; i < n; i++) {   /* (part, tracks: an MMT-8 has no drum patterns) */
+            img[at + MD_SONG_HDR + 2u * i] = d[SQ_STEP * i];
+            img[at + MD_SONG_HDR + 2u * i + 1u] = d[SQ_STEP * i + 1u];
+        }
         img[at + size - 1u] = 0xFFu;
         pos += size;
     }

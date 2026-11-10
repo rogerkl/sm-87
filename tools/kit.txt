@@ -1,0 +1,25 @@
+# SM-87's drum kit: tools/mkkit.py makes app/rom/hr_kit.h of it, the sounds built into the firmware.
+#
+#   sound NAME FILE [vel=N]
+#       a WAV file (in --dir, sounds/ unless told), mixed down to mono, at one of the sampler's rates (or resampled to
+#       the nearest), 12 bits as the sampler keeps it. NAME: up to 6 characters. vel: velocity's say in its level,
+#       0..99 (the sampler's VEL>LV; 60 unless told)
+#   pad NAME SOUND [tune=N] [level=N] [pan=N] [note=N] [group=N] [poly=N]
+#       the pads in order, up to 16 (the white keys from the lowest); SOUND a sound's NAME. tune: semitones
+#       (-24..24), level 0..99 (85), pan -3..3 (0), note: its MIDI note (General MIDI's), group: pads that cut each
+#       other (the hats: 1), poly: its voices at once, 1 or 2 (the HR-16's crash: 2)
+#
+# A pad saved keeps its sound by number: put new sounds at the end of the list.
+
+sound KICK  BD.wav
+sound SNARE Snare.wav
+sound CLHAT CH.wav
+sound OPHAT OH.wav
+sound CYMBL Cymbal.wav
+
+pad KICK  KICK  note=36
+pad SNARE SNARE note=38
+pad CLHAT CLHAT note=42 group=1
+pad OPHAT OPHAT note=46 group=1
+pad CRASH CYMBL note=49 poly=2
+pad RIDE  CYMBL note=51 tune=-3 poly=2

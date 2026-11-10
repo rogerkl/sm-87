@@ -1,9 +1,9 @@
-# SM-87: an MMT-8 style sequencer and an S700/X7000 style sampler for the M-VAVE FM-1 (fm1-base's tools/build.py)
+# SM-87: an MMT-8 style sequencer, an S700/X7000 style sampler and an HR-16 style drum machine for the M-VAVE FM-1 (fm1-base's tools/build.py)
 name = "SM87"
 id_prefix = "FM-1_87"          # package identity: dev FM-1_8700, releases FM-1_87XXYYZZ
 usb_manufacturer = "SM-87"
 usb_product = "SM-87 FM-1"
-o2 = ["s700/*.c", "mmt8/*.c"]  # the sampler, the sample memory and the sequencer, at -O2
+o2 = ["s700/*.c", "mmt8/*.c", "hr16/*.c"]   # the sampler, its memory, the sequencer, the drums: -O2
 words = "words.tsv"
 ble = false                    # no radio: the RAM goes to sequences and samples
 emu = ["midi", "port", "data"] # the browser emulator (--web): Web MIDI with SysEx both ways, a port for other pages

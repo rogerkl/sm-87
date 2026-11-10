@@ -1,6 +1,7 @@
 // SM-87 in the browser emulator (fm1-base tools/build.py ../app --web), under node with fm1-base's harness: the
 // worklet and app.wasm as a browser runs them. As Axs7 talks to an X7000 through the emulator's MIDI part:
-// ROVS, a whole dump (32,752 words, 66,632 bytes, one frame), RSPRM, RSD back word for word, then the slot played.
+// ROVS, a whole dump (32,752 words, 66,632 bytes, one frame), RSPRM, RSD back word for word, then the slot played;
+// an MMT-8 memory dump in and back; a drum pattern recorded from MIDI and played out.
 //   node test/emu_test.mjs [app/build/emu]
 import { startEmu, check, done } from "../fm1-base/tests/emu_harness.mjs";
 
@@ -137,4 +138,19 @@ if (mback.length) {
   for (let i = 0; i < mdump.length; i++) if (mback[0][i] !== mdump[i]) bad++;
   check(bad === 0, `the same dump, byte for byte (${bad} differ)`);
 }
+
+// the HR-16: its page (ARP), REC armed, PLAY: a kick from MIDI channel 10 goes into the pattern as it loops, and
+// plays out (on 10) the second time round (a new pattern's 8 beats at 120 BPM: 4 s)
+tap(8);
+tap(11);
+emu.send({ type: "buttons", mask: 1 << 10 });
+emu.run(30);
+midi([0x99, 36, 100]);
+emu.send({ type: "buttons", mask: 0 });
+emu.run(3900);
+check(!out().some((m) => m[0] === 0x99), "the first time round: the kick not played again");
+emu.run(400);
+const kicks = out().filter((m) => m[0] === 0x99 && m[1] === 36 && m[2] === 100);
+check(kicks.length === 1, `the second time round: the kick out on channel 10 (${kicks.length})`);
+tap(10);
 done();

@@ -1,0 +1,197 @@
+# The HR-16 (hr16/), with the kit test/run.sh makes (test/make_test_kit.py: KICK SNARE CLHAT OPHAT CRASH RIDE): its
+# pads on MIDI channel 10 (the hats cut each other); a pattern recorded on its page as it loops (the hits quantized
+# to 1/16) and played back; LENGTH, COPY, ERASE, a pad's sound and MIDI; the drums beside the MMT-8's part (muted
+# with SEL + the ninth white key) and with a song's step; all of it kept across a power cycle. 120 BPM: 500 ms a
+# beat, 5.2 ms a clock.
+wait 600
+expect kit 4
+expect padsnd1 0
+expect padsnd6 3
+expect padtune6 -3
+expect padnote3 42
+expect drch 10
+# MIDI in on channel 10: the pads on those notes; the sampler (channel 1) not
+peakreset
+midi 99 24 64
+wait 50
+expect drvoices 1
+expect voices 0
+expect peak_db_min -40
+wait 300
+# the open hat, then the closed: the open one cut
+midi 99 2E 64
+midi 99 2A 64
+wait 30
+expect drvoices 1
+wait 200
+# the drum page (ARP); a white key plays its pad
+tap ARP
+wait 30
+expect page 9
+tapkey w1
+expect drvoices 1
+wait 300
+shot drums.png
+# recording: REC arms, PLAY plays the drums alone; kick, snare, kick, snare near the beats
+tap REC
+wait 30
+expect drrec 1
+press PLAY
+wait 30
+expect aux 1
+expect drrecording 1
+midi 99 24 64
+wait 468
+midi 99 26 64
+wait 498
+midi 99 24 64
+wait 498
+midi 99 26 64
+release PLAY
+wait 100
+expect drhits 4
+expect drbeats 8
+shot drums_rec.png
+# the second time round (the 8 beats of a new pattern: 4 s from the start) they play, out on channel 10
+wait 2300
+out
+wait 300
+expect_out USB 99 24 64
+tap PLAY
+wait 30
+expect aux 0
+tap REC
+wait 30
+expect drrec 0
+# quantize (K2) and swing (K3)
+turn K2 -1
+wait 30
+expect drquant 2
+turn K3 4 20
+wait 30
+expect drswing 54
+turn K2 1
+turn K3 -4 20
+wait 30
+# LENGTH: 4 beats (the hits all in them)
+turn ALGO 1
+wait 30
+expect drfn 1
+turn K1 -4 20
+tap REC
+wait 30
+expect drbeats 4
+expect drhits 4
+# COPY to pattern 01: a copy
+turn ALGO 2
+wait 30
+expect drfn 3
+turn K1 1
+tap REC
+wait 30
+expect drhits1 4
+# ERASE: the whole pattern until a pad's key chooses the snare; its hits out
+turn ALGO -1
+wait 30
+expect drfn 2
+expect drpad 17
+tapkey w1
+expect drpad 2
+tap REC
+wait 30
+expect drhits 2
+# PAD SOUND: the kick 5 up, its level 80
+turn ALGO 2
+wait 30
+expect drfn 4
+tapkey w0
+turn K2 5 20
+turn K3 -5 20
+wait 30
+expect padtune1 5
+expect padlevel1 80
+wait 1300
+shot drums_sound.png
+# PAD MIDI: the drums' channel
+turn ALGO 1
+wait 30
+expect drfn 5
+shot drums_midi.png
+turn K4 1
+wait 30
+expect drch 11
+turn K4 -1
+wait 30
+expect drch 10
+tap ARP
+wait 30
+expect drfn 0
+# with the MMT-8's part (PLAY on its page): its K4 the drums' pattern, played beside the part (an empty one here)
+tap SEQ
+wait 30
+expect page 8
+turn K4 1
+wait 30
+expect drpat 1
+out
+tap PLAY
+wait 200
+expect seq 2
+expect drplaying 1
+expect_out USB 99 24 64
+# SEL + the ninth white key: the drums muted, then on again
+press SEL
+tapkey w8
+wait 30
+shot drums_seqmute.png
+release SEL
+wait 30
+expect drmute 1
+expect drplaying -1
+press SEL
+tapkey w8
+release SEL
+wait 30
+expect drmute 0
+tap PLAY
+wait 30
+expect seq 0
+# a song: part 00 of 2 beats (LENGTH), a step of it with drum pattern 01 (K4); it plays from the step's start
+turn ALGO 1
+wait 30
+turn K1 2 20
+tap REC
+wait 30
+expect beats 2
+tap SEQ
+wait 30
+tap SEQ
+wait 30
+expect songmode 1
+turn K3 1
+wait 30
+expect steps 1
+expect stepdr1 -1
+turn K4 2 20
+wait 30
+expect stepdr1 1
+wait 1300
+shot drums_song.png
+out
+tap PLAY
+wait 100
+expect drplaying 1
+expect_out USB 99 24 64
+wait 1100
+expect seq 0
+# kept: the patterns, the song step's drums, the pads
+tap SAVE
+wait 300
+reboot
+wait 600
+expect drhits0 2
+expect drhits1 4
+expect stepdr1 1
+expect padtune1 5
+expect padlevel1 80
+expect drch 10

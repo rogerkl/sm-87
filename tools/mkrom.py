@@ -16,13 +16,15 @@ FILE is
   - an S700/X7000 QuickDisk image (.qd, as a Gotek or HxC uses them): the sample and all its parameters and programs
     (documentation/akai-s700-x7000/05-quickdisk.md).
 
-Up to 16 samples, of up to 32,752 words each, packed two words to three bytes: --max-kb (default 440) of the
-firmware's 581 KB slot (the firmware itself takes about 110 KB).
+Up to 16 samples, of up to 32,752 words each, packed two words to three bytes, in --max-kb (KiB) of the firmware's
+581,564-byte slot: by default what the firmware itself (about 150 KiB) and the drum kit built in (app/rom/hr_kit.h,
+tools/mkkit.py) leave.
 """
 import argparse
 import gzip
 import json
 import math
+import re
 import struct
 import sys
 import zlib
@@ -32,6 +34,9 @@ import numpy as np
 
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "app" / "rom" / "rom_samples.h"
+KIT = ROOT / "app" / "rom" / "hr_kit.h"
+APP_SLOT = 0x8DFBC                # fm1-base tools/fm1pkg_make.py
+FIRMWARE = 150 * 1024             # the firmware without samples or kit, with room to grow
 MAXWORDS = 32752
 NPARAM = 155
 # the SPRM values (app/s700/s7.h)
@@ -270,11 +275,20 @@ def c_name(s):
     return "".join(ch if 32 <= ord(ch) < 127 and ch not in '"\\' else "?" for ch in s)[:24]
 
 
+def kit_bytes():
+    """the drum kit's sounds built in (tools/mkkit.py), bytes"""
+    if not KIT.exists():
+        return 0
+    return sum(int(n) for n in re.findall(r"HR_KIT_D\d+\[(\d+)\]", KIT.read_text()))
+
+
 def main():
+    room = (APP_SLOT - FIRMWARE - kit_bytes()) // 1024
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("files", nargs="*", help="FILE[@SLOT]: WAV or .qd")
     ap.add_argument("-o", "--out", type=Path, default=OUT)
-    ap.add_argument("--max-kb", type=int, default=440)
+    ap.add_argument("--max-kb", type=int, default=room,
+                    help=f"room for the samples (now {room}: the slot less the firmware and the drum kit)")
     ap.add_argument("--none", action="store_true", help="remove the generated file: a build without samples")
     a = ap.parse_args()
     if a.none:
@@ -303,7 +317,8 @@ def main():
     items.sort()
     total = sum(len(pack(w)) for _, _, w, _, _ in items)
     if total > a.max_kb * 1024:
-        raise SystemExit(f"{total // 1024} KB of samples: more than --max-kb {a.max_kb}")
+        raise SystemExit(f"{total // 1024} KB of samples: more than --max-kb {a.max_kb}"
+                         + (f" (the drum kit takes {kit_bytes() // 1024} KB)" if kit_bytes() else ""))
     blob = b"".join(bytes([s]) + bytes(p) + pack(w) for s, _, w, p, _ in items)
     rom_id = zlib.crc32(blob) or 1
     lines = ["/* Samples built into the firmware: made by tools/mkrom.py, do not edit. From:"]

@@ -117,12 +117,15 @@ enum { ENV_OFF, ENV_ATTACK, ENV_HOLD, ENV_RELEASE };
 
 typedef struct {
     uint8_t stage, key, slot, mode, vel, lfo_full, released;
+    uint8_t drum;                 /* the drum machine's: no filter, no bend nor vibrato, panned (s7_drum_start) */
+    const s7_slot_t *src;         /* the sound: a slot, or one of the drum kit's */
     const uint8_t *data;
     uint32_t len, loop_start, loop_end, period;   /* period: the loop's in positions (0: none) */
     uint32_t pos, frac;           /* the position, 32.32: whole words and the fraction */
     uint32_t step_i, step_f;      /* the step now, with bend and vibrato */
     float base_step;              /* the step at no bend nor vibrato */
     float level, env, rel;
+    float gl, gr;                 /* a drum voice's gains, left and right */
     const float (*fc)[3];         /* the filter's sections, for this note's cutoff */
     float ic1[3], ic2[3];
     float lfo_phase, lfo_inc;     /* in turns */
@@ -134,6 +137,7 @@ typedef struct {
 } voice_t;
 
 static voice_t vc[S7_VOICES];
+static voice_t dv[S7_DRUM_VOICES];   /* the drum machine's */
 static uint32_t prog_now, note_count, bend_range = 2u, wheel, press;
 static float bend_ratio = 1.0f;
 
@@ -173,14 +177,12 @@ static inline float read_at(const voice_t *x, int32_t i)
     return j < 0 ? 0.0f : (float)s7_w12(x->data, (uint32_t)j);
 }
 
-static void voice_start(voice_t *x, uint32_t slot, uint32_t key, uint32_t vel)
+/* a voice at the sample's START, with its points and scan mode (once: a loop played through to END, as a drum
+ * trigger) */
+static void voice_points(voice_t *x, const s7_slot_t *s, uint32_t slot, int once)
 {
-    const s7_slot_t *s = &s7_slot[slot];
     const uint8_t *p = s->p;
     uint32_t end = s7_word(p, S7_P_SEND), start = s7_word(p, S7_P_SSTRT), ls = s7_word(p, S7_P_SLOOP), le, mode;
-    uint32_t tr = p[S7_P_TRANSP(prog_now)];
-    int32_t semis, f;
-    float rate;
     if (end > s->words)
         end = s->words;
     if (start + 1u > end)
@@ -189,7 +191,7 @@ static void voice_start(voice_t *x, uint32_t slot, uint32_t key, uint32_t vel)
     if (ls > le)
         ls = le;
     mode = p[S7_P_RPMODE];
-    if (mode != S7_LOOP && mode != S7_ALT && mode != S7_DRUM)
+    if ((mode != S7_LOOP && mode != S7_ALT && mode != S7_DRUM) || (once && mode != S7_DRUM))
         mode = S7_ONESHOT;
     if ((mode == S7_LOOP || mode == S7_ALT) && le < ls + 2u)
         mode = S7_ONESHOT;        /* a loop needs two words to go back and forth between */
@@ -202,9 +204,25 @@ static void voice_start(voice_t *x, uint32_t slot, uint32_t key, uint32_t vel)
     x->pos = start;
     x->frac = 0;
     x->slot = (uint8_t)slot;
+    x->src = s;
+    x->released = 0;
+    x->age = 0;
+    x->ctl = 0;
+    x->win_i = -0x7FFFFFFF;
+    x->started = ++note_count;
+}
+
+static void voice_start(voice_t *x, uint32_t slot, uint32_t key, uint32_t vel)
+{
+    const s7_slot_t *s = &s7_slot[slot];
+    const uint8_t *p = s->p;
+    uint32_t tr = p[S7_P_TRANSP(prog_now)];
+    int32_t semis, f;
+    float rate;
+    voice_points(x, s, slot, 0);
+    x->drum = 0;
     x->key = (uint8_t)key;
     x->vel = (uint8_t)vel;
-    x->released = 0;
     /* pitch: the key from the root (or the root's own pitch), the program's transpose, the fine tune */
     semis = (tr & 0x80u) ? 0 : (int32_t)key - (int32_t)p[S7_P_RECNP];
     semis += (int32_t)(tr & 0x7Fu) - ((tr & 0x40u) ? 128 : 0);
@@ -222,12 +240,8 @@ static void voice_start(voice_t *x, uint32_t slot, uint32_t key, uint32_t vel)
     x->lfo_inc = p[S7_P_LFSP] ? (1.65f + 0.0634f * (float)p[S7_P_LFSP]) * (float)CONTROL_PERIOD / fs_now : 0.0f;
     x->lfo_full = (uint8_t)(8u * p[S7_P_LFDP] / 101u > 7u ? 7u : 8u * p[S7_P_LFDP] / 101u);
     x->lfo_delay = ctl_lfo_step / (100u - (p[S7_P_LFDL] > 99u ? 99u : p[S7_P_LFDL]));
-    x->age = 0;
-    x->ctl = 0;
     x->env = 0.0f;
     x->stage = ENV_ATTACK;
-    x->win_i = -0x7FFFFFFF;
-    x->started = ++note_count;
 }
 
 /* semitones either way for a number of vibrato steps: ±(2.7 + 6.4 n) cents */
@@ -238,7 +252,7 @@ static inline float vib_depth(uint32_t steps)
 
 static void voice_control(voice_t *x)
 {
-    const s7_slot_t *s = &s7_slot[x->slot];
+    const s7_slot_t *s = x->src;
     uint32_t lfo = x->lfo_delay ? x->age / x->lfo_delay : 7u, prs;
     float depth, st;
     uint32_t si;
@@ -269,7 +283,7 @@ static void voice_render(voice_t *x, float *out, uint32_t n)
         int32_t i = (int32_t)x->pos;
         if (x->ctl == 0) {
             voice_control(x);
-            x->ctl = CONTROL_PERIOD;
+            x->ctl = x->drum ? 0xFFFFFFFFu : CONTROL_PERIOD;   /* (a drum's pitch never moves) */
         }
         x->ctl--;
         x->age++;
@@ -297,8 +311,8 @@ static void voice_render(voice_t *x, float *out, uint32_t n)
         c2 = x->win[0] - 2.5f * x->win[1] + 2.0f * x->win[2] - 0.5f * x->win[3];
         c3 = 0.5f * (x->win[3] - x->win[0]) + 1.5f * (x->win[1] - x->win[2]);
         y = ((c3 * t + c2) * t + c1) * t + x->win[1];
-        /* the 6-pole lowpass: three state variable sections (trapezoidal, Axs7 filter.rs) */
-        {
+        /* the 6-pole lowpass: three state variable sections (trapezoidal, Axs7 filter.rs); a drum's goes without */
+        if (!x->drum) {
             uint32_t s;
             for (s = 0; s < 3u; s++) {
                 float v3 = y - x->ic2[s];
@@ -387,7 +401,7 @@ void s7_note_off(uint32_t key, uint32_t off_vel)
         x->released = 1;
         /* VEL>RELEASE follows the note off's velocity: from 64, longer below, shorter above */
         {
-            const uint8_t *p = s7_slot[x->slot].p;
+            const uint8_t *p = x->src->p;
             int32_t d = (int32_t)p[S7_P_VELRLS] * (64 - (int32_t)off_vel);
             r = (int32_t)p[S7_P_RLEASE] + (d + (d >= 0 ? 32 : -32)) / 64;
         }
@@ -417,6 +431,9 @@ void s7_kill_slot(uint32_t slot)
     for (i = 0; i < S7_VOICES; i++)
         if (vc[i].slot == slot)
             vc[i].stage = ENV_OFF;
+    for (i = 0; i < S7_DRUM_VOICES; i++)   /* (a pad may play a slot) */
+        if (dv[i].slot == slot)
+            dv[i].stage = ENV_OFF;
 }
 
 uint32_t s7_voices_active(void)
@@ -433,4 +450,70 @@ void s7_render(float *out, uint32_t n)
     for (i = 0; i < S7_VOICES; i++)
         if (vc[i].stage != ENV_OFF)
             voice_render(&vc[i], out, n);
+}
+
+/* ------------------------------------------------------------------------------------- the drum machine --- */
+/* The HR-16's voices (hr16/): the sampler's, reading a sound in the same format, played once from START to END at
+ * its own pitch moved by semis, without the filter, the bend or vibrato, and panned. Level and pan: the caller's */
+void s7_drum_start(uint32_t v, const s7_slot_t *s, uint32_t slot, float semis, float gl, float gr)
+{
+    voice_t *x;
+    if (v >= S7_DRUM_VOICES || !s || !s->data || !s->words)
+        return;
+    x = &dv[v];
+    voice_points(x, s, slot, 1);
+    x->drum = 1;
+    x->key = 0;
+    x->vel = 0;
+    x->base_step = s7_rate(s->p[S7_P_RECBW]) / fs_now *
+                   fm_exp2f((semis + (float)(int8_t)s->p[S7_P_SFNTUN] / 16.0f) / 12.0f);
+    if (x->base_step > 60000.0f)
+        x->base_step = 60000.0f;
+    x->level = 1.0f;
+    x->gl = gl;
+    x->gr = gr;
+    x->lfo_inc = 0.0f;
+    x->lfo_full = 0;
+    x->lfo_delay = 0;
+    x->env = 1.0f;                /* (a drum hits at once: no ramp) */
+    x->stage = ENV_HOLD;
+}
+
+void s7_drum_choke(uint32_t v)
+{
+    if (v < S7_DRUM_VOICES && dv[v].stage != ENV_OFF && !dv[v].released) {
+        dv[v].released = 1;
+        dv[v].rel = rel_g[0];     /* RELEASE 0: gone in about 20 ms */
+        dv[v].stage = ENV_RELEASE;
+    }
+}
+
+int s7_drum_active(uint32_t v) { return v < S7_DRUM_VOICES && dv[v].stage != ENV_OFF; }
+int s7_drum_released(uint32_t v) { return v < S7_DRUM_VOICES && dv[v].released; }
+uint32_t s7_drum_age(uint32_t v) { return v < S7_DRUM_VOICES ? note_count - dv[v].started : 0u; }
+
+void s7_drum_kill(void)
+{
+    uint32_t i;
+    for (i = 0; i < S7_DRUM_VOICES; i++)
+        dv[i].stage = ENV_OFF;
+}
+
+void s7_drum_render(float *l, float *r, uint32_t n)
+{
+    float tmp[64];
+    uint32_t i, k, at, m;
+    for (i = 0; i < S7_DRUM_VOICES; i++) {
+        voice_t *x = &dv[i];
+        for (at = 0; at < n && x->stage != ENV_OFF; at += m) {
+            m = n - at < 64u ? n - at : 64u;
+            for (k = 0; k < m; k++)
+                tmp[k] = 0.0f;
+            voice_render(x, tmp, m);
+            for (k = 0; k < m; k++) {
+                l[at + k] += tmp[k] * x->gl;
+                r[at + k] += tmp[k] * x->gr;
+            }
+        }
+    }
 }

@@ -30,6 +30,8 @@ typedef struct {
     uint32_t take_n, take_beats;  /* the take's events; the length a first take sets */
     uint8_t take_part, take_track, take_full;
     uint8_t take_nothing;         /* a take ended with nothing to keep (the app says so, and clears it) */
+    uint8_t aux;                  /* the clock runs for the drums alone (the sequencer stopped: sqp_aux_play) */
+    uint8_t started;              /* 1 from the top, 2 continued: for the drums' first tick to see (they clear it) */
 } sqp_t;
 
 extern volatile sqp_t sqp;
@@ -39,6 +41,9 @@ extern sq_raw_t sqp_take[SQP_TAKE_MAX];
 void sqp_emit(uint32_t st, uint32_t d1, uint32_t d2);
 void sqp_click(int accent);
 void sqp_midi_rt(uint32_t b);     /* a realtime byte out (MIDI clock) */
+/* the app's: every tick of the clock while the sequencer plays (after its tracks', before the tick moves on: sqp.tick
+ * is the one playing) or the drums run alone (sqp.aux): the drum machine's (hr16/) */
+void sqp_on_tick(void);
 
 void sqp_init(float fs);
 void sqp_set_tempo(uint32_t bpm);
@@ -46,6 +51,8 @@ void sqp_set_tempo(uint32_t bpm);
 void sqp_play(void);              /* from the top: the part, or the song's first step; with a count-in when armed */
 void sqp_stop(void);              /* a take running ends here (a first take sets its part's length) */
 void sqp_continue(void);
+void sqp_aux_play(int cont);      /* the clock for the drums alone, the sequencer stopped (MIDI start or continue out);
+                                   * sqp_stop stops it */
 void sqp_punch(void);             /* REC while a take runs: it ends (a first take: with the transport, as stop) */
 void sqp_select_part(uint32_t p); /* at once when stopped, at the part's end while playing */
 void sqp_select_song(uint32_t s);
@@ -56,6 +63,8 @@ uint32_t sqp_frames_to_tick(void);   /* frames until the next tick (the render's
 void sqp_advance(uint32_t frames);   /* the stretch rendered: a tick due is played */
 void sqp_input(uint32_t st, uint32_t d1, uint32_t d2);   /* MIDI in and the keys: into a take that runs */
 uint32_t sqp_beat(void);          /* the beat now, from 1 (count-in: 0) */
+int sqp_nearer_last(void);        /* between two ticks: nearer the one just played than the next (a hit played now) */
+void sqp_off_after(uint32_t ticks, uint32_t st, uint32_t key);   /* a note's off (st: 8n), so many ticks on */
 /* MIDI clock in (sqp.clock_in): a realtime message or the song position (F2: d its 16ths) from MIDI in, frame the
  * render's frame count when it came. The audio interrupt (the render, before the block) */
 void sqp_rt_in(uint32_t st, uint32_t d, uint32_t frame);

@@ -428,8 +428,12 @@ static void ed_rec_step(int sel)
         r = sq_song_delete(sqp.song, seq_song_step, sq_scratch);
         ed_say(r, "STEP ERASED");
     } else {
+        uint32_t n = sq_song_steps(sqp.song), dr;
         (void)ed_step(&part, &mask);
-        r = sq_song_insert(sqp.song, seq_song_step, part, mask, sq_scratch);
+        /* (its drums: the step shown's, at the end the last step's) */
+        dr = seq_song_step < n ? sq_song_drums(sqp.song, seq_song_step)
+             : seq_song_step ? sq_song_drums(sqp.song, seq_song_step - 1u) : SQ_NO_DRUMS;
+        r = sq_song_insert(sqp.song, seq_song_step, part, mask, (uint8_t)dr, sq_scratch);
         ed_say(r, "STEP ADDED");
     }
     ed_song_reload();

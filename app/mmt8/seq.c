@@ -1,4 +1,5 @@
 /* SM-87: the MMT-8's memory, see seq.h */
+#include <stddef.h>
 #include "seq.h"
 
 sq_mem_t sq __attribute__((section(".pool")));
@@ -22,13 +23,29 @@ void sq_part_name_default(uint32_t p)
         sq.part[p].name[i] = E[i];
 }
 
+static void clear_parts_songs(void);
+
 void sq_clear(void)
 {
-    static const char N[SQ_NAME] = "NO SONG NAME  ";
-    uint32_t i, k;
+    uint32_t i;
     sq.magic = SQ_MAGIC;
     sq.version = SQ_VERSION;
     sq.used = 0;
+    clear_parts_songs();
+    for (i = 0; i < SQ_BLOBS; i++)
+        sq.blob[i].off = sq.blob[i].len = 0;
+    for (i = 0; i < SQ_TRACKS; i++)
+        sq.offset[i] = 0;
+    for (i = 0; i < SQ_MMT8_HDR; i++)
+        sq.mmt8[i] = 0;
+    for (i = 0; i < SQ_PATTERNS; i++)
+        sq.pattern[i].beats = 0;
+}
+
+static void clear_parts_songs(void)
+{
+    static const char N[SQ_NAME] = "NO SONG NAME  ";
+    uint32_t i, k;
     for (i = 0; i < SQ_PARTS; i++) {
         sq.part[i].beats = 0;
         for (k = 0; k < SQ_TRACKS; k++)
@@ -40,32 +57,89 @@ void sq_clear(void)
         for (k = 0; k < SQ_NAME; k++)
             sq.song[i].name[k] = N[k];
     }
-    for (i = 0; i < SQ_BLOBS; i++)
+}
+
+void sq_clear_mmt8(void)
+{
+    uint32_t at = 0, last = 0, i, k;
+    sq_lock();
+    /* the drum patterns to the arena's start, in the order they are in (each moves down: copied forward) */
+    for (;;) {
+        sq_blob_t *b = 0;
+        for (i = SQ_PAT(0); i < SQ_PAT(SQ_PATTERNS); i++)
+            if (sq.blob[i].len && sq.blob[i].off >= last && (!b || sq.blob[i].off < b->off))
+                b = &sq.blob[i];
+        if (!b)
+            break;
+        last = (uint32_t)b->off + 1u;
+        for (k = 0; k < b->len; k++)
+            sq.arena[at + k] = sq.arena[b->off + k];
+        b->off = (uint16_t)at;
+        at += b->len;
+    }
+    for (i = 0; i < SQ_PAT(0); i++)
         sq.blob[i].off = sq.blob[i].len = 0;
-    for (i = 0; i < SQ_TRACKS; i++)
-        sq.offset[i] = 0;
+    sq.used = (uint16_t)at;
+    clear_parts_songs();
     for (i = 0; i < SQ_MMT8_HDR; i++)
         sq.mmt8[i] = 0;
+    sq_unlock();
 }
 
-/* the fields each version added, at the tables' end: 2 the offsets, 3 the MMT-8 header */
+/* the tables as each version had them: to the parts' and songs' blobs (1), then the offsets (2), the MMT-8 header
+ * (3); 4 put the drum patterns' blobs after the songs', and their lengths at the end */
+#define SQ_BLOBS_V3 (SQ_PARTS * SQ_TRACKS + SQ_SONGS)
+#define SQ_TABLES_V1 (offsetof(sq_mem_t, blob) + SQ_BLOBS_V3 * sizeof(sq_blob_t))
 uint32_t sq_image_tables(uint32_t version)
 {
-    uint32_t t = (uint32_t)(sq.arena - (uint8_t *)&sq);
-    return version == SQ_VERSION ? t : version == 2u ? t - SQ_MMT8_HDR : version == 1u ? t - SQ_MMT8_HDR - SQ_TRACKS : 0u;
+    switch (version) {
+    case SQ_VERSION:
+        return (uint32_t)offsetof(sq_mem_t, arena);
+    case 3u:
+        return (uint32_t)(SQ_TABLES_V1 + SQ_TRACKS + SQ_MMT8_HDR);
+    case 2u:
+        return (uint32_t)(SQ_TABLES_V1 + SQ_TRACKS);
+    case 1u:
+        return (uint32_t)SQ_TABLES_V1;
+    default:
+        return 0;
+    }
 }
 
-void sq_image_upgrade(void)
+int sq_image_upgrade(uint8_t *scratch)
 {
-    uint32_t i;
-    if (sq.version == 1u)
+    uint32_t v = sq.version, i, s;
+    uint8_t *b = (uint8_t *)&sq;
+    if (v >= SQ_VERSION || v == 0u)
+        return 0;
+    /* the offsets and the header (as far as it had them) after the drum patterns' blobs, which start empty */
+    copy(b + offsetof(sq_mem_t, offset), b + SQ_TABLES_V1, sq_image_tables(v) - (uint32_t)SQ_TABLES_V1);
+    for (i = SQ_BLOBS_V3; i < SQ_BLOBS; i++)
+        sq.blob[i].off = sq.blob[i].len = 0;
+    if (v < 2u)
         for (i = 0; i < SQ_TRACKS; i++)
             sq.offset[i] = 0;
-    if (sq.version == 1u || sq.version == 2u) {
+    if (v < 3u)
         for (i = 0; i < SQ_MMT8_HDR; i++)
             sq.mmt8[i] = 0;
-        sq.version = SQ_VERSION;
+    for (i = 0; i < SQ_PATTERNS; i++)
+        sq.pattern[i].beats = 0;
+    sq.version = SQ_VERSION;
+    /* the songs' steps: part and tracks, now with no drum pattern */
+    for (s = 0; s < SQ_SONGS; s++) {
+        uint32_t n = sq_len(SQ_SONG(s)) / 2u;
+        const uint8_t *d = sq_data(SQ_SONG(s));
+        if (!n)
+            continue;
+        for (i = 0; i < n; i++) {
+            scratch[SQ_STEP * i] = d[2u * i];
+            scratch[SQ_STEP * i + 1u] = d[2u * i + 1u];
+            scratch[SQ_STEP * i + 2u] = SQ_NO_DRUMS;
+        }
+        if (sq_replace(SQ_SONG(s), scratch, SQ_STEP * n) != 0)
+            return -1;
     }
+    return 0;
 }
 
 int sq_valid(void)
@@ -83,6 +157,12 @@ int sq_valid(void)
             return 0;
     for (i = 0; i < SQ_TRACKS; i++)
         if (sq.offset[i] > SQ_OFFSET_MAX || sq.offset[i] < -SQ_OFFSET_MAX)
+            return 0;
+    for (i = 0; i < SQ_SONGS; i++)
+        if (sq_len(SQ_SONG(i)) % SQ_STEP)
+            return 0;
+    for (i = 0; i < SQ_PATTERNS; i++)
+        if (sq_len(SQ_PAT(i)) % SQ_HIT_LEN || sq.pattern[i].beats > SQ_MAX_BEATS)
             return 0;
     return sum == sq.used;        /* every byte someone's, none twice */
 }
@@ -227,13 +307,24 @@ int sq_commit(uint32_t p, uint32_t t, const sq_raw_t *take, uint32_t n, uint32_t
 }
 
 /* ------------------------------------------------------------------------------------------- songs --- */
-uint32_t sq_song_steps(uint32_t s) { return sq_len(SQ_SONG(s)) / 2u; }
+uint32_t sq_song_steps(uint32_t s) { return sq_len(SQ_SONG(s)) / SQ_STEP; }
 
 void sq_song_step(uint32_t s, uint32_t i, uint8_t *part, uint8_t *mask)
 {
-    const uint8_t *d = sq_data(SQ_SONG(s)) + 2u * i;
+    const uint8_t *d = sq_data(SQ_SONG(s)) + SQ_STEP * i;
     *part = d[0];
     *mask = d[1];
+}
+
+uint32_t sq_song_drums(uint32_t s, uint32_t i)
+{
+    return i < sq_song_steps(s) ? sq_data(SQ_SONG(s))[SQ_STEP * i + 2u] : SQ_NO_DRUMS;
+}
+
+void sq_song_set_drums(uint32_t s, uint32_t i, uint32_t pattern)
+{
+    if (i < sq_song_steps(s))
+        sq.arena[sq.blob[SQ_SONG(s)].off + SQ_STEP * i + 2u] = (uint8_t)(pattern < SQ_PATTERNS ? pattern : SQ_NO_DRUMS);
 }
 
 int sq_song_set(uint32_t s, uint32_t i, uint8_t part, uint8_t mask, uint8_t *scratch)
@@ -242,17 +333,19 @@ int sq_song_set(uint32_t s, uint32_t i, uint8_t part, uint8_t mask, uint8_t *scr
     const uint8_t *d = sq_data(SQ_SONG(s));
     if (i > n || i >= SQ_STEPS)
         return -1;
-    for (k = 0; k < 2u * n; k++)
+    for (k = 0; k < SQ_STEP * n; k++)
         scratch[k] = d[k];
     if (part == 0xFFu)
         n = i;                    /* the song ends here */
     else {
-        scratch[2u * i] = part;
-        scratch[2u * i + 1u] = mask;
-        if (i == n)
+        scratch[SQ_STEP * i] = part;
+        scratch[SQ_STEP * i + 1u] = mask;
+        if (i == n) {             /* a new step: the drums of the one before it */
+            scratch[SQ_STEP * i + 2u] = i ? scratch[SQ_STEP * i - 1u] : SQ_NO_DRUMS;
             n++;
+        }
     }
-    return sq_replace(SQ_SONG(s), scratch, 2u * n);
+    return sq_replace(SQ_SONG(s), scratch, SQ_STEP * n);
 }
 
 /* ------------------------------------------------------------------------------------------- edits --- */
@@ -586,9 +679,9 @@ int sq_song_append(uint32_t a, uint32_t b, uint8_t *scratch)
         return SQ_E_NONE;
     if (na + nb > SQ_STEPS)
         return SQ_E_LONG;
-    copy(scratch, sq_data(SQ_SONG(b)), 2u * nb);
-    copy(scratch + 2u * nb, sq_data(SQ_SONG(a)), 2u * na);
-    return sq_replace(SQ_SONG(b), scratch, 2u * (na + nb)) != 0 ? SQ_E_ROOM : 0;
+    copy(scratch, sq_data(SQ_SONG(b)), SQ_STEP * nb);
+    copy(scratch + SQ_STEP * nb, sq_data(SQ_SONG(a)), SQ_STEP * na);
+    return sq_replace(SQ_SONG(b), scratch, SQ_STEP * (na + nb)) != 0 ? SQ_E_ROOM : 0;
 }
 
 void sq_song_erase(uint32_t s)
@@ -600,7 +693,7 @@ void sq_song_erase(uint32_t s)
         sq.song[s].name[k] = N[k];
 }
 
-int sq_song_insert(uint32_t s, uint32_t i, uint8_t part, uint8_t mask, uint8_t *scratch)
+int sq_song_insert(uint32_t s, uint32_t i, uint8_t part, uint8_t mask, uint8_t drums, uint8_t *scratch)
 {
     uint32_t n = sq_song_steps(s);
     const uint8_t *d = sq_data(SQ_SONG(s));
@@ -608,11 +701,12 @@ int sq_song_insert(uint32_t s, uint32_t i, uint8_t part, uint8_t mask, uint8_t *
         return SQ_E_NONE;
     if (n >= SQ_STEPS)
         return SQ_E_LONG;
-    copy(scratch, d, 2u * i);
-    scratch[2u * i] = part;
-    scratch[2u * i + 1u] = mask;
-    copy(scratch + 2u * i + 2u, d + 2u * i, 2u * (n - i));
-    return sq_replace(SQ_SONG(s), scratch, 2u * (n + 1u)) != 0 ? SQ_E_ROOM : 0;
+    copy(scratch, d, SQ_STEP * i);
+    scratch[SQ_STEP * i] = part;
+    scratch[SQ_STEP * i + 1u] = mask;
+    scratch[SQ_STEP * i + 2u] = drums;
+    copy(scratch + SQ_STEP * (i + 1u), d + SQ_STEP * i, SQ_STEP * (n - i));
+    return sq_replace(SQ_SONG(s), scratch, SQ_STEP * (n + 1u)) != 0 ? SQ_E_ROOM : 0;
 }
 
 int sq_song_delete(uint32_t s, uint32_t i, uint8_t *scratch)
@@ -621,9 +715,9 @@ int sq_song_delete(uint32_t s, uint32_t i, uint8_t *scratch)
     const uint8_t *d = sq_data(SQ_SONG(s));
     if (i >= n)
         return SQ_E_NONE;
-    copy(scratch, d, 2u * i);
-    copy(scratch + 2u * i, d + 2u * i + 2u, 2u * (n - i - 1u));
-    return sq_replace(SQ_SONG(s), scratch, 2u * (n - 1u));
+    copy(scratch, d, SQ_STEP * i);
+    copy(scratch + SQ_STEP * i, d + SQ_STEP * (i + 1u), SQ_STEP * (n - i - 1u));
+    return sq_replace(SQ_SONG(s), scratch, SQ_STEP * (n - 1u));
 }
 
 /* ------------------------------------------------------------------------------------------- EDIT --- */

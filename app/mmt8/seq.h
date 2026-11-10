@@ -1,12 +1,14 @@
 /* SM-87: the MMT-8's memory. 100 parts of 8 tracks and 100 songs, as documentation/MMT-8_Manual.pdf describes them:
  * a part is up to 682 beats at 96 clocks a beat, its 8 tracks played together, each with a MIDI channel (or
- * UNCHANGED: the channels it was recorded on); a song is a list of up to 255 steps, each a part and which of its
- * tracks play.
+ * UNCHANGED: the channels it was recorded on); a song is a list of up to 255 steps, each a part, which of its
+ * tracks play, and the drum pattern that plays with it (or none). The HR-16's 100 drum patterns (hr16/) live here too.
  *
- * Every track and every song's steps is a blob in one arena of 64 KB, as the MMT-8 kept its memory in one: about
- * 9,000 notes. A track's events are in time order:
+ * Every track, every song's steps and every drum pattern is a blob in one arena of 64 KB, as the MMT-8 kept its
+ * memory in one: about 9,000 notes. A track's events are in time order:
  *   a note:       tick (2 bytes, little-endian, from the part's start), 9n, key, velocity, duration (2 bytes)   7 bytes
  *   anything else: tick (2), status, data 1, data 2                                                        5 bytes
+ * a song's steps: part, tracks (a bit each), drum pattern (0xFF none)                                       3 bytes
+ * a drum pattern's hits, in time order (then by pad): tick (2), pad, velocity                               4 bytes
  *
  * Pure code: the player (player.c) reads it in the audio interrupt; the main loop changes it inside plat_lock. */
 #pragma once
@@ -25,6 +27,10 @@
 #define SQ_NOTE_LEN 7u
 #define SQ_EV_LEN 5u
 #define SQ_MMT8_HDR 0x200u        /* an MMT-8 dump's header (its pointers and settings) */
+#define SQ_PATTERNS 100u          /* the drum machine's (hr16/) */
+#define SQ_STEP 3u                /* a song step's bytes */
+#define SQ_NO_DRUMS 0xFFu         /* a song step without a drum pattern */
+#define SQ_HIT_LEN 4u             /* a drum hit's bytes */
 
 typedef struct {
     uint16_t beats;               /* 0: an empty part (no length yet) */
@@ -42,16 +48,21 @@ typedef struct {
     uint16_t off, len;            /* in the arena */
 } sq_blob_t;
 
-#define SQ_BLOBS (SQ_PARTS * SQ_TRACKS + SQ_SONGS)
+typedef struct {
+    uint16_t beats;               /* 0: none set (it plays as the HR-16's default, 8) */
+} sq_pattern_t;
+
+#define SQ_BLOBS (SQ_PARTS * SQ_TRACKS + SQ_SONGS + SQ_PATTERNS)
 typedef struct {
     uint32_t magic;
     uint16_t version, used;       /* used: the arena's bytes taken (65536 never: one byte kept) */
     sq_part_t part[SQ_PARTS];
     sq_song_t song[SQ_SONGS];
-    sq_blob_t blob[SQ_BLOBS];     /* part p track t: p * 8 + t; song s's steps: 800 + s */
+    sq_blob_t blob[SQ_BLOBS];     /* part p track t: p * 8 + t; song s's steps: 800 + s; drum pattern d: 900 + d */
     int8_t offset[SQ_TRACKS];     /* SONG QUANTIZE: each track's clocks late (+) or early (-) in every song, +-48 */
     uint8_t mmt8[SQ_MMT8_HDR];    /* the header of the last MMT-8 dump taken in (mmtdump.h): the bytes of it we don't
                                    * know, sent back in ours (zeros: none came yet) */
+    sq_pattern_t pattern[SQ_PATTERNS];   /* the drum patterns' lengths */
     uint8_t arena[SQ_ARENA];
 } sq_mem_t;
 
@@ -59,8 +70,10 @@ extern sq_mem_t sq;
 
 #define SQ_TRK(p, t) ((p) * SQ_TRACKS + (t))
 #define SQ_SONG(s) (SQ_PARTS * SQ_TRACKS + (s))
+#define SQ_PAT(d) (SQ_PARTS * SQ_TRACKS + SQ_SONGS + (d))
 #define SQ_MAGIC 0x38544D4Du      /* "MMT8" */
-#define SQ_VERSION 3u             /* 2: the song offsets; 3: an MMT-8 dump's header */
+#define SQ_VERSION 4u             /* 2: the song offsets; 3: an MMT-8 dump's header; 4: the drum patterns, a song
+                                   * step's drum pattern */
 #define SQ_OFFSET_MAX 48          /* a track's song offset, clocks (384ths: half a beat) */
 
 static inline uint32_t sq_ev_len(const uint8_t *e) { return (e[2] & 0xF0u) == 0x90u ? SQ_NOTE_LEN : SQ_EV_LEN; }
@@ -75,13 +88,16 @@ static inline uint32_t sq_part_ticks(uint32_t p) { return sq.part[p].beats * SQ_
 void sq_lock(void);
 void sq_unlock(void);
 
-void sq_clear(void);              /* every part and song empty */
+void sq_clear(void);              /* every part, song and drum pattern empty */
+void sq_clear_mmt8(void);         /* every part and song empty (an MMT-8's dump coming in): the drum patterns and the
+                                   * song offsets kept */
 int sq_valid(void);               /* a memory loaded from the flash holds together */
 /* the saved image (app.c sq_save, sq_load): the tables (sq up to its arena), then the arena's used bytes. Its tables'
  * length for the version an image says (0: not one known); after loading an older one, what it lacked set (before
- * version 2: no song offsets; before 3: no MMT-8 header) and the version now */
+ * version 2: no song offsets; before 3: no MMT-8 header; before 4: no drum patterns, the songs' steps two bytes)
+ * and the version now. -1: the songs' steps don't fit as three bytes (the memory all but full) */
 uint32_t sq_image_tables(uint32_t version);
-void sq_image_upgrade(void);
+int sq_image_upgrade(uint8_t *scratch);
 uint32_t sq_free(void);           /* the arena's free bytes */
 /* a blob's bytes replaced by data (len bytes); -1: no room (nothing changed) */
 int sq_replace(uint32_t blob, const uint8_t *data, uint32_t len);
@@ -103,7 +119,10 @@ int sq_commit(uint32_t p, uint32_t t, const sq_raw_t *take, uint32_t n, uint32_t
 /* ---- songs ---- */
 uint32_t sq_song_steps(uint32_t s);
 void sq_song_step(uint32_t s, uint32_t i, uint8_t *part, uint8_t *mask);
-/* step i set to part and mask (i = the song's length: appended); a part of 0xFF ends the song at i. -1: no room */
+uint32_t sq_song_drums(uint32_t s, uint32_t i);   /* step i's drum pattern, SQ_NO_DRUMS none (or past the end) */
+void sq_song_set_drums(uint32_t s, uint32_t i, uint32_t pattern);   /* (in place) */
+/* step i set to part and mask (i = the song's length: appended, with the drum pattern of the step before); a part of
+ * 0xFF ends the song at i. -1: no room */
 int sq_song_set(uint32_t s, uint32_t i, uint8_t part, uint8_t mask, uint8_t *scratch);
 
 /* ---- edits, the MMT-8's ---- */
@@ -140,7 +159,8 @@ int sq_copy_track(uint32_t a, uint32_t ta, uint32_t b, uint32_t tb, uint32_t fil
 /* ---- songs, the MMT-8's song edits ---- */
 int sq_song_append(uint32_t a, uint32_t b, uint8_t *scratch);   /* COPY: song a's steps after b's */
 void sq_song_erase(uint32_t s);
-int sq_song_insert(uint32_t s, uint32_t i, uint8_t part, uint8_t mask, uint8_t *scratch);  /* the steps from i on move */
+int sq_song_insert(uint32_t s, uint32_t i, uint8_t part, uint8_t mask, uint8_t drums,
+                   uint8_t *scratch);   /* the steps from i on move */
 int sq_song_delete(uint32_t s, uint32_t i, uint8_t *scratch);
 
 /* ---- EDIT: a track's events one at a time ---- */
