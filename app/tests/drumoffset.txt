@@ -1,0 +1,77 @@
+# The HR-16's OFFSET (ALGO on the drum page: a pad's hits, or all, moved by clocks, round at the ends) and FILL
+# (OCT+ held on the drum page: a pad held repeats at the quantize rate, recorded when recording). 120 BPM: 500 ms
+# a beat; a new pattern: 8 beats, 768 clocks.
+wait 600
+tap ARP
+wait 30
+# a pattern from MIDI in: the kick on 1 and 3, the snare on 2
+tap REC
+press PLAY
+wait 30
+midi 99 24 64
+wait 468
+midi 99 26 64
+wait 498
+midi 99 24 64
+release PLAY
+wait 100
+tap PLAY
+wait 30
+tap REC
+wait 30
+expect drhits 3
+expect drhit1 0
+expect drhit2 96
+expect drhit3 192
+# OFFSET: all pads until a pad's key chooses one; the snare 3 clocks later
+turn ALGO 5
+wait 30
+expect drfn 5
+expect drpad 17
+tapkey w1
+expect drpad 2
+turn K1 3 20
+wait 30
+expect droff 3
+shot offset.png
+tap REC
+wait 30
+expect drhit2 99
+# all of them 10 earlier: the kick on 1 round to the end
+turn K2 15 20
+wait 30
+expect drpad 17
+turn K1 -13 20
+wait 30
+expect droff -10
+tap REC
+wait 30
+expect drhit1 89
+expect drhit2 182
+expect drhit3 758
+# FILL: OCT+ held, the hat held a second (8 sixteenths), recording: its repeats go in
+tap ARP
+wait 1300
+expect drfn 0
+tap REC
+wait 30
+press PLAY
+wait 30
+release PLAY
+press OCT+
+wait 30
+expect drfill 1
+expect octave 0
+shot fill.png
+key w2 down
+wait 1000
+key w2 up
+release OCT+
+wait 30
+expect drfill 0
+tap PLAY
+wait 30
+tap REC
+wait 30
+expect drhits >10
+expect drhits <14

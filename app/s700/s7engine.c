@@ -117,6 +117,7 @@ enum { ENV_OFF, ENV_ATTACK, ENV_HOLD, ENV_RELEASE };
 
 typedef struct {
     uint8_t stage, key, slot, mode, vel, lfo_full, released;
+    uint8_t ch;                   /* its channel's controllers (in OMNI ON or OFF: one for all, 0) */
     uint8_t drum;                 /* the drum machine's: no filter, no bend nor vibrato, panned (s7_drum_start) */
     const s7_slot_t *src;         /* the sound: a slot, or one of the drum kit's */
     const uint8_t *data;
@@ -138,20 +139,43 @@ typedef struct {
 
 static voice_t vc[S7_VOICES];
 static voice_t dv[S7_DRUM_VOICES];   /* the drum machine's */
-static uint32_t prog_now, note_count, bend_range = 2u, wheel, press;
-static float bend_ratio = 1.0f;
+static uint32_t prog_now, note_count, bend_range = 2u, midi_mode = S7_OMNI_OFF;
+static uint8_t wheel[S7_CHANNELS], press[S7_CHANNELS];   /* each channel's (MULTI), else [0] */
+static int16_t bend_raw[S7_CHANNELS];
+static float bend_ratio[S7_CHANNELS] = {1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f,
+                                        1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f};
 
 #define CONTROL_PERIOD 16u
 
+/* a MIDI channel's controllers: its own in MULTI; in OMNI ON or OFF one instrument, one set */
+static uint32_t chan_of(uint32_t ch) { return midi_mode == S7_MULTI ? ch % S7_CHANNELS : 0u; }
+
 void s7_program(uint32_t prog) { prog_now = prog % S7_PROGRAMS; }
 uint32_t s7_current_program(void) { return prog_now; }
-void s7_bend_range(uint32_t semis) { bend_range = semis > 12u ? 12u : semis; }
-void s7_bend(int32_t v)
+void s7_midi_mode(uint32_t mode) { midi_mode = mode <= S7_MULTI ? mode : S7_OMNI_OFF; }
+uint32_t s7_program_of(uint32_t ch)
 {
-    bend_ratio = fm_exp2f((float)v / 8192.0f * (float)bend_range / 12.0f);
+    return midi_mode == S7_MULTI ? (prog_now & 16u) + ch % S7_CHANNELS : prog_now;   /* (P1-16, or P17-32) */
 }
-void s7_modwheel(uint32_t v) { wheel = v > 127u ? 127u : v; }
-void s7_pressure(uint32_t v) { press = v > 127u ? 127u : v; }
+static void bend_set(uint32_t c)
+{
+    bend_ratio[c] = fm_exp2f((float)bend_raw[c] / 8192.0f * (float)bend_range / 12.0f);
+}
+void s7_bend_range(uint32_t semis)
+{
+    uint32_t c;
+    bend_range = semis > 12u ? 12u : semis;
+    for (c = 0; c < S7_CHANNELS; c++)
+        bend_set(c);
+}
+void s7_bend(uint32_t ch, int32_t v)
+{
+    uint32_t c = chan_of(ch);
+    bend_raw[c] = (int16_t)v;
+    bend_set(c);
+}
+void s7_modwheel(uint32_t ch, uint32_t v) { wheel[chan_of(ch)] = (uint8_t)(v > 127u ? 127u : v); }
+void s7_pressure(uint32_t ch, uint32_t v) { press[chan_of(ch)] = (uint8_t)(v > 127u ? 127u : v); }
 
 /* the word a voice reads at a position that keeps counting up through its loop (Axs7 voice.rs index()) */
 static inline int32_t index_of(uint32_t mode, uint32_t len, uint32_t ls, uint32_t le, int32_t v)
@@ -212,15 +236,16 @@ static void voice_points(voice_t *x, const s7_slot_t *s, uint32_t slot, int once
     x->started = ++note_count;
 }
 
-static void voice_start(voice_t *x, uint32_t slot, uint32_t key, uint32_t vel)
+static void voice_start(voice_t *x, uint32_t slot, uint32_t prog, uint32_t ch, uint32_t key, uint32_t vel)
 {
     const s7_slot_t *s = &s7_slot[slot];
     const uint8_t *p = s->p;
-    uint32_t tr = p[S7_P_TRANSP(prog_now)];
+    uint32_t tr = p[S7_P_TRANSP(prog)];
     int32_t semis, f;
     float rate;
     voice_points(x, s, slot, 0);
     x->drum = 0;
+    x->ch = (uint8_t)ch;
     x->key = (uint8_t)key;
     x->vel = (uint8_t)vel;
     /* pitch: the key from the root (or the root's own pitch), the program's transpose, the fine tune */
@@ -258,9 +283,9 @@ static void voice_control(voice_t *x)
     uint32_t si;
     if (lfo > x->lfo_full)
         lfo = x->lfo_full;
-    prs = (press / 16u) * s->pressure / 99u;
-    depth = vib_depth(lfo) + vib_depth(wheel / 16u) + vib_depth(prs);
-    st = x->base_step * bend_ratio;
+    prs = (press[x->ch] / 16u) * s->pressure / 99u;
+    depth = vib_depth(lfo) + vib_depth(wheel[x->ch] / 16u) + vib_depth(prs);
+    st = x->drum ? x->base_step : x->base_step * bend_ratio[x->ch];   /* (a drum: no bend) */
     if (x->lfo_inc > 0.0f) {      /* SPEED 0 stops the LFO: no vibrato at all, not even the wheel's */
         if (depth > 0.0f)
             st *= fm_exp2f(depth * fm_sin_turns(x->lfo_phase) / 12.0f);
@@ -373,49 +398,58 @@ static voice_t *voice_free(void)
     return best;
 }
 
-void s7_note_on(uint32_t key, uint32_t vel)
+void s7_note_on(uint32_t ch, uint32_t key, uint32_t vel)
 {
-    uint32_t sl;
+    uint32_t sl, prog = s7_program_of(ch);
     if (vel == 0u) {
-        s7_note_off(key, 64u);
+        s7_note_off(ch, key, 64u);
         return;
     }
     for (sl = 0; sl < S7_SLOTS; sl++) {
         const s7_slot_t *s = &s7_slot[sl];
-        if (!s7_slot_in_program(s, prog_now) || key < s->p[S7_P_KEYL(prog_now)] || key > s->p[S7_P_KEYH(prog_now)])
+        if (!s7_slot_in_program(s, prog) || key < s->p[S7_P_KEYL(prog)] || key > s->p[S7_P_KEYH(prog)])
             continue;
-        voice_start(voice_free(), sl, key, vel);
+        voice_start(voice_free(), sl, prog, chan_of(ch), key, vel);
     }
 }
 
-void s7_note_off(uint32_t key, uint32_t off_vel)
+/* a voice let go: VEL>RELEASE follows the note off's velocity, from 64: longer below, shorter above (a drum
+ * trigger plays to its end) */
+static void voice_release(voice_t *x, uint32_t off_vel)
 {
-    uint32_t i;
-    for (i = 0; i < S7_VOICES; i++) {
-        voice_t *x = &vc[i];
-        int32_t r;
-        if (x->stage == ENV_OFF || x->released || x->key != key)
-            continue;
-        if (x->mode == S7_DRUM)   /* a drum trigger plays to its end */
-            continue;
-        x->released = 1;
-        /* VEL>RELEASE follows the note off's velocity: from 64, longer below, shorter above */
-        {
-            const uint8_t *p = x->src->p;
-            int32_t d = (int32_t)p[S7_P_VELRLS] * (64 - (int32_t)off_vel);
-            r = (int32_t)p[S7_P_RLEASE] + (d + (d >= 0 ? 32 : -32)) / 64;
-        }
-        x->rel = rel_g[r < 0 ? 0 : r > 99 ? 99 : r];
-        x->stage = ENV_RELEASE;
-    }
+    const uint8_t *p;
+    int32_t d, r;
+    if (x->stage == ENV_OFF || x->released || x->mode == S7_DRUM)
+        return;
+    p = x->src->p;
+    d = (int32_t)p[S7_P_VELRLS] * (64 - (int32_t)off_vel);
+    r = (int32_t)p[S7_P_RLEASE] + (d + (d >= 0 ? 32 : -32)) / 64;
+    x->released = 1;
+    x->rel = rel_g[r < 0 ? 0 : r > 99 ? 99 : r];
+    x->stage = ENV_RELEASE;
+}
+
+void s7_note_off(uint32_t ch, uint32_t key, uint32_t off_vel)
+{
+    uint32_t i, c = chan_of(ch);
+    for (i = 0; i < S7_VOICES; i++)
+        if (vc[i].key == key && vc[i].ch == c)
+            voice_release(&vc[i], off_vel);
 }
 
 void s7_all_off(void)
 {
     uint32_t i;
     for (i = 0; i < S7_VOICES; i++)
-        if (vc[i].stage != ENV_OFF && !vc[i].released)
-            s7_note_off(vc[i].key, 64u);
+        voice_release(&vc[i], 64u);
+}
+
+void s7_channel_off(uint32_t ch)
+{
+    uint32_t i, c = chan_of(ch);
+    for (i = 0; i < S7_VOICES; i++)
+        if (vc[i].ch == c)
+            voice_release(&vc[i], 64u);
 }
 
 void s7_kill(void)

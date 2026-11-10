@@ -1,11 +1,12 @@
 /* SM-87: the HR-16's page (ARP). The LCD as the HR-16 shows a pattern: its number, the beat playing; the sixteen
  * white keys its pads. PRESET picks the pattern (queued for the end of the one playing), K1 the tempo, K2 the
  * quantize, K3 the swing; REC arms recording (hits played go into the pattern as it loops, quantized and swung;
- * SEL + a pad held erases that pad's hits as they come by); PLAY plays the drums alone, SEL + PLAY continues.
+ * SEL + a pad held erases that pad's hits as they come by); OCT+ held is the HR-16's FILL (a pad held repeats at the
+ * quantize rate, recorded too); PLAY plays the drums alone, SEL + PLAY continues.
  * ALGO turns to its functions: STEP EDIT (below), LENGTH, ERASE (a pad's hits, or the pattern), COPY (appended to
- * another), PAD SOUND (a pad's sound, tuning, level, pan; REC: as the kit has it), PAD MIDI (its note, group,
- * voices; the drums' channel), each done with REC. A pad key on a pad's function chooses it. Part of the unity build
- * (app.c, after ui/pages_seq.c).
+ * another), OFFSET (a pad's hits or all moved by clocks, -99..99, round at the ends), PAD SOUND (a pad's sound,
+ * tuning, level, pan; REC: as the kit has it), PAD MIDI (its note, group, voices; the drums' channel), each done
+ * with REC. A pad key on a pad's function chooses it. Part of the unity build (app.c, after ui/pages_seq.c).
  *
  * STEP EDIT, the HR-16's: "STEP 001 + 00/96", the beat and the clock in it, over the hit there ("SNARE  V100 1/2",
  * EMPTY without one). SELECT goes from place to place: each step of the quantize grid (swung), and each hit, on or
@@ -14,12 +15,15 @@
  * the hit shown a clock (SEL: a step), K2 its velocity, K3 its pad, K4 the grid; REC erases it. PLAY leaves it and
  * plays from the top, as the HR-16. */
 
-enum { DF_PLAY, DF_STEP, DF_LENGTH, DF_ERASE, DF_COPY, DF_SOUND, DF_MIDI, DF_N };
-static const char *const DF_TXT[DF_N] = {"", "STEP EDIT", "LENGTH", "ERASE", "COPY", "PAD SOUND", "PAD MIDI"};
+enum { DF_PLAY, DF_STEP, DF_LENGTH, DF_ERASE, DF_COPY, DF_OFFSET, DF_SOUND, DF_MIDI, DF_N };
+static const char *const DF_TXT[DF_N] = {"",     "STEP EDIT", "LENGTH",    "ERASE",
+                                         "COPY", "OFFSET",    "PAD SOUND", "PAD MIDI"};
+#define DF_HAS_PAD(fn) ((fn) == DF_SOUND || (fn) == DF_MIDI || (fn) == DF_ERASE || (fn) == DF_OFFSET)
 
 static struct {
     uint8_t fn;
-    uint8_t pad;                  /* the pad's functions, ERASE (HR_PADS: the whole pattern) */
+    uint8_t pad;                  /* the pad's functions, ERASE and OFFSET (HR_PADS: every pad) */
+    int8_t off;                   /* OFFSET: clocks, -99..99 */
     uint8_t to;                   /* COPY: the pattern to */
     uint16_t beats;               /* LENGTH: what REC sets */
     uint16_t st;                  /* STEP EDIT: the place shown, clocks */
@@ -54,7 +58,7 @@ static void dr_enter(uint32_t fn)
     dr.fn = (uint8_t)fn;
     dr.beats = (uint16_t)hr_beats(hrp.pattern);
     dr.to = hrp.pattern;
-    if (fn == DF_ERASE)
+    if (fn == DF_ERASE || fn == DF_OFFSET)
         dr.pad = HR_PADS;         /* (the whole pattern, until a pad is chosen) */
     else if (dr.pad >= HR_PADS)
         dr.pad = 0;
@@ -218,7 +222,7 @@ static void dr_algo(int32_t d)
 /* a pad's key on the page: on a pad's function it chooses the pad (and plays) */
 static void dr_pad_key(uint32_t pad)
 {
-    if (dr.fn == DF_SOUND || dr.fn == DF_MIDI || dr.fn == DF_ERASE)
+    if (DF_HAS_PAD(dr.fn))
         dr.pad = (uint8_t)pad;
 }
 
@@ -290,6 +294,12 @@ static void dr_turn(uint32_t enc, int32_t e, uint32_t btn)
     case DF_COPY:
         if (enc == EN_K1)
             dr.to = (uint8_t)clamp((int32_t)dr.to + e, 0, SQ_PATTERNS - 1);
+        break;
+    case DF_OFFSET:
+        if (enc == EN_K1)         /* SEL held: ten at a time */
+            dr.off = (int8_t)clamp((int32_t)dr.off + e * ((btn >> B_SEL & 1u) ? 10 : 1), -99, 99);
+        else if (enc == EN_K2)    /* the pads, then all of them */
+            dr.pad = (uint8_t)clamp((int32_t)dr.pad + e, 0, HR_PADS);
         break;
     case DF_SOUND:
         if (enc == EN_K1) {       /* none, the kit's, the slots */
@@ -368,6 +378,12 @@ static void dr_rec(uint32_t btn)
         }
         r = hr_copy(p, dr.to, sq_scratch);
         dr_say(r, "COPY COMPLETE");
+        break;
+    case DF_OFFSET:               /* (again: as much again) */
+        if (!dr.off)
+            return;
+        r = hr_offset(p, dr.pad, dr.off, sq_scratch);
+        dr_say(r, dr.pad < HR_PADS ? "PAD MOVED" : "PATTERN MOVED");
         break;
     case DF_SOUND:
     case DF_MIDI:                 /* the pad as the kit has it; SEL: all of them */
@@ -451,7 +467,11 @@ static void dr_draw(int sel_held)
         t[LCD_COLS] = 0;
         lcd_row(0, t);
         t[0] = 0;
-        if (sel_held && hrp.rec) {
+        if (hrp.fill) {           /* OCT+ held: FILL at the quantize rate */
+            str_cat(t, "FILL ");
+            str_cat(t, hrp.quant % HR_GRIDS == HR_GRIDS - 1u ? "1/32" : HR_GRID_TXT[hrp.quant % HR_GRIDS]);
+            str_cat(t, ": A PAD");
+        } else if (sel_held && hrp.rec) {
             str_cat(t, "SEL+PAD: ERASE");
         } else if (hrp.rec) {
             str_cat(t, "REC ");
@@ -544,6 +564,16 @@ static void dr_draw(int sel_held)
         lcd_row(0, t);
         lcd_row(1, hr_hits(dr.to) ? "REC: APPENDED" : "REC: COPIED");
         return;
+    case DF_OFFSET:               /* "OFFSET  PATT 05" / "KICK     +03/384" */
+        str_cat(t, "OFFSET  PATT ");
+        fmt_uint(n, hrp.pattern, 2, '0');
+        str_cat(t, n);
+        lcd_row(0, t);
+        fmt_signed(n, dr.off, 2);
+        str_cat(n, "/384");
+        ed_lr(t, dr.pad < HR_PADS ? hr_pad_name(dr.pad) : "ALL PADS", n);
+        lcd_row(1, t);
+        return;
     case DF_SOUND:
         dr_pad_title(t, dr.pad);
         lcd_row(0, t);
@@ -593,7 +623,7 @@ static uint32_t dr_chosen(void)
 {
     if (dr.fn == DF_STEP)
         return dr_step_pads();
-    if ((dr.fn == DF_SOUND || dr.fn == DF_MIDI || dr.fn == DF_ERASE) && dr.pad < HR_PADS)
+    if (DF_HAS_PAD(dr.fn) && dr.pad < HR_PADS)
         return 1u << dr.pad;
     return 0;
 }

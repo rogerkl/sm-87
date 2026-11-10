@@ -300,6 +300,60 @@ static void test_step(void)
     CHECK(hrp_take(&r) && r.kind == HR_REC_STEP && r.pad == 2u && r.vel == 90u, "a pad in STEP EDIT: for the place");
 }
 
+/* OFFSET: a pad's hits, or all, moved by clocks, round at the ends; FILL: a pad held repeating on the grid */
+static void test_offset_fill(void)
+{
+    uint32_t c0, i;
+    sq_clear();
+    hr_set_length(3, 2, scratch);         /* 192 clocks: the kick at 0 and 180, the snare at 96 */
+    hr_add(3, 0, 0, 100, scratch);
+    hr_add(3, 96, 1, 90, scratch);
+    hr_add(3, 180, 0, 80, scratch);
+    hr_offset(3, 0, 20, scratch);         /* the kick 20 later: 180 round to 8 */
+    CHECK(hr_hits(3) == 3u && hr_hit_tick(hr_hit_at(3, 0)) == 8u && hr_hit_at(3, 0)[3] == 80u &&
+              hr_hit_tick(hr_hit_at(3, 1)) == 20u && hr_hit_tick(hr_hit_at(3, 2)) == 96u && hr_hit_at(3, 2)[2] == 1u,
+          "the kick +20: at %u %u, the snare at %u", hr_hit_tick(hr_hit_at(3, 0)), hr_hit_tick(hr_hit_at(3, 1)),
+          hr_hit_tick(hr_hit_at(3, 2)));
+    hr_offset(3, HR_PADS, -10, scratch);  /* all 10 earlier: 8 round to 190 */
+    CHECK(hr_hit_tick(hr_hit_at(3, 0)) == 10u && hr_hit_tick(hr_hit_at(3, 1)) == 86u &&
+              hr_hit_tick(hr_hit_at(3, 2)) == 190u && hr_hit_at(3, 2)[3] == 80u,
+          "all -10: at %u %u %u", hr_hit_tick(hr_hit_at(3, 0)), hr_hit_tick(hr_hit_at(3, 1)),
+          hr_hit_tick(hr_hit_at(3, 2)));
+    hr_offset(3, 5, 30, scratch);         /* a pad without hits: nothing moves */
+    CHECK(hr_hits(3) == 3u && hr_hit_tick(hr_hit_at(3, 0)) == 10u && sq_valid(), "a pad without hits: as it was");
+
+    /* FILL: the hat held from clock 29 (the 1/16 at 24 its own hit's): repeats at 48, 72, 96, 120; recorded */
+    sq_clear();
+    sqp_init(FS);
+    hrp.pattern = 6;
+    hrp.quant = 3;
+    hrp.swing = 50;
+    hrp.rec = 1;
+    n_hit = 0;
+    sqp_aux_play(0);
+    c0 = sqp.clock;
+    ticks(30);
+    hrp.fill = 1;
+    hrp_fill_pad(2, 77, 1);
+    ticks(100);
+    CHECK(played(0, c0, "48:2 72:2 96:2 120:2"), "FILL: on the 1/16s after its own");
+    for (i = 0; i < n_hit; i++)
+        if (hit[i].vel != 77u)
+            break;
+    CHECK(i == n_hit, "at its velocity");
+    hrp_fill_pad(2, 0, 0);                /* let go: no more */
+    ticks(100);
+    CHECK(n_hit == 4u, "let go: %u", n_hit);
+    take_hits();
+    CHECK(hr_hits(6) == 4u && hr_hit_tick(hr_hit_at(6, 0)) == 48u, "recorded: %u hits", hr_hits(6));
+    hrp_fill_pad(1, 90, 1);               /* FILL let go (the button): none */
+    hrp.fill = 0;
+    ticks(100);
+    CHECK(n_hit == 4u, "FILL let go: %u", n_hit);
+    sqp_stop();
+    hrp.rec = 0;
+}
+
 /* ------------------------------------------------------------------------------------------------ voices --- */
 static uint8_t snd[S7_PACKED(4000)];
 static const hr_kit_sound_t KIT[3] = {
@@ -405,6 +459,7 @@ int main(void)
     test_player();
     test_record();
     test_step();
+    test_offset_fill();
     test_voices();
     printf("hr16: %d checks, %d failed\n", checks, fails);
     return fails != 0;

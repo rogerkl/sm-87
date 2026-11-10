@@ -16,6 +16,7 @@
 #define S7_VOICES 6u              /* as the S700 */
 #define S7_NPARAM 155u            /* SPRM's values */
 #define S7_MAXWORDS 32752u        /* a sample dump's limit */
+#define S7_CHANNELS 16u
 #define S7_PACKED(words) (((words) + 1u) / 2u * 3u + 1u)   /* bytes a sample takes packed (+1: a 32-bit read's pad) */
 
 /* the SPRM values (k: the value's number, documentation/akai-s700-x7000/02-sample-parameters.md) */
@@ -90,17 +91,27 @@ float s7_rate(uint32_t code);
 /* the defaults of an empty slot's values (the X7000's test tone's, in no program) */
 void s7_default_params(uint8_t *p);
 
-/* ---- the engine (audio interrupt) ---- */
+/* ---- the engine (audio interrupt) ----
+ * The S700's MIDI modes (its manual, 33-37; OVS's OMNION): OMNI OFF hears its basic channel, OMNI ON every channel,
+ * both playing the program chosen; MULTI PROGRAM (its mode 7) hears every channel, channel 1..16 playing program
+ * P1..P16, or P17..P32 while one of those is the program chosen (the manual says "or P17-32", not how: here, the
+ * program chosen's bank). The six voices go to whichever channel needs one. The app sends the engine only what its
+ * mode hears; the channel (0..15) is the message's */
+enum { S7_OMNI_OFF, S7_OMNI_ON, S7_MULTI };
 void s7_init(float fs);           /* the tables, at the output rate */
-void s7_note_on(uint32_t key, uint32_t vel);
-void s7_note_off(uint32_t key, uint32_t off_vel);   /* off_vel: the note off's velocity (64 for a note on at 0) */
-void s7_program(uint32_t prog);   /* 0..31: P1..P32 */
+void s7_midi_mode(uint32_t mode);
+uint32_t s7_program_of(uint32_t ch);   /* the program a channel plays (0..31) */
+void s7_note_on(uint32_t ch, uint32_t key, uint32_t vel);
+void s7_note_off(uint32_t ch, uint32_t key, uint32_t off_vel);   /* off_vel: the note off's (64: a note on at 0) */
+void s7_program(uint32_t prog);   /* 0..31: P1..P32, the program chosen (MULTI: its bank) */
 uint32_t s7_current_program(void);
-void s7_bend(int32_t v);          /* -8192..8191 */
+/* the controllers: each channel's own in MULTI; in OMNI ON or OFF one set for all */
+void s7_bend(uint32_t ch, int32_t v);   /* -8192..8191 */
 void s7_bend_range(uint32_t semis);
-void s7_modwheel(uint32_t v);     /* 0..127 */
-void s7_pressure(uint32_t v);     /* channel aftertouch 0..127 */
+void s7_modwheel(uint32_t ch, uint32_t v);   /* 0..127 */
+void s7_pressure(uint32_t ch, uint32_t v);   /* channel aftertouch 0..127 */
 void s7_all_off(void);            /* every voice released */
+void s7_channel_off(uint32_t ch); /* a channel's voices released (all notes off) */
 void s7_kill(void);               /* every voice silent now */
 void s7_kill_slot(uint32_t slot); /* the voices playing a slot silent now (before its sample changes) */
 void s7_render(float *out, uint32_t n);   /* adds n samples (mono) to out */

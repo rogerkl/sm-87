@@ -213,6 +213,40 @@ int hr_move(uint32_t p, uint32_t tick, uint32_t pad, uint32_t to_tick, uint32_t 
     return hr_add(p, to_tick, to_pad, vel, scratch);
 }
 
+/* ------------------------------------------------------------------------------------------------ OFFSET --- */
+int hr_offset(uint32_t p, uint32_t pad, int32_t clocks, uint8_t *scratch)
+{
+    const uint8_t *d = sq_data(SQ_PAT(p));
+    uint32_t len = sq_len(SQ_PAT(p)), ticks = hr_beats(p) * SQ_PPQN, a, i;
+    if (!len || !clocks)
+        return 0;
+    if (len > SQ_SCRATCH)
+        return -1;
+    for (a = 0; a < len; a += SQ_HIT_LEN) {   /* the hits moved (round at the ends), then in order again */
+        int32_t t = (int32_t)hr_hit_tick(d + a);
+        if (pad >= HR_PADS || d[a + 2u] == pad) {
+            t = (t + clocks) % (int32_t)ticks;
+            if (t < 0)
+                t += (int32_t)ticks;
+        }
+        scratch[a] = (uint8_t)t;
+        scratch[a + 1u] = (uint8_t)((uint32_t)t >> 8);
+        scratch[a + 2u] = d[a + 2u];
+        scratch[a + 3u] = d[a + 3u];
+    }
+    for (a = SQ_HIT_LEN; a < len; a += SQ_HIT_LEN) {   /* (all but sorted: a pad's hits moved past the others near) */
+        uint8_t h[SQ_HIT_LEN];
+        uint32_t key = hr_hit_tick(scratch + a) << 8 | scratch[a + 2u];
+        for (i = 0; i < SQ_HIT_LEN; i++)
+            h[i] = scratch[a + i];
+        for (i = a; i >= SQ_HIT_LEN && (hr_hit_tick(scratch + i - SQ_HIT_LEN) << 8 | scratch[i - SQ_HIT_LEN + 2u]) > key;
+             i -= SQ_HIT_LEN)
+            copy(scratch + i, scratch + i - SQ_HIT_LEN, SQ_HIT_LEN);
+        copy(scratch + i, h, SQ_HIT_LEN);
+    }
+    return sq_replace(SQ_PAT(p), scratch, len);   /* (a pad's hits all move: none lands on another of its own) */
+}
+
 /* ------------------------------------------------------------------------------------------- the player --- */
 volatile hrp_t hrp = {.next = 0xFFu, .quant = 3u, .swing = 50u, .playing = 0xFFu};
 
@@ -229,6 +263,18 @@ static struct {
 } skip[SKIPS];
 static uint32_t n_skip;
 static uint8_t pre_start;         /* a hit came between the start and its first tick: its skip kept */
+
+/* FILL: the pads held repeating, the velocity each was hit at, the clock after which its repeats come */
+static uint16_t fill_mask;
+static uint8_t fill_vel[HR_PADS];
+static uint32_t fill_after[HR_PADS];
+
+/* FILL's rate: the quantize grid (off: 1/32) */
+static uint32_t fill_grid(void)
+{
+    uint32_t g = HR_GRID[hrp.quant % HR_GRIDS];
+    return g > 1u ? g : 12u;
+}
 
 #define RECQ 64u
 static hr_rec_t recq[RECQ];
@@ -328,6 +374,18 @@ void hrp_tick(void)
             hr_emit(pad, d[a + 3u]);
     }
     cur = a;
+    if (!hrp.fill)
+        fill_mask = 0;
+    if (fill_mask && !quiet && hr_quantize(t, fill_grid(), hrp.swing) == t) {   /* FILL: on each step of its grid */
+        uint32_t i;
+        for (i = 0; i < HR_PADS; i++) {
+            if (!(fill_mask >> i & 1u) || (int32_t)(sqp.clock - fill_after[i]) <= 0)
+                continue;
+            hr_emit(i, fill_vel[i]);
+            if (own && hrp_recording())
+                rec_put(p, t, i, fill_vel[i], HR_REC_ADD);
+        }
+    }
     if (own && hrp.tick == 0u && hrp.next != 0xFFu && !hrp.rec) {   /* its end: the one queued */
         hrp.pattern = hrp.next;
         hrp.next = 0xFFu;
@@ -358,6 +416,26 @@ void hrp_record(uint32_t pad, uint32_t vel)
         n_skip++;
     }
     rec_put(p, q % ticks, pad, vel, HR_REC_ADD);
+}
+
+void hrp_fill_pad(uint32_t pad, uint32_t vel, int on)
+{
+    uint32_t last, pos, q;
+    if (pad >= HR_PADS)
+        return;
+    if (!on || !vel) {
+        fill_mask &= (uint16_t)~(1u << pad);
+        return;
+    }
+    if (!hrp.fill)
+        return;
+    /* the hit itself is played (and recorded) as any: the repeats from the grid's next step after where it went */
+    last = cur_p != 0xFFu && cur_t >= 0 && !sqp.started ? (uint32_t)cur_t : 0xFFFFFFFFu;
+    pos = last == 0xFFFFFFFFu ? 0u : sqp_nearer_last() ? last : last + 1u;
+    q = hr_quantize(pos, fill_grid(), hrp.swing);
+    fill_after[pad] = sqp.clock + q - (last + 1u);   /* (the clock of q: it may be the last played's, or earlier) */
+    fill_vel[pad] = (uint8_t)vel;
+    fill_mask |= (uint16_t)(1u << pad);
 }
 
 void hrp_step_in(uint32_t pad, uint32_t vel)

@@ -178,9 +178,9 @@ static void seq_status(void)
     fmt_uint(n, pct, 0, ' ');
     str_cat(n, "%");
     cv_text(162, 30, &FONT_XS, n, C_HI);
-    cv_text(8, 44, &FONT_XS, "SAMPLER CH", C_GRAY);
-    fmt_uint(n, set.s7_channel + 1u, 0, ' ');
-    cv_text(88, 44, &FONT_XS, n, C_HI);
+    cv_text(8, 44, &FONT_XS, "SAMPLER", C_GRAY);
+    s7_chan_text(t);
+    cv_text(70, 44, &FONT_XS, t, C_HI);
     cv_text(130, 44, &FONT_XS, "CPU", C_GRAY);
     fmt_uint(n, plat_cpu_pct(), 0, ' ');
     str_cat(n, "%");

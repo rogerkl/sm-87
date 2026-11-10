@@ -92,6 +92,9 @@ uint32_t hr_step_prev(uint32_t p, uint32_t tick, uint32_t grid, uint32_t swing);
 uint32_t hr_hits_at(uint32_t p, uint32_t tick, uint32_t *first);
 /* a hit moved to another place or pad, its velocity kept (that pad's hit there replaced). -1 no room */
 int hr_move(uint32_t p, uint32_t tick, uint32_t pad, uint32_t to_tick, uint32_t to_pad, uint8_t *scratch);
+/* OFFSET (the HR-16's): the pad's hits (HR_PADS: every pad's) moved by clocks (384ths: + later), past the end round
+ * to the start and before the start to the end. -1: too long for the scratch */
+int hr_offset(uint32_t p, uint32_t pad, int32_t clocks, uint8_t *scratch);
 
 /* ---- the player (audio interrupt, sqp_on_tick) ----
  * With the sequencer playing a song: each step's pattern, from the step's start (none: quiet). Else its own loop:
@@ -108,6 +111,7 @@ typedef struct {
     uint16_t at;                  /* the clock playing (shown) */
     uint16_t erase;               /* the pads held to erase while recording (the HR-16's ERASE + a pad), a bit each */
     uint8_t step;                 /* STEP EDIT shown: a pad played goes to its place (hrp_step_in), not recorded */
+    uint8_t fill;                 /* FILL held: a pad pressed repeats at the quantize rate while held (hrp_fill_pad) */
 } hrp_t;
 extern volatile hrp_t hrp;
 void hrp_tick(void);              /* a tick of the clock (sqp_on_tick) */
@@ -123,4 +127,7 @@ typedef struct {
 } hr_rec_t;
 int hrp_take(hr_rec_t *r);
 void hrp_step_in(uint32_t pad, uint32_t vel);
+/* FILL (the HR-16's): a pad pressed (on) with hrp.fill set, or let go: while the clock runs it repeats on each step
+ * of the quantize grid (off: 1/32) after the one it was played on, at its first velocity; recorded when recording */
+void hrp_fill_pad(uint32_t pad, uint32_t vel, int on);
 void hr_emit(uint32_t pad, uint32_t vel);   /* the app's: a pattern's hit (the pad, and MIDI out) */

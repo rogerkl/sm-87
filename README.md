@@ -21,6 +21,8 @@ on an FM-1 yet** (see *On the device*).
   - Vibrato: a stepped sine, plus the mod wheel and aftertouch.
   - One shot, loop, alternating and drum trigger.
   - 32 programs of key ranges.
+  - The S700's MIDI modes: OMNI OFF (its channel), OMNI ON (every channel), and MULTI PROGRAM, where channel 1-16
+    plays program 1-16 (or 17-32), so each MMT-8 track can play its own program.
 - **Sample memory** is 299 KB of flash: 6 full-length samples, as many as a stock S700 holds, or all 16 slots with
   shorter ones. Samples play in place from the flash. An empty slot holds the X7000's test tone.
 - **Samples over MIDI.** The FM-1 answers as an X7000 with 16 slots: the sample dump in and out, SPRM/RSPRM and
@@ -47,7 +49,7 @@ on an FM-1 yet** (see *On the device*).
   - The sounds are the sampler's format (12 bits, at its rates) and play on its voices, without the filter: a kit
     built into the firmware (`resources/kit`), or any of the sampler's 16 slots.
   - 100 patterns of up to 682 beats, in the sequencer's memory. Recorded as they loop, each hit quantized (1/4 ..
-    1/64, or off) and swung (50-75%) as it goes in, the HR-16's way.
+    1/64, or off) and swung (50-75%) as it goes in, the HR-16's way. Its STEP EDIT, OFFSET and FILL too.
   - With the MMT-8: one clock and tempo. A song step chooses the drum pattern that plays with it (or none). Playing
     a part, the drums loop their own pattern beside it. On their own page they play alone.
 - **The screen** is a 2 × 16 character LCD, drawn dot by dot, with a status strip under it.
@@ -73,7 +75,27 @@ on an FM-1 yet** (see *On the device*).
 | LFO | SPEED, DEPTH, DELAY, PRESSURE |
 | SELECT / K1-K4 (sampler pages) | The slot / the page's values. The strip under the LCD shows the slot, its sample and the program |
 | HOME | The sampler's overview |
+| GLO | MIDI: K1 the sampler's channel, K2 its mode (OMNI OFF, ON, MULTI), K3 the pitch bend's range, K4 the drums' channel |
 | SAVE | Lit when something isn't saved: settings, the sample parameters, the sequencer (stopped) |
+
+### MIDI modes (GLO)
+
+The S700's MIDI modes, from its manual (33-37), set with K2 on the GLO page:
+- **OMNI OFF** (as before): the sampler hears its channel (K1) and plays the program shown (PRESET).
+- **OMNI ON:** every channel plays the program shown.
+- **MULTI** (the S700's MULTI PROGRAM / POLYPHONIC): channel 1 plays program 1, channel 2 program 2, up to 16. The
+  6 voices go to whichever channel needs one. While a program of 17-32 is shown, channels 1-16 play programs 17-32
+  instead (the manual says "or P17-32" without saying how; this is a guess). A program change on the sampler's
+  own channel chooses the program shown; one on another channel is ignored, since that channel's program is fixed.
+  Pitch bend, the mod wheel and aftertouch are each channel's own.
+
+In MULTI the keys play the program shown on its own channel: with P5 shown they play channel 5. A track you record
+from the keys then plays P5 when its channel is UNCHANGED. To give an existing track a program, set its channel
+(K2 on the SEQ page, or MIDI CHANNEL) to that program's number.
+
+Channel 10 is the drums' too. In MULTI it also plays program 10.
+
+OVS (Akai's overall settings) carries the mode both ways.
 
 ### The drum machine (ARP)
 
@@ -88,6 +110,7 @@ or while recording the quantize and swing. The strip shows the 16 pads, lit as t
 | K1 / K2 / K3 | Tempo / quantize (1/4, 1/8, 1/12, 1/16, 1/24, 1/32, 1/48, 1/64, off) / swing, 50-75% |
 | REC | Recording on or off: the hits played (pads, or MIDI in on the drums' channel) go into the pattern as it loops |
 | SEL + a pad, recording | Erases that pad's hits as they come by, while held (the HR-16's ERASE + a pad) |
+| OCT+ held | FILL: a pad held repeats at the quantize rate (off: 1/32), at the velocity it was hit at, while the drums play; recorded when recording. (The pads have no octave: OCT- and OCT+ don't change it here) |
 | ALGO | The functions below; ARP goes back to the pattern |
 
 A new pattern is 8 beats long, as on the HR-16. A hit is placed on the nearest step of the quantize grid. It's heard
@@ -100,6 +123,7 @@ when the drums play alone, or beside a part; it doesn't record in a song.
 | LENGTH | Beats, 1-682 (SEL: tens) | | | | Sets the pattern's length (stopped): hits past the end go |
 | ERASE | A pad, or all (a pad's key chooses it) | | | | Erases that pad's hits, or the whole pattern |
 | COPY | The pattern to | | | | Appends the pattern to the other (an empty one gets a copy; itself: twice as long) |
+| OFFSET | Clocks, -99..99 (384ths; SEL: tens) | A pad, or all (a pad's key chooses it) | | | Moves the hits that much later (+) or earlier; past the end round to the start, and back. Again: as much again |
 | PAD SOUND | The sound: the kit's, then SLOT01-16 | Tuning, ±24 | Level | Pan, <3 .. 3> | The pad as the kit sets it; SEL + REC: all of them |
 | PAD MIDI | Its note | Its group (pads that cut each other) | Voices, 1 or 2 | The drums' channel | As PAD SOUND |
 
@@ -357,6 +381,6 @@ The first things to measure on a device, before more is built on these assumptio
 
 ## Next
 
-- More of the HR-16: its own songs, OFFSET (moving a pad's hits by clocks), FILL, and a pattern's sounds kept with
-  it.
+- More of the HR-16: a pattern's sounds kept with it (the HR-16 stores its pads' voice, tuning and mix with a
+  pattern).
 - A dump sent to a real MMT-8, and MIDI clock in with `midi_stamp` (fm1.toml) for timing finer than a block.

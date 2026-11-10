@@ -101,9 +101,9 @@ tap REC
 wait 30
 expect drhits 2
 # PAD SOUND: the kick 5 up, its level 80
-turn ALGO 2
+turn ALGO 3
 wait 30
-expect drfn 5
+expect drfn 6
 tapkey w0
 turn K2 5 20
 turn K3 -5 20
@@ -115,7 +115,7 @@ shot drums_sound.png
 # PAD MIDI: the drums' channel
 turn ALGO 1
 wait 30
-expect drfn 6
+expect drfn 7
 shot drums_midi.png
 turn K4 1
 wait 30

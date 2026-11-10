@@ -28,14 +28,15 @@ typedef struct {
     int8_t octave;                /* the keys: -2 .. +2 */
     uint8_t clock_in;             /* the sequencer's clock: 0 its own, 1 MIDI's */
     uint8_t clock_out_off;        /* MIDI clock out off (on unless) */
-    uint8_t rsv[3];
+    uint8_t s7_mode;              /* the sampler's MIDI mode: S7_OMNI_OFF, S7_OMNI_ON, S7_MULTI (s700/s7.h) */
+    uint8_t rsv[2];
     /* the drums' (a settings object saved before them is shorter: these take their defaults) */
     uint8_t dr_channel;           /* their MIDI channel, 0..15 (10: 9) */
     uint8_t dr_quant, dr_swing;   /* recording's quantize (hr16/hr.h HR_GRID's index) and swing, % */
     uint8_t dr_kit_n;             /* the kit's sounds when the pads were saved (hr_pads_rekit) */
     hr_pad_t pads[HR_PADS];
 } settings_t;
-#define SET_V1_LEN 12u            /* (to rsv) */
+#define SET_V1_LEN 12u            /* (to the drums') */
 static settings_t set;
 static uint8_t set_dirty;
 
@@ -57,6 +58,7 @@ static void settings_defaults(void)
     set.octave = 0;
     set.clock_in = 0;
     set.clock_out_off = 0;
+    set.s7_mode = S7_OMNI_OFF;
     drums_defaults();
 }
 
@@ -66,7 +68,7 @@ static void settings_load(void)
     int n = plat_store_load(OBJ_SETTINGS, &set, sizeof set);
     uint32_t i;
     if (n < (int)SET_V1_LEN || set.magic != SET_MAGIC || set.s7_channel > 15u || set.bend_range > 12u ||
-        set.octave < -2 || set.octave > 2) {
+        set.octave < -2 || set.octave > 2 || set.s7_mode > S7_MULTI) {
         settings_defaults();
         return;
     }
@@ -109,36 +111,59 @@ static void ev_push(uint32_t st, uint32_t d1, uint32_t d2)
     evq_w = w + 1u;
 }
 
-/* one message to the sampler (audio interrupt) */
+/* one message to the sampler, on a channel its MIDI mode hears (audio interrupt). A program change chooses the
+ * program (in MULTI on the basic channel only: the others' programs are theirs, by channel) */
 static void s7_message(uint32_t st, uint32_t d1, uint32_t d2)
 {
+    uint32_t ch = st & 0x0Fu;
     switch (st & 0xF0u) {
     case 0x90u:
-        s7_note_on(d1, d2);       /* velocity 0: a note off at 64 */
+        s7_note_on(ch, d1, d2);   /* velocity 0: a note off at 64 */
         break;
     case 0x80u:
-        s7_note_off(d1, d2);
+        s7_note_off(ch, d1, d2);
         break;
     case 0xB0u:
         if (d1 == 1u)
-            s7_modwheel(d2);
+            s7_modwheel(ch, d2);
         else if (d1 == 120u)
             s7_kill();
         else if (d1 == 123u)
-            s7_all_off();
+            s7_channel_off(ch);
         break;
     case 0xC0u:
-        s7_program(d1);
+        if (set.s7_mode != S7_MULTI || ch == set.s7_channel)
+            s7_program(d1);
         break;
     case 0xD0u:
-        s7_pressure(d1);
+        s7_pressure(ch, d1);
         break;
     case 0xE0u:
-        s7_bend((int32_t)(d1 | d2 << 7) - 8192);
+        s7_bend(ch, (int32_t)(d1 | d2 << 7) - 8192);
         break;
     default:
         break;
     }
+}
+
+/* what the sampler hears, for the strips: "CH 1", "OMNI", "MULTI" */
+static void s7_chan_text(char *t)
+{
+    t[0] = 0;
+    if (set.s7_mode == S7_MULTI) {
+        str_cat(t, "MULTI");
+    } else if (set.s7_mode == S7_OMNI_ON) {
+        str_cat(t, "OMNI");
+    } else {
+        str_cat(t, "CH ");
+        fmt_uint(t + 3, set.s7_channel + 1u, 0, ' ');
+    }
+}
+
+/* the channel the keys play the sampler on: its basic channel; in MULTI the program shown's (P5: channel 5) */
+static uint32_t s7_keys_channel(void)
+{
+    return set.s7_mode == S7_MULTI ? s7_current_program() % S7_CHANNELS : set.s7_channel;
 }
 
 static volatile uint32_t midi_in_count, midi_in_last;
@@ -153,12 +178,13 @@ static void hr_message(uint32_t st, uint32_t d1, uint32_t d2)
 }
 
 /* ------------------------------------------------------------------------------------------ the routing --- */
-/* everything played, by the sequencer, the keys or MIDI in, goes here: the sampler on its channel, the drums on
- * theirs, and out over USB (to (TO_USB): where it may go; MIDI in does not go back where it came from) */
+/* everything played, by the sequencer, the keys or MIDI in, goes here: the sampler on its channel (OMNI ON, MULTI:
+ * every channel), the drums on theirs (in MULTI channel 10 is both), and out over USB (to (TO_USB): where it may go;
+ * MIDI in does not go back where it came from) */
 static void play_out(uint32_t st, uint32_t d1, uint32_t d2, uint32_t to)
 {
     if (st < 0xF0u) {
-        if ((st & 0x0Fu) == set.s7_channel)
+        if (set.s7_mode != S7_OMNI_OFF || (st & 0x0Fu) == set.s7_channel)
             s7_message(st, d1, d2);
         if ((st & 0x0Fu) == set.dr_channel)
             hr_message(st, d1, d2);
@@ -229,6 +255,8 @@ static void played_in(uint32_t st, uint32_t d1, uint32_t d2, uint32_t to)
         else if (pad >= 0)
             hrp_record((uint32_t)pad, d2);
     }
+    if ((st & 0xE0u) == 0x80u && (st & 0x0Fu) == set.dr_channel && hr_pad_of(d1) >= 0)   /* FILL: held, let go */
+        hrp_fill_pad((uint32_t)hr_pad_of(d1), d2, (st & 0xF0u) == 0x90u && d2);
     if (sqp.rec_armed || sqp.take_state == SQP_TAKE_RUNNING) {
         uint32_t ch = sq.part[sqp.part].chan[sqp.rec_track];
         if (ch)
@@ -464,6 +492,7 @@ void app_init(void)
     hrp.swing = set.dr_swing;
     s7_init(SM_FS);
     s7_bend_range(set.bend_range);
+    s7_midi_mode(set.s7_mode);
     s7mem_init();
     sds_init(stage[0], stage[1]);
     sq_load();
@@ -477,6 +506,7 @@ void app_init(void)
 /* the FM-1 answers as an X7000 with 16 slots (s700/sds.h): sample dumps in (byte by byte, the USB interrupt) and out,
  * the parameters (SPRM) and the overall settings (OVS) both ways, on the sampler's channel */
 static uint32_t sx_last_ms;       /* the last SysEx of ours: an automatic save waits for quiet */
+static const uint8_t OVS_OMNI[3] = {0, 128, 64};   /* OVS's OMNION for S7_OMNI_OFF, S7_OMNI_ON, S7_MULTI */
 static uint8_t sx_autosave;       /* parameters came over MIDI: saved once it is quiet */
 static int32_t dump_request = -1; /* RSD: the slot to send, from the main loop */
 static void say_slot(const char *a, const char *b, uint32_t slot);
@@ -576,7 +606,7 @@ int app_sysex(const uint8_t *p, uint32_t n)
     switch (p[2]) {
     case 0x01: {                             /* ROVS: the overall settings */
         uint8_t o[OVS_LEN];
-        s7_ovs_t v = {(uint8_t)ch, 3, (uint8_t)ch, 0, set.bend_range, 0, 5, 127};
+        s7_ovs_t v = {(uint8_t)ch, 3, (uint8_t)ch, OVS_OMNI[set.s7_mode], set.bend_range, 0, 5, 127};
         ovs_build(o, ch, &v);
         (void)plat_sysex_send(o, OVS_LEN);
         break;
@@ -592,12 +622,22 @@ int app_sysex(const uint8_t *p, uint32_t n)
     case 0x06:                               /* SECRE / SECRD: sample dumps taken or not */
         sds_enabled = p[2] == 0x05u;
         break;
-    case 0x08: {                             /* OVS: the channel and the pitch wheel's range */
-        s7_ovs_t v = {(uint8_t)ch, 3, (uint8_t)ch, 0, set.bend_range, 0, 5, 127};
+    case 0x08: {                             /* OVS: the channel, the MIDI mode, the pitch wheel's range */
+        s7_ovs_t v = {(uint8_t)ch, 3, (uint8_t)ch, OVS_OMNI[set.s7_mode], set.bend_range, 0, 5, 127};
         if (ovs_parse(p, n, &v) == 0 && v.channel < 16u && v.bend_range <= 12u) {
+            uint32_t m, f;
+            for (m = 0; m <= S7_MULTI && OVS_OMNI[m] != v.omni; m++)
+                ;
             set.s7_channel = v.channel;
             set.bend_range = v.bend_range;
+            f = plat_lock();
             s7_bend_range(v.bend_range);
+            if (m <= S7_MULTI && m != set.s7_mode) {   /* (another value: the mode kept) */
+                set.s7_mode = (uint8_t)m;
+                s7_all_off();
+                s7_midi_mode(m);
+            }
+            plat_unlock(f);
             set_dirty = 1;
         }
         break;
@@ -728,6 +768,58 @@ static void md_send_service(void)
 #include "ui/pages_drum.c"
 #define PG_SEQ PG_N               /* the sequencer's page, after the sampler's */
 #define PG_DRUM (PG_N + 1u)       /* the drums' */
+#define PG_MIDI (PG_N + 2u)       /* GLO: MIDI, the S700's (its basic channel, OMNI OFF / ON / MULTI, the bend's range) and
+                                   * the drums' channel */
+
+static const char *const S7_MODE_TXT[3] = {"OFF", "ON", "MULT"};
+
+/* "CH  OMNI BEND DR" / "01  MULT   2 10" */
+static void page_midi(void)
+{
+    char t[LCD_COLS + 1], n[4];
+    uint32_t i;
+    for (i = 0; i < LCD_COLS; i++)
+        t[i] = ' ';
+    t[LCD_COLS] = 0;
+    fmt_uint(n, set.s7_channel + 1u, 2, '0');
+    t[0] = n[0], t[1] = n[1];
+    for (i = 0; S7_MODE_TXT[set.s7_mode % 3u][i]; i++)
+        t[4 + i] = S7_MODE_TXT[set.s7_mode % 3u][i];
+    fmt_uint(n, set.bend_range, 2, ' ');
+    t[10] = n[0], t[11] = n[1];
+    fmt_uint(n, set.dr_channel + 1u, 2, '0');
+    t[14] = n[0], t[15] = n[1];
+    lcd_row(0, "CH  OMNI BEND DR");
+    lcd_row(1, t);
+}
+
+/* K1 the sampler's channel, K2 its mode, K3 the bend's range, K4 the drums' channel */
+static void midi_turn(uint32_t k, int32_t e)
+{
+    uint32_t f;
+    if (k == EN_K1) {
+        set.s7_channel = (uint8_t)clamp((int32_t)set.s7_channel + e, 0, 15);
+    } else if (k == EN_K2) {
+        uint32_t m = (uint32_t)clamp((int32_t)set.s7_mode + e, S7_OMNI_OFF, S7_MULTI);
+        if (m == set.s7_mode)
+            return;
+        set.s7_mode = (uint8_t)m;
+        f = plat_lock();
+        s7_all_off();             /* (a note held stays where it was: let go) */
+        s7_midi_mode(m);
+        plat_unlock(f);
+    } else if (k == EN_K3) {
+        set.bend_range = (uint8_t)clamp((int32_t)set.bend_range + e, 0, 12);
+        f = plat_lock();
+        s7_bend_range(set.bend_range);
+        plat_unlock(f);
+    } else if (k == EN_K4) {
+        set.dr_channel = (uint8_t)clamp((int32_t)set.dr_channel + e, 0, 15);
+    } else {
+        return;
+    }
+    set_dirty = 1;
+}
 
 /* a dump in: the sequencer stopped, its memory replaced */
 static void md_service(void)
@@ -969,6 +1061,7 @@ static void input(void)
     uint32_t keys, btn = plat_buttons(), k, lit_keys, dim_keys = 0, lit_btn;
     int32_t e;
     int tracks = ui.page == PG_SEQ && (ed.fn || (btn & (1u << B_SEL | 1u << B_REC)));
+    hrp.fill = (uint8_t)(ui.page == PG_DRUM && (btn >> B_OCTUP & 1u));   /* the HR-16's FILL, before the pads below */
     touch_poll();
     keys = touch_keys();
     dr_lights_take();
@@ -1005,7 +1098,7 @@ static void input(void)
                 ui.key_ch[k] = set.dr_channel;
                 ui.redraw = 1;
             } else {
-                ui.key_ch[k] = set.s7_channel;
+                ui.key_ch[k] = (uint8_t)s7_keys_channel();
             }
             ui.key_note[k] = (uint8_t)note;
             ev_push(0x90u | ui.key_ch[k], note, v ? v : 1u);
@@ -1026,7 +1119,7 @@ static void input(void)
         }
         if (!(btn & bit) || (ui.btn & bit))
             continue;
-        if (k == B_OCTDN || k == B_OCTUP) {
+        if ((k == B_OCTDN || k == B_OCTUP) && ui.page != PG_DRUM) {   /* (the pads have no octave: OCT+ is FILL) */
             int32_t o = set.octave + (k == B_OCTUP ? 1 : -1);
             if (o >= -2 && o <= 2) {
                 set.octave = (int8_t)o;
@@ -1077,6 +1170,9 @@ static void input(void)
         } else if (k == B_LFO) {
             ui.page = PG_LFO;
             ui.redraw = 1;
+        } else if (k == B_GLO) {             /* GLO: MIDI */
+            ui.page = PG_MIDI;
+            ui.redraw = 1;
         } else if (k == B_HOME) {
             ui.page = PG_HOME;
             ui.redraw = 1;
@@ -1113,6 +1209,9 @@ static void input(void)
             ui.redraw = 1;
         } else if (k == EN_PRESET) {
             program_step(e);
+        } else if (ui.page == PG_MIDI) {
+            midi_turn(k, e);
+            ui.redraw = 1;
         } else if (k == EN_SELECT) {         /* SELECT: the slot the sampler's pages edit */
             int32_t sl = (int32_t)ui.slot + e;
             ui.slot = (uint8_t)(sl < 0 ? 0 : sl > 15 ? 15 : sl);
@@ -1126,7 +1225,7 @@ static void input(void)
     ui.btn = btn;
     /* the lights: the held, SAVE while something is not saved, the transport, the page's button */
     lit_btn = btn | (unsaved() ? 1u << B_SAVE : 0u) | (sqp.rec_armed || hrp.rec ? 1u << B_REC : 0u);
-    lit_btn |= ui.page == PG_SEQ ? 1u << B_SEQ : ui.page == PG_DRUM ? 1u << B_ARP : 0u;
+    lit_btn |= ui.page == PG_SEQ ? 1u << B_SEQ : ui.page == PG_DRUM ? 1u << B_ARP : ui.page == PG_MIDI ? 1u << B_GLO : 0u;
     if (sqp.state != SQP_STOPPED || sqp.aux)
         lit_btn |= LED_PLAY_GREEN;
     lit_keys = keys;
@@ -1169,8 +1268,8 @@ static void draw_status(void)
     fmt_uint(t, fr * 4u, 0, ' ');
     str_cat(t, "K");
     cv_text(160, 4, &FONT_XS, t, C_HI);
-    cv_text(8, 22, &FONT_XS, "MIDI CH", C_GRAY);
-    fmt_uint(t, set.s7_channel + 1u, 0, ' ');
+    cv_text(8, 22, &FONT_XS, "MIDI", C_GRAY);
+    s7_chan_text(t);
     cv_text(70, 22, &FONT_XS, t, C_HI);
     cv_text(120, 22, &FONT_XS, "CPU", C_GRAY);
     fmt_uint(t, plat_cpu_pct(), 0, ' ');
@@ -1258,6 +1357,8 @@ void app_frame(void)
         cursor = ed_cursor_row();
     } else if (ui.page == PG_DRUM) {
         dr_draw((int)(ui.btn >> B_SEL & 1u));
+    } else if (ui.page == PG_MIDI) {
+        page_midi();
     } else if (ui.page == PG_HOME) {
         page_home();
     } else {
@@ -1285,6 +1386,16 @@ int app_expect(const char *what, int *got)
         *got = (int)s7_current_program() + 1;
     else if (!strcmp(what, "voices"))
         *got = (int)s7_voices_active();
+    else if (!strcmp(what, "s7mode"))       /* the sampler's MIDI mode: 0 OMNI OFF, 1 OMNI ON, 2 MULTI */
+        *got = set.s7_mode;
+    else if (!strcmp(what, "s7ch"))         /* its basic channel, 1..16 */
+        *got = set.s7_channel + 1;
+    else if (!strcmp(what, "bendrange"))
+        *got = set.bend_range;
+    else if (!strcmp(what, "keych"))        /* the channel the keys play it on, 1..16 */
+        *got = (int)s7_keys_channel() + 1;
+    else if (!strncmp(what, "progof", 6))   /* progofN: the program channel N plays, 1..32 */
+        *got = (int)s7_program_of((uint32_t)atoi(what + 6) - 1u) + 1;
     else if (!strcmp(what, "drpat"))        /* the drums: their own pattern */
         *got = hrp.pattern;
     else if (!strcmp(what, "drnext"))       /* the one queued (-1 none) */
@@ -1293,6 +1404,11 @@ int app_expect(const char *what, int *got)
         *got = hrp.playing == 0xFFu ? -1 : hrp.playing;
     else if (!strcmp(what, "drhits"))       /* the hits in their pattern */
         *got = (int)hr_hits(hrp.pattern);
+    else if (!strncmp(what, "drhit", 5) && what[5] >= '0' && what[5] <= '9')   /* drhitN: their pattern's hit N's
+                                                                                 * clock (from 1; -1 none) */
+        *got = hr_hit_at(hrp.pattern, (uint32_t)atoi(what + 5) - 1u)
+                   ? (int)hr_hit_tick(hr_hit_at(hrp.pattern, (uint32_t)atoi(what + 5) - 1u))
+                   : -1;
     else if (!strncmp(what, "drhits", 6))   /* drhitsN: pattern N's */
         *got = (int)hr_hits((uint32_t)atoi(what + 6) % SQ_PATTERNS);
     else if (!strcmp(what, "drbeats"))
@@ -1315,6 +1431,10 @@ int app_expect(const char *what, int *got)
         *got = dr.fn;
     else if (!strcmp(what, "drpad"))        /* the pad a function has (from 1; 17: the whole pattern) */
         *got = dr.pad + 1;
+    else if (!strcmp(what, "drfill"))       /* FILL held */
+        *got = hrp.fill;
+    else if (!strcmp(what, "droff"))        /* OFFSET: its clocks */
+        *got = dr.off;
     else if (!strcmp(what, "drstep"))       /* STEP EDIT: the place, clocks */
         *got = dr.st;
     else if (!strncmp(what, "drstep", 6)) { /* drstepn: its hits; drstepi: the one shown (from 1); drsteppad,

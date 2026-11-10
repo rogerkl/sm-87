@@ -202,12 +202,12 @@ static void test_filter(void)
     for (i = 0; i < sizeof pts / sizeof pts[0]; i++) {
         float fc = s7_cutoff_hz(pts[i].f), hz = make_sine(fc * pts[i].mult, 32000, 1800.0f), open, shut;
         slot_setup(32000);
-        s7_note_on(60, 100);
+        s7_note_on(0, 60, 100);
         render(8192);
         open = tone_db(out + 4096, 4096, hz);
         s7_kill();
         s7_slot[0].p[S7_P_FLTFRQ] = (uint8_t)pts[i].f;
-        s7_note_on(60, 100);
+        s7_note_on(0, 60, 100);
         render(8192);
         shut = tone_db(out + 4096, 4096, hz);
         s7_kill();
@@ -220,19 +220,19 @@ static void test_pitch(void)
 {
     float hz = make_sine(1000.0f, 32000, 1800.0f), got;
     slot_setup(32000);
-    s7_note_on(60, 100);              /* the root: the sample's own rate */
+    s7_note_on(0, 60, 100);              /* the root: the sample's own rate */
     render(44100);
     got = freq_of(out + 1000, 40000);
     CHECK(fabsf(got / hz - 1.0f) < 1e-3f, "root: %.2f Hz, want %.2f", got, hz);
     s7_kill();
-    s7_note_on(72, 100);              /* an octave up */
+    s7_note_on(0, 72, 100);              /* an octave up */
     render(44100);
     got = freq_of(out + 1000, 40000);
     CHECK(fabsf(got / (2.0f * hz) - 1.0f) < 1e-3f, "octave: %.2f Hz, want %.2f", got, 2.0f * hz);
     s7_kill();
     s7_slot[0].p[S7_P_TRANSP(0)] = 0x80u | 5u;   /* constant pitch, +5 semitones */
     s7_slot[0].p[S7_P_SFNTUN] = (uint8_t)(int8_t)-8;   /* half a semitone down */
-    s7_note_on(40, 100);
+    s7_note_on(0, 40, 100);
     render(44100);
     got = freq_of(out + 1000, 40000);
     CHECK(fabsf(12.0f * log2f(got / hz) - 4.5f) < 0.01f, "constant pitch +5, fine -8: %.3f semitones, want 4.5",
@@ -250,9 +250,9 @@ static void test_release(void)
         uint32_t span = (uint32_t)(t60 * FS * 0.25f);
         slot_setup(32000);
         s7_slot[0].p[S7_P_RLEASE] = (uint8_t)rs[i];
-        s7_note_on(60, 100);
+        s7_note_on(0, 60, 100);
         render(4410);
-        s7_note_off(60, 64);
+        s7_note_off(0, 60, 64);
         render(span * 2u + 2048u);
         a = rms_db(out + 1024, 1024);
         b = rms_db(out + 1024 + span, 1024);
@@ -267,15 +267,15 @@ static void test_release(void)
         slot_setup(32000);
         s7_slot[0].p[S7_P_RLEASE] = 50;
         s7_slot[0].p[S7_P_VELRLS] = 99;
-        s7_note_on(60, 100);
+        s7_note_on(0, 60, 100);
         render(4410);
-        s7_note_off(60, 0);
+        s7_note_off(0, 60, 0);
         render(22050);
         slow = rms_db(out + 20000, 1024);
         s7_kill();
-        s7_note_on(60, 100);
+        s7_note_on(0, 60, 100);
         render(4410);
-        s7_note_off(60, 127);
+        s7_note_off(0, 60, 127);
         render(22050);
         fast = rms_db(out + 20000, 1024);
         s7_kill();
@@ -286,9 +286,9 @@ static void test_release(void)
         slot_setup(32000);
         s7_slot[0].p[S7_P_RPMODE] = S7_DRUM;
         s7_slot[0].p[S7_P_RLEASE] = 0;
-        s7_note_on(60, 100);
+        s7_note_on(0, 60, 100);
         render(4410);
-        s7_note_off(60, 64);
+        s7_note_off(0, 60, 64);
         render(4410);
         CHECK(s7_voices_active() == 1u && rms_db(out, 4410) > -30.0f, "drum trigger: stopped at key off");
         render(44100);
@@ -303,11 +303,11 @@ static void test_level(void)
     make_sine(1000.0f, 32000, 2000.0f);
     slot_setup(32000);
     s7_slot[0].p[S7_P_VELLDN] = 99;
-    s7_note_on(60, 127);
+    s7_note_on(0, 60, 127);
     render(8192);
     a = rms_db(out + 4096, 4096);
     s7_kill();
-    s7_note_on(60, 64);
+    s7_note_on(0, 60, 64);
     render(8192);
     b = rms_db(out + 4096, 4096);
     s7_kill();
@@ -323,7 +323,7 @@ static void test_vibrato(void)
     s7_slot[0].p[S7_P_LFDP] = 99;
     s7_slot[0].p[S7_P_LFDL] = 0;
     s7_slot[0].p[S7_P_LFSP] = 1;      /* 1.7 Hz: slow, so a 50 ms window sees one pitch */
-    s7_note_on(60, 100);
+    s7_note_on(0, 60, 100);
     render(44100 * 3);
     for (i = 44100; i + w < 44100u * 3u; i += w / 2u) {
         float f = freq_of(out + i, w);
@@ -338,6 +338,57 @@ static void test_vibrato(void)
     (void)hz;
 }
 
+/* MULTI PROGRAM: channel n plays program n (the bank of the program chosen: P1-16 or P17-32); its note offs and
+ * bend its own. OMNI ON / OFF: the program chosen whatever the channel */
+static void test_multi(void)
+{
+    float hz = make_sine(1000.0f, 32000, 1800.0f), got;
+    slot_setup(32000);                    /* slot 1: P1; slot 2 the same sample, P5, an octave up; slot 3: P17 */
+    s7_slot[1] = s7_slot[0];
+    s7_slot[1].p[S7_P_KEYL(0)] = 24, s7_slot[1].p[S7_P_KEYH(0)] = 0;
+    s7_slot[1].p[S7_P_KEYL(4)] = 0, s7_slot[1].p[S7_P_KEYH(4)] = 99;
+    s7_slot[1].p[S7_P_TRANSP(4)] = 12;
+    s7_slot[2] = s7_slot[0];
+    s7_slot[2].p[S7_P_KEYL(0)] = 24, s7_slot[2].p[S7_P_KEYH(0)] = 0;
+    s7_slot[2].p[S7_P_KEYL(16)] = 0, s7_slot[2].p[S7_P_KEYH(16)] = 99;
+    s7_midi_mode(S7_MULTI);
+    s7_program(0);
+    CHECK(s7_program_of(0) == 0u && s7_program_of(4) == 4u && s7_program_of(15) == 15u, "MULTI: channel n, P n");
+    s7_note_on(4, 60, 100);               /* channel 5: P5, an octave up */
+    render(44100);
+    got = freq_of(out + 1000, 40000);
+    CHECK(s7_voices_active() == 1u && fabsf(got / (2.0f * hz) - 1.0f) < 1e-3f, "channel 5: P5 (%.1f Hz)", got);
+    s7_note_on(3, 60, 100);               /* channel 4: P4, nothing in it */
+    CHECK(s7_voices_active() == 1u, "channel 4: P4, empty");
+    s7_note_on(0, 60, 100);               /* channel 1: P1 */
+    CHECK(s7_voices_active() == 2u, "channel 1: P1 (%u voices)", s7_voices_active());
+    s7_bend(0, 8191);                     /* channel 1's bend: not channel 5's voice */
+    s7_note_off(0, 60, 64);               /* channel 1's note off: its voice only */
+    render(44100 * 3);
+    got = freq_of(out + 44100 * 2, 40000);
+    CHECK(s7_voices_active() == 1u && fabsf(got / (2.0f * hz) - 1.0f) < 1e-3f,
+          "channel 1's note off and bend: channel 5's voice on, unbent (%u voices, %.1f Hz)", s7_voices_active(), got);
+    s7_channel_off(4);
+    render(44100 * 3);
+    CHECK(s7_voices_active() == 0u, "channel 5's all notes off");
+    s7_bend(0, 0);
+    s7_program(20);                       /* a program of 17-32 chosen: channel 1 plays P17 */
+    CHECK(s7_program_of(0) == 16u && s7_program_of(15) == 31u, "P21 chosen: channel 1 P%u", s7_program_of(0) + 1u);
+    s7_note_on(0, 60, 100);
+    CHECK(s7_voices_active() == 1u, "channel 1: P17");
+    s7_kill();
+    s7_midi_mode(S7_OMNI_ON);             /* OMNI ON: the program chosen, P5, whatever the channel */
+    s7_program(4);
+    CHECK(s7_program_of(0) == 4u && s7_program_of(9) == 4u, "OMNI ON: P5 on every channel");
+    s7_note_on(9, 60, 100);
+    s7_note_off(9, 60, 64);
+    render(44100 * 3);
+    CHECK(s7_voices_active() == 0u, "its note off");
+    s7_midi_mode(S7_OMNI_OFF);
+    s7_program(0);
+    s7_kill();
+}
+
 int main(void)
 {
     s7_init(FS);
@@ -349,6 +400,7 @@ int main(void)
     test_release();
     test_level();
     test_vibrato();
+    test_multi();
     printf("engine: %d checks, %d failed\n", checks, fails);
     return fails != 0;
 }
