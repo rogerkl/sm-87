@@ -96,6 +96,7 @@ static uint8_t stage[SDS_BUFS][S7_PACKED(S7_MAXWORDS)] __attribute__((section(".
 /* the panel plays the sampler from the main loop; the voices live in the audio interrupt. A ring of MIDI-like
  * messages (status | d1 << 8 | d2 << 16) between them, one writer and one reader */
 #define EVQ 64u
+#define EV_INTERNAL (1u << 24)    /* heard here only: not recorded, not out over MIDI (STEP EDIT's hit shown) */
 static volatile uint32_t evq[EVQ];
 static volatile uint32_t evq_w, evq_r;
 
@@ -221,9 +222,11 @@ static void played_in(uint32_t st, uint32_t d1, uint32_t d2, uint32_t to)
     if (st >= 0xF0u)
         return;
     sqp_input(st, d1, d2);
-    if ((st & 0xF0u) == 0x90u && d2 && (st & 0x0Fu) == set.dr_channel && hrp_recording()) {
-        int32_t pad = hr_pad_of(d1);   /* the drums recording: into the pattern */
-        if (pad >= 0)
+    if ((st & 0xF0u) == 0x90u && d2 && (st & 0x0Fu) == set.dr_channel && (hrp.step || hrp_recording())) {
+        int32_t pad = hr_pad_of(d1);   /* the drums recording, or STEP EDIT: into the pattern */
+        if (pad >= 0 && hrp.step)
+            hrp_step_in((uint32_t)pad, d2);
+        else if (pad >= 0)
             hrp_record((uint32_t)pad, d2);
     }
     if (sqp.rec_armed || sqp.take_state == SQP_TAKE_RUNNING) {
@@ -263,7 +266,10 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
     float gain = (float)master_q12 / 4096.0f * (8388607.0f * 0.5f / 2048.0f);
     while (evq_r != evq_w) {                 /* the keys: the sampler's channel, or (the pads) the drums' */
         uint32_t e = evq[evq_r % EVQ];
-        played_in(e & 0xFFu, e >> 8 & 0xFFu, e >> 16 & 0xFFu, TO_USB);
+        if (e & EV_INTERNAL)
+            play_out(e & 0xFFu, e >> 8 & 0xFFu, e >> 16 & 0xFFu, 0);
+        else
+            played_in(e & 0xFFu, e >> 8 & 0xFFu, e >> 16 & 0xFFu, TO_USB);
         evq_r = evq_r + 1u;
     }
     midi_in();
@@ -402,13 +408,18 @@ empty:
     sq_clear();
 }
 
-/* the drums' recording: its hits into the pattern (or out of it, held to erase) */
+/* the drums' recording: its hits into the pattern (or out of it, held to erase); STEP EDIT's pads at its place */
+static void dr_step_add(uint32_t pad, uint32_t vel);
 static void hr_service(void)
 {
     hr_rec_t r;
     int full = 0;
     while (hrp_take(&r)) {
-        if (r.erase) {
+        if (r.kind == HR_REC_STEP) {
+            dr_step_add(r.pad, r.vel);
+            continue;
+        }
+        if (r.kind == HR_REC_ERASE) {
             full |= hr_remove(r.pattern, r.tick, r.pad, sq_scratch) != 0;
         } else {
             if (!sq.pattern[r.pattern].beats)   /* (its length now its own: the default it played at) */
@@ -838,8 +849,11 @@ static void transport_button(uint32_t k, uint32_t btn)
     if (k == B_PLAY) {
         if (sqp.state != SQP_STOPPED || sqp.aux)
             sqp_stop();
-        else if (ui.page == PG_DRUM)        /* the drums alone (SEL: on from their beat) */
+        else if (ui.page == PG_DRUM) {      /* the drums alone (SEL: on from their beat); STEP EDIT left */
+            if (dr.fn == DF_STEP)
+                dr.fn = DF_PLAY;
             sqp_aux_play((int)(btn >> B_SEL & 1u));
+        }
         else if (btn >> B_SEL & 1u)
             sqp_continue();
         else
@@ -1223,6 +1237,7 @@ void app_frame(void)
     static uint32_t last_status;
     uint32_t now = plat_ms();
     int32_t cursor = -1;
+    hrp.step = (uint8_t)(ui.page == PG_DRUM && dr.fn == DF_STEP);   /* (the pads go to its place) */
     input();
     s700_midi_service();
     md_service();
@@ -1305,6 +1320,23 @@ int app_expect(const char *what, int *got)
         *got = dr.fn;
     else if (!strcmp(what, "drpad"))        /* the pad a function has (from 1; 17: the whole pattern) */
         *got = dr.pad + 1;
+    else if (!strcmp(what, "drstep"))       /* STEP EDIT: the place, clocks */
+        *got = dr.st;
+    else if (!strncmp(what, "drstep", 6)) { /* drstepn: its hits; drstepi: the one shown (from 1); drsteppad,
+                                             * drstepvel: its pad (from 1), velocity (0: none) */
+        uint32_t nh;
+        const uint8_t *h = dr_step_hit(&nh);
+        if (!strcmp(what, "drstepn"))
+            *got = (int)nh;
+        else if (!strcmp(what, "drstepi"))
+            *got = h ? dr.hi + 1 : 0;
+        else if (!strcmp(what, "drsteppad"))
+            *got = h ? h[2] + 1 : 0;
+        else if (!strcmp(what, "drstepvel"))
+            *got = h ? h[3] : 0;
+        else
+            return 0;
+    }
     else if (!strcmp(what, "aux"))          /* the drums running alone */
         *got = sqp.aux;
     else if (!strcmp(what, "kit"))          /* the kit's sounds built in */

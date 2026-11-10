@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
-"""The HR-16's drum kit built into the firmware: app/rom/hr_kit.h, from a kit list (tools/kit.txt) naming WAV files.
+"""The HR-16's drum kit built into the firmware, from resources/kit/kit.txt and the WAV files beside it.
 
-  .venv/bin/python tools/mkkit.py                       (tools/kit.txt, the WAV files in sounds/)
-  .venv/bin/python tools/mkkit.py KIT --dir DIR
-  .venv/bin/python tools/mkkit.py --none                (a build without a kit: the pads play the sampler's slots)
+The build makes it (app/fm1.toml: gen = mkkit.py --out {gen}/hr_kit.h): a header of the kit's sounds and its pads'
+set-up, for app/hr16/hrkit.c. Run by hand, it tells what the kit holds and what it takes of the firmware's slot:
 
-The header is not in the repository (the sounds are yours, or a library's). The sounds are the sampler's format:
-mono, 12 bits, packed two words to three bytes, at one of its 41 rates (a WAV at another is resampled to the
-nearest). The firmware's slot holds them with the samples tools/mkrom.py builds in: this says how much they take.
+  .venv/bin/python tools/mkkit.py                       (resources/kit/kit.txt)
+  .venv/bin/python tools/mkkit.py KIT [--dir DIR] [--out FILE]
+
+The sounds are the sampler's format: mono, 12 bits, packed two words to three bytes, at one of its 41 rates (a WAV at
+another is resampled to the nearest). They share the firmware's slot with the samples tools/mkrom.py builds in.
 """
 import argparse
 import re
@@ -21,7 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import mkrom  # noqa: E402  (the WAV reading, the rates, the packing)
 
 ROOT = Path(__file__).resolve().parent.parent
-OUT = ROOT / "app" / "rom" / "hr_kit.h"
+KIT = ROOT / "resources" / "kit" / "kit.txt"
 NAME = 6
 PADS = 16
 
@@ -78,17 +79,21 @@ def load(path):
     return mkrom.to_words(x), code, float(np.max(np.abs(x))) if len(x) else 0.0
 
 
+def kit_bytes(kit=KIT, wav_dir=None):
+    """the bytes the kit's sounds take in the firmware (tools/mkrom.py's budget)"""
+    sounds, _ = parse(kit)
+    d = Path(wav_dir) if wav_dir else Path(kit).parent
+    return sum(len(mkrom.pack(load(d / s["file"])[0])) for s in sounds)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("kit", nargs="?", default=str(ROOT / "tools" / "kit.txt"))
-    ap.add_argument("--dir", default=str(ROOT / "sounds"), help="where the kit's WAV files are")
-    ap.add_argument("-o", "--out", type=Path, default=OUT)
-    ap.add_argument("--none", action="store_true", help="remove the generated file: a build without a kit")
+    ap.add_argument("kit", nargs="?", default=str(KIT))
+    ap.add_argument("--dir", help="where the kit's WAV files are (the kit list's folder unless told)")
+    ap.add_argument("-o", "--out", type=Path, help="the header to write (the build's: {gen}/hr_kit.h)")
+    ap.add_argument("-q", "--quiet", action="store_true", help="one line, not the kit's every sound and pad")
     a = ap.parse_args()
-    if a.none:
-        a.out.unlink(missing_ok=True)
-        print(f"removed {a.out}: the next build has no drum kit")
-        return
+    wav_dir = Path(a.dir) if a.dir else Path(a.kit).parent
     sounds, pads = parse(a.kit)
     if not sounds:
         raise SystemExit(f"{a.kit}: no sounds")
@@ -96,7 +101,7 @@ def main():
              " * edit. The sounds:"]
     body, total, blob = [], 0, b""
     for i, s in enumerate(sounds):
-        f = Path(a.dir) / s["file"]
+        f = wav_dir / s["file"]
         if not f.exists():
             raise SystemExit(f"{s['at']}: {f}: no such file")
         words, code, peak = load(f)
@@ -121,8 +126,14 @@ def main():
         lines += ["};", ""]
     else:
         lines += ["static const hr_kit_pad_t HR_KIT_PAD[1];", ""]
-    a.out.parent.mkdir(parents=True, exist_ok=True)
-    a.out.write_text("\n".join(lines))
+    if a.out:
+        a.out.parent.mkdir(parents=True, exist_ok=True)
+        text = "\n".join(lines)
+        if not a.out.exists() or a.out.read_text() != text:   # (unchanged: left as it is, nothing rebuilt)
+            a.out.write_text(text)
+    if a.quiet:
+        print(f"kit      {len(sounds)} sounds, {len(pads)} pads, {total / 1024:.1f} KB ({Path(a.kit).name})")
+        return
     for i, s in enumerate(sounds):
         db = 20 * np.log10(s["peak"]) if s["peak"] > 0 else -99
         print(f"sound {i}  {s['name']:6}  {s['words']:6} words  {mkrom.RATES[s['code']]:7.0f} Hz  "
@@ -130,7 +141,7 @@ def main():
     for i, p in enumerate(pads):
         print(f"pad {i + 1:2}  {p['name']:6}  {sounds[p['sound']]['name']:6}  tune {p['tune']:+d}  note {p['note']}"
               + (f"  group {p['group']}" if p["group"] else "") + (f"  poly {p['poly']}" if p["poly"] > 1 else ""))
-    print(f"{a.out}: {len(sounds)} sounds, {total / 1024:.1f} KB of the firmware's slot")
+    print(f"{len(sounds)} sounds, {total / 1024:.1f} KB of the firmware's slot" + (f": {a.out}" if a.out else ""))
     rom = mkrom.OUT
     if rom.exists():                  # the samples built in beside it: do they still fit?
         rom_kb = sum(int(n) for n in re.findall(r"S7_ROM_D\d+\[(\d+)\]", rom.read_text())) / 1024

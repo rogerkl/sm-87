@@ -129,19 +129,88 @@ int hr_copy(uint32_t a, uint32_t b, uint8_t *scratch)
     return 0;
 }
 
+/* a pair of grid places' second one, from the pair's start: halfway at 50%, later swung */
+static uint32_t swung(uint32_t pair, uint32_t swing)
+{
+    swing = swing < 50u ? 50u : swing > HR_SWING_MAX ? HR_SWING_MAX : swing;
+    return (pair * swing + 50u) / 100u;
+}
+
 uint32_t hr_quantize(uint32_t tick, uint32_t grid, uint32_t swing)
 {
     uint32_t pair = 2u * grid, base, r, sw;
     if (grid <= 1u)
         return tick;
-    if (swing < 50u)
-        swing = 50u;
-    if (swing > HR_SWING_MAX)
-        swing = HR_SWING_MAX;
     base = tick / pair * pair;
     r = tick - base;
-    sw = (pair * swing + 50u) / 100u;   /* a pair's second place: halfway at 50%, later swung */
+    sw = swung(pair, swing);
     return base + (2u * r < sw ? 0u : 2u * r < sw + pair ? sw : pair);
+}
+
+/* ---------------------------------------------------------------------------------------------- step edit --- */
+/* the grid's first place after tick, and its last before it (tick > 0: 0 is one) */
+static uint32_t grid_next(uint32_t tick, uint32_t grid, uint32_t swing)
+{
+    uint32_t pair = 2u * grid, base, sw;
+    if (grid <= 1u)
+        return tick + 1u;
+    base = tick / pair * pair;
+    sw = swung(pair, swing);
+    return base + sw > tick ? base + sw : base + pair;
+}
+
+static uint32_t grid_prev(uint32_t tick, uint32_t grid, uint32_t swing)
+{
+    uint32_t pair = 2u * grid, base, sw;
+    if (grid <= 1u)
+        return tick - 1u;
+    base = (tick - 1u) / pair * pair;
+    sw = swung(pair, swing);
+    return tick - 1u >= base + sw ? base + sw : base;
+}
+
+uint32_t hr_step_next(uint32_t p, uint32_t tick, uint32_t grid, uint32_t swing)
+{
+    uint32_t ticks = hr_beats(p) * SQ_PPQN, n = grid_next(tick, grid, swing), a = find(p, tick + 1u, 0);
+    if (a < sq_len(SQ_PAT(p)) && hr_hit_tick(sq_data(SQ_PAT(p)) + a) < n)
+        n = hr_hit_tick(sq_data(SQ_PAT(p)) + a);   /* a hit before the next grid place */
+    return n >= ticks ? 0u : n;
+}
+
+uint32_t hr_step_prev(uint32_t p, uint32_t tick, uint32_t grid, uint32_t swing)
+{
+    uint32_t ticks = hr_beats(p) * SQ_PPQN, n, a;
+    if (tick == 0u || tick > ticks)
+        tick = ticks;             /* from the start: round to the end */
+    n = grid_prev(tick, grid, swing);
+    a = find(p, tick, 0);         /* the hit before it, if later than n */
+    if (a > 0u && hr_hit_tick(sq_data(SQ_PAT(p)) + a - SQ_HIT_LEN) > n)
+        n = hr_hit_tick(sq_data(SQ_PAT(p)) + a - SQ_HIT_LEN);
+    return n;
+}
+
+uint32_t hr_hits_at(uint32_t p, uint32_t tick, uint32_t *first)
+{
+    const uint8_t *d = sq_data(SQ_PAT(p));
+    uint32_t len = sq_len(SQ_PAT(p)), a = find(p, tick, 0), n = 0;
+    *first = a / SQ_HIT_LEN;
+    while (a < len && hr_hit_tick(d + a) == tick)
+        a += SQ_HIT_LEN, n++;
+    return n;
+}
+
+int hr_move(uint32_t p, uint32_t tick, uint32_t pad, uint32_t to_tick, uint32_t to_pad, uint8_t *scratch)
+{
+    uint32_t a = find(p, tick, pad), vel;
+    const uint8_t *d = sq_data(SQ_PAT(p));
+    if (a >= sq_len(SQ_PAT(p)) || hr_hit_tick(d + a) != tick || d[a + 2u] != pad)
+        return 0;                 /* (no such hit) */
+    if (to_tick == tick && to_pad == pad)
+        return 0;
+    vel = d[a + 3u];
+    if (hr_remove(p, tick, pad, scratch) != 0)
+        return -1;
+    return hr_add(p, to_tick, to_pad, vel, scratch);
 }
 
 /* ------------------------------------------------------------------------------------------- the player --- */
@@ -165,7 +234,7 @@ static uint8_t pre_start;         /* a hit came between the start and its first 
 static hr_rec_t recq[RECQ];
 static volatile uint32_t recq_w, recq_r;
 
-static void rec_put(uint32_t p, uint32_t tick, uint32_t pad, uint32_t vel, uint32_t erase)
+static void rec_put(uint32_t p, uint32_t tick, uint32_t pad, uint32_t vel, uint32_t kind)
 {
     hr_rec_t *r;
     if (recq_w - recq_r >= RECQ)
@@ -175,7 +244,7 @@ static void rec_put(uint32_t p, uint32_t tick, uint32_t pad, uint32_t vel, uint3
     r->pattern = (uint8_t)p;
     r->pad = (uint8_t)pad;
     r->vel = (uint8_t)vel;
-    r->erase = (uint8_t)erase;
+    r->kind = (uint8_t)kind;
     recq_w = recq_w + 1u;
 }
 
@@ -254,7 +323,7 @@ void hrp_tick(void)
         if (quiet)
             continue;
         if (own && hrp.rec && (hrp.erase >> pad & 1u))
-            rec_put(p, t, pad, 0, 1);   /* held to erase: out as it comes by */
+            rec_put(p, t, pad, 0, HR_REC_ERASE);   /* held to erase: out as it comes by */
         else if (!skipped(pad))
             hr_emit(pad, d[a + 3u]);
     }
@@ -288,5 +357,11 @@ void hrp_record(uint32_t pad, uint32_t vel)
         skip[n_skip].pad = (uint8_t)pad;
         n_skip++;
     }
-    rec_put(p, q % ticks, pad, vel, 0);
+    rec_put(p, q % ticks, pad, vel, HR_REC_ADD);
+}
+
+void hrp_step_in(uint32_t pad, uint32_t vel)
+{
+    if (pad < HR_PADS && vel)
+        rec_put(hrp.pattern, 0, pad, vel, HR_REC_STEP);
 }

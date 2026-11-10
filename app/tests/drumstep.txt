@@ -1,0 +1,119 @@
+# The HR-16's STEP EDIT (ALGO on the drum page): SELECT from place to place (the 1/16 grid, every hit, one hit at a
+# time where there are more, round at the ends), a pad played (MIDI in on channel 10, or a white key) going in at
+# the place, K2 its velocity, K1 its place (off the grid: SELECT stops there), K3 its pad, REC erasing it, K4 the
+# grid; PLAY leaves it. Pattern 00, new: 8 beats, 768 clocks.
+wait 600
+tap ARP
+wait 30
+turn ALGO 1
+wait 30
+expect drfn 1
+expect drstep 0
+expect drstepn 0
+# the kick on the one
+midi 99 24 64
+wait 30
+expect drhits 1
+expect drsteppad 1
+expect drstepvel 100
+expect drbeats 8
+# on a 1/16: the snare and the closed hat there, the last one played shown
+turn SELECT 1
+wait 30
+expect drstep 24
+midi 99 26 32
+midi 99 2A 28
+wait 30
+expect drstepn 2
+expect drsteppad 3
+expect drstepi 2
+shot step.png
+# back: the snare (a hit at a time), then the kick; back from the one: the pattern's last step, 744
+turn SELECT -1
+wait 30
+expect drstep 24
+expect drsteppad 2
+turn SELECT -1
+wait 30
+expect drstep 0
+expect drsteppad 1
+turn SELECT -1
+wait 30
+expect drstep 744
+expect drstepn 0
+turn SELECT 1
+wait 30
+expect drstep 0
+# K2 the velocity; K1 its place, 5 clocks on (off the grid: SELECT stops there too)
+turn K2 -20 20
+wait 30
+expect drstepvel 80
+turn K1 5 20
+wait 30
+expect drstep 5
+expect drsteppad 1
+turn SELECT -1
+wait 30
+expect drstep 0
+expect drstepn 0
+turn SELECT 1
+wait 30
+expect drstep 5
+expect drsteppad 1
+# K3 its pad: the snare's (none there yet); REC erases it
+turn K3 1
+wait 30
+expect drsteppad 2
+expect drstepvel 80
+tap REC
+wait 30
+expect drhits 2
+expect drstepn 0
+# K4 the grid: 1/8 (0, 48, ...): from 0 on, the hits at 24 (one, then the other), then 48
+turn K4 -2 20
+wait 30
+expect drquant 1
+turn SELECT -1
+wait 30
+expect drstep 0
+turn SELECT 1
+wait 30
+expect drstep 24
+expect drstepi 1
+turn SELECT 1
+wait 30
+expect drstep 24
+expect drstepi 2
+turn SELECT 1
+wait 30
+expect drstep 48
+turn K4 2 20
+# a white key: its pad at the place
+tapkey w4
+wait 30
+expect drsteppad 5
+expect drhits 3
+# SEL + SELECT: by beats
+press SEL
+turn SELECT 2
+release SEL
+wait 30
+expect drstep 192
+# PLAY: STEP EDIT left, the pattern from the top
+tap PLAY
+wait 30
+expect drfn 0
+expect aux 1
+tap PLAY
+wait 30
+expect aux 0
+# out of STEP EDIT and not recording, MIDI in plays and goes nowhere
+midi 99 24 64
+wait 30
+expect drhits 3
+# kept
+tap SAVE
+wait 300
+reboot
+wait 600
+expect drhits0 3

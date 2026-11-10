@@ -64,7 +64,7 @@ static void take_hits(void)
 {
     hr_rec_t r;
     while (hrp_take(&r)) {
-        if (r.erase)
+        if (r.kind == HR_REC_ERASE)
             hr_remove(r.pattern, r.tick, r.pad, scratch);
         else
             hr_add(r.pattern, r.tick, r.pad, r.vel, scratch);
@@ -252,6 +252,54 @@ static void test_record(void)
     hrp.rec = 0;
 }
 
+/* STEP EDIT's places: the grid's steps and every hit, round at the ends; the hits at one; a hit moved */
+static void test_step(void)
+{
+    uint32_t first, n;
+    hr_rec_t r;
+    sq_clear();
+    hr_set_length(2, 2, scratch);         /* 192 clocks: hits at 0 (pads 1, 3), 30 (pad 2: off the grid), 96 */
+    hr_add(2, 0, 0, 100, scratch);
+    hr_add(2, 0, 2, 90, scratch);
+    hr_add(2, 30, 1, 80, scratch);
+    hr_add(2, 96, 0, 70, scratch);
+    CHECK(hr_step_next(2, 0, 24, 50) == 24u && hr_step_next(2, 24, 24, 50) == 30u &&
+              hr_step_next(2, 30, 24, 50) == 48u && hr_step_next(2, 168, 24, 50) == 0u,
+          "on: 0 -> %u -> %u -> %u, 168 -> %u", hr_step_next(2, 0, 24, 50), hr_step_next(2, 24, 24, 50),
+          hr_step_next(2, 30, 24, 50), hr_step_next(2, 168, 24, 50));
+    CHECK(hr_step_prev(2, 0, 24, 50) == 168u && hr_step_prev(2, 48, 24, 50) == 30u &&
+              hr_step_prev(2, 30, 24, 50) == 24u && hr_step_prev(2, 97, 1, 50) == 96u,
+          "back: 0 -> %u, 48 -> %u, 30 -> %u", hr_step_prev(2, 0, 24, 50), hr_step_prev(2, 48, 24, 50),
+          hr_step_prev(2, 30, 24, 50));
+    CHECK(hr_step_next(2, 0, 24, 66) == 30u && hr_step_next(2, 30, 24, 66) == 32u &&
+              hr_step_prev(2, 48, 24, 66) == 32u && hr_step_next(2, 33, 24, 66) == 48u,
+          "swung 66%%: 0 -> %u, 30 -> %u", hr_step_next(2, 0, 24, 66), hr_step_next(2, 30, 24, 66));
+    {                                     /* the whole pattern at 1/8: 4 steps, and the hit at 30 */
+        uint32_t at = 0, stops = 0;
+        do {
+            at = hr_step_next(2, at, 48, 50);
+            stops++;
+        } while (at && stops < 20u);
+        CHECK(stops == 5u, "1/8 round the pattern: %u places (0 48 96 144, and the hit at 30)", stops);
+    }
+    n = hr_hits_at(2, 0, &first);
+    CHECK(n == 2u && first == 0u && hr_hits_at(2, 30, &first) == 1u && first == 2u && hr_hits_at(2, 24, &first) == 0u,
+          "the hits at 0: %u, at 30: one, the third", n);
+    hr_move(2, 30, 1, 24, 1, scratch);
+    CHECK(hr_hits_at(2, 30, &first) == 0u && hr_hits_at(2, 24, &first) == 1u && hr_hit_at(2, first)[3] == 80u,
+          "moved to 24, its velocity kept");
+    hr_move(2, 24, 1, 24, 3, scratch);
+    CHECK(hr_hits_at(2, 24, &first) == 1u && hr_hit_at(2, first)[2] == 3u, "to another pad");
+    hr_move(2, 24, 3, 0, 0, scratch);     /* onto pad 1's hit at 0: replaces it */
+    CHECK(hr_hits(2) == 3u && hr_hits_at(2, 0, &first) == 2u && hr_hit_at(2, first)[3] == 80u,
+          "onto one there: replaced, %u hits", hr_hits(2));
+    CHECK(sq_valid(), "the memory holds together");
+    while (hrp_take(&r))
+        ;
+    hrp_step_in(2, 90);
+    CHECK(hrp_take(&r) && r.kind == HR_REC_STEP && r.pad == 2u && r.vel == 90u, "a pad in STEP EDIT: for the place");
+}
+
 /* ------------------------------------------------------------------------------------------------ voices --- */
 static uint8_t snd[S7_PACKED(4000)];
 static const hr_kit_sound_t KIT[3] = {
@@ -356,6 +404,7 @@ int main(void)
     test_patterns();
     test_player();
     test_record();
+    test_step();
     test_voices();
     printf("hr16: %d checks, %d failed\n", checks, fails);
     return fails != 0;

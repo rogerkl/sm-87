@@ -17,14 +17,13 @@ FILE is
     (documentation/akai-s700-x7000/05-quickdisk.md).
 
 Up to 16 samples, of up to 32,752 words each, packed two words to three bytes, in --max-kb (KiB) of the firmware's
-581,564-byte slot: by default what the firmware itself (about 150 KiB) and the drum kit built in (app/rom/hr_kit.h,
+581,564-byte slot: by default what the firmware itself (about 150 KiB) and the drum kit (resources/kit, built in by
 tools/mkkit.py) leave.
 """
 import argparse
 import gzip
 import json
 import math
-import re
 import struct
 import sys
 import zlib
@@ -34,7 +33,6 @@ import numpy as np
 
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "app" / "rom" / "rom_samples.h"
-KIT = ROOT / "app" / "rom" / "hr_kit.h"
 APP_SLOT = 0x8DFBC                # fm1-base tools/fm1pkg_make.py
 FIRMWARE = 150 * 1024             # the firmware without samples or kit, with room to grow
 MAXWORDS = 32752
@@ -277,9 +275,9 @@ def c_name(s):
 
 def kit_bytes():
     """the drum kit's sounds built in (tools/mkkit.py), bytes"""
-    if not KIT.exists():
-        return 0
-    return sum(int(n) for n in re.findall(r"HR_KIT_D\d+\[(\d+)\]", KIT.read_text()))
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import mkkit                  # (it imports this: here, once both are loaded)
+    return mkkit.kit_bytes()
 
 
 def main():

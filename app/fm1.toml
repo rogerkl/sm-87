@@ -4,6 +4,7 @@ id_prefix = "FM-1_87"          # package identity: dev FM-1_8700, releases FM-1_
 usb_manufacturer = "SM-87"
 usb_product = "SM-87 FM-1"
 o2 = ["s700/*.c", "mmt8/*.c", "hr16/*.c"]   # the sampler, its memory, the sequencer, the drums: -O2
+gen = ["../tools/mkkit.py --quiet --out {gen}/hr_kit.h"]   # the drum kit (resources/kit), built in
 words = "words.tsv"
 ble = false                    # no radio: the RAM goes to sequences and samples
 emu = ["midi", "port", "data"] # the browser emulator (--web): Web MIDI with SysEx both ways, a port for other pages

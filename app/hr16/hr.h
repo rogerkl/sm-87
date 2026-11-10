@@ -2,8 +2,8 @@
  * down to what the FM-1 holds:
  *   - 16 pads, each playing one sound at its own tuning, level and pan, on its own MIDI note; the hats choke each
  *     other (a group), the crash rings over itself (two voices);
- *   - the sounds: a kit built into the firmware (tools/mkkit.py from tools/kit.txt: app/rom/hr_kit.h), or any of the
- *     sampler's 16 slots. They are the sampler's format (12-bit words, packed, at one of its rates) and play on its
+ *   - the sounds: a kit built into the firmware (resources/kit: its WAV files and kit.txt, made a header by
+ *     tools/mkkit.py as the firmware is built), or any of the sampler's 16 slots. They are the sampler's format (12-bit words, packed, at one of its rates) and play on its
  *     voices (s700/s7.h s7_drum_start), without its filter;
  *   - 100 patterns of up to 682 beats, in the sequencer's memory (mmt8/seq.h): recorded as they loop, each hit
  *     quantized (1/4 .. 1/64, or off) and swung (50 .. 75%) as it goes in, the HR-16's way;
@@ -35,7 +35,7 @@ typedef struct {
 } hr_pad_t;
 
 /* ---- the kit and the pads (hrkit.c) ---- */
-typedef struct {                  /* a sound built in (app/rom/hr_kit.h) */
+typedef struct {                  /* a sound built in (the build's hr_kit.h) */
     const uint8_t *data;          /* packed 12-bit words (s7.h) */
     uint16_t words;
     uint8_t rate;                 /* its rate code (RECBW) */
@@ -85,6 +85,13 @@ int hr_set_length(uint32_t p, uint32_t beats, uint8_t *scratch);   /* 1..682: hi
 int hr_copy(uint32_t a, uint32_t b, uint8_t *scratch);
 /* where a hit played at tick goes: the nearest place on the grid (clocks), every second one swung (50..75%) */
 uint32_t hr_quantize(uint32_t tick, uint32_t grid, uint32_t swing);
+/* STEP EDIT (the HR-16's): the places it stops at, each step of the grid (swung) and each hit; after the pattern's
+ * end round to its start (and back). The hits at a place: how many, the first's index */
+uint32_t hr_step_next(uint32_t p, uint32_t tick, uint32_t grid, uint32_t swing);
+uint32_t hr_step_prev(uint32_t p, uint32_t tick, uint32_t grid, uint32_t swing);
+uint32_t hr_hits_at(uint32_t p, uint32_t tick, uint32_t *first);
+/* a hit moved to another place or pad, its velocity kept (that pad's hit there replaced). -1 no room */
+int hr_move(uint32_t p, uint32_t tick, uint32_t pad, uint32_t to_tick, uint32_t to_pad, uint8_t *scratch);
 
 /* ---- the player (audio interrupt, sqp_on_tick) ----
  * With the sequencer playing a song: each step's pattern, from the step's start (none: quiet). Else its own loop:
@@ -100,16 +107,20 @@ typedef struct {
     uint16_t tick;                /* its own loop's next clock */
     uint16_t at;                  /* the clock playing (shown) */
     uint16_t erase;               /* the pads held to erase while recording (the HR-16's ERASE + a pad), a bit each */
+    uint8_t step;                 /* STEP EDIT shown: a pad played goes to its place (hrp_step_in), not recorded */
 } hrp_t;
 extern volatile hrp_t hrp;
 void hrp_tick(void);              /* a tick of the clock (sqp_on_tick) */
 void hrp_resync(void);            /* the patterns changed (sq_unlock) */
 int hrp_recording(void);          /* hits played go in now */
 void hrp_record(uint32_t pad, uint32_t vel);   /* a pad played (on the drum channel): into the pattern, if recording */
-/* what the recording did, for the main loop to put in the pattern (hrp_take, then hr_add or hr_remove) */
+/* what the recording did, for the main loop to put in the pattern (hrp_take, then hr_add or hr_remove); in STEP
+ * EDIT a pad played, for it to put at the place shown */
+enum { HR_REC_ADD, HR_REC_ERASE, HR_REC_STEP };
 typedef struct {
     uint16_t tick;
-    uint8_t pattern, pad, vel, erase;
+    uint8_t pattern, pad, vel, kind;
 } hr_rec_t;
 int hrp_take(hr_rec_t *r);
+void hrp_step_in(uint32_t pad, uint32_t vel);
 void hr_emit(uint32_t pad, uint32_t vel);   /* the app's: a pattern's hit (the pad, and MIDI out) */

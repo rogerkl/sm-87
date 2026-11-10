@@ -2,19 +2,28 @@
  * white keys its pads. PRESET picks the pattern (queued for the end of the one playing), K1 the tempo, K2 the
  * quantize, K3 the swing; REC arms recording (hits played go into the pattern as it loops, quantized and swung;
  * SEL + a pad held erases that pad's hits as they come by); PLAY plays the drums alone, SEL + PLAY continues.
- * ALGO turns to its functions, each done with REC: LENGTH, ERASE (a pad's hits, or the pattern), COPY (appended to
+ * ALGO turns to its functions: STEP EDIT (below), LENGTH, ERASE (a pad's hits, or the pattern), COPY (appended to
  * another), PAD SOUND (a pad's sound, tuning, level, pan; REC: as the kit has it), PAD MIDI (its note, group,
- * voices; the drums' channel). A pad key on a pad's function chooses it. Part of the unity build (app.c, after
- * ui/pages_seq.c). */
+ * voices; the drums' channel), each done with REC. A pad key on a pad's function chooses it. Part of the unity build
+ * (app.c, after ui/pages_seq.c).
+ *
+ * STEP EDIT, the HR-16's: "STEP 001 + 00/96", the beat and the clock in it, over the hit there ("SNARE  V100 1/2",
+ * EMPTY without one). SELECT goes from place to place: each step of the quantize grid (swung), and each hit, on or
+ * off the grid; where there are more hits, one at a time; SEL: by beats; round at the ends. A pad played (a white
+ * key, or MIDI in) goes in at the place, at its velocity (that pad's there already: its velocity replaced). K1 moves
+ * the hit shown a clock (SEL: a step), K2 its velocity, K3 its pad, K4 the grid; REC erases it. PLAY leaves it and
+ * plays from the top, as the HR-16. */
 
-enum { DF_PLAY, DF_LENGTH, DF_ERASE, DF_COPY, DF_SOUND, DF_MIDI, DF_N };
-static const char *const DF_TXT[DF_N] = {"", "LENGTH", "ERASE", "COPY", "PAD SOUND", "PAD MIDI"};
+enum { DF_PLAY, DF_STEP, DF_LENGTH, DF_ERASE, DF_COPY, DF_SOUND, DF_MIDI, DF_N };
+static const char *const DF_TXT[DF_N] = {"", "STEP EDIT", "LENGTH", "ERASE", "COPY", "PAD SOUND", "PAD MIDI"};
 
 static struct {
     uint8_t fn;
     uint8_t pad;                  /* the pad's functions, ERASE (HR_PADS: the whole pattern) */
     uint8_t to;                   /* COPY: the pattern to */
     uint16_t beats;               /* LENGTH: what REC sets */
+    uint16_t st;                  /* STEP EDIT: the place shown, clocks */
+    uint8_t hi;                   /* the hit shown of those there */
 } dr;
 
 /* the white key's pad, or -1 */
@@ -49,6 +58,153 @@ static void dr_enter(uint32_t fn)
         dr.pad = HR_PADS;         /* (the whole pattern, until a pad is chosen) */
     else if (dr.pad >= HR_PADS)
         dr.pad = 0;
+    if (fn == DF_STEP) {          /* from the top; the pads go in here, not recorded */
+        dr.st = 0;
+        dr.hi = 0;
+        hrp.rec = 0;
+    }
+}
+
+/* ---------------------------------------------------------------------------------------------- STEP EDIT --- */
+/* the hit shown (0: none there), and how many there are */
+static const uint8_t *dr_step_hit(uint32_t *n_out)
+{
+    uint32_t first, n;
+    if (dr.st >= hr_beats(hrp.pattern) * SQ_PPQN)
+        dr.st = 0;                /* (made shorter) */
+    n = hr_hits_at(hrp.pattern, dr.st, &first);
+    if (dr.hi >= n)
+        dr.hi = (uint8_t)(n ? n - 1u : 0u);
+    if (n_out)
+        *n_out = n;
+    return n ? hr_hit_at(hrp.pattern, first + dr.hi) : 0;
+}
+
+/* the pads with a hit at the place, a bit each */
+static uint32_t dr_step_pads(void)
+{
+    uint32_t first, n = hr_hits_at(hrp.pattern, dr.st, &first), i, m = 0;
+    for (i = 0; i < n; i++)
+        m |= 1u << hr_hit_at(hrp.pattern, first + i)[2];
+    return m;
+}
+
+static int dr_has_hit(uint32_t tick, uint32_t pad)
+{
+    uint32_t first, n = hr_hits_at(hrp.pattern, tick, &first), i;
+    for (i = 0; i < n; i++)
+        if (hr_hit_at(hrp.pattern, first + i)[2] == pad)
+            return 1;
+    return 0;
+}
+
+static void dr_step_show(uint32_t pad)
+{
+    uint32_t first, n = hr_hits_at(hrp.pattern, dr.st, &first), i;
+    for (i = 0; i < n; i++)
+        if (hr_hit_at(hrp.pattern, first + i)[2] == pad)
+            dr.hi = (uint8_t)i;
+}
+
+/* the hit shown heard: the drums only (not out over MIDI, not recorded) */
+static void dr_step_hear(void)
+{
+    const uint8_t *h = dr_step_hit(0);
+    if (h)
+        ev_push(EV_INTERNAL | 0x90u | set.dr_channel, hr_pad[h[2]].note, h[3]);
+}
+
+/* SELECT: on (or back) a place, a hit at a time where there are more; by beats: from beat to beat */
+static void dr_step_turn(int32_t e, int beats)
+{
+    uint32_t p = hrp.pattern, ticks = hr_beats(p) * SQ_PPQN, g = HR_GRID[hrp.quant % HR_GRIDS], n;
+    for (; e > 0; e--) {
+        (void)dr_step_hit(&n);
+        if (!beats && dr.hi + 1u < n) {
+            dr.hi++;
+            continue;
+        }
+        dr.st = (uint16_t)(beats ? (dr.st / SQ_PPQN + 1u) * SQ_PPQN : hr_step_next(p, dr.st, g, hrp.swing));
+        if (dr.st >= ticks)
+            dr.st = 0;
+        dr.hi = 0;
+    }
+    for (; e < 0; e++) {
+        if (!beats && dr.hi > 0u) {
+            dr.hi--;
+            continue;
+        }
+        if (beats)
+            dr.st = (uint16_t)(dr.st % SQ_PPQN ? dr.st / SQ_PPQN * SQ_PPQN : dr.st ? dr.st - SQ_PPQN : ticks - SQ_PPQN);
+        else
+            dr.st = (uint16_t)hr_step_prev(p, dr.st, g, hrp.swing);
+        (void)dr_step_hit(&n);
+        dr.hi = (uint8_t)(n ? n - 1u : 0u);
+    }
+    dr_step_hear();
+}
+
+/* K1 its place, K2 its velocity, K3 its pad (a place or pad where that pad has one already: passed over) */
+static void dr_step_change(uint32_t enc, int32_t e, int sel)
+{
+    uint32_t p = hrp.pattern, ticks = hr_beats(p) * SQ_PPQN, pad, vel, g = HR_GRID[hrp.quant % HR_GRIDS];
+    const uint8_t *h = dr_step_hit(0);
+    int r = 0;
+    if (!h)
+        return;
+    pad = h[2];
+    vel = h[3];
+    if (enc == EN_K1) {
+        int32_t t = (int32_t)dr.st, d = e > 0 ? 1 : -1;
+        for (; e; e -= d) {       /* a clock (SEL: a step) at a time, while the pad is free there */
+            int32_t to = t + d * (sel ? (int32_t)g : 1);
+            if (to < 0 || to >= (int32_t)ticks || dr_has_hit((uint32_t)to, pad))
+                break;
+            t = to;
+        }
+        if ((uint32_t)t != dr.st) {
+            r = hr_move(p, dr.st, pad, (uint32_t)t, pad, sq_scratch);
+            dr.st = (uint16_t)t;
+            dr_step_show(pad);
+        }
+    } else if (enc == EN_K2) {
+        r = hr_add(p, dr.st, pad, (uint32_t)clamp((int32_t)vel + e, 1, 127), sq_scratch);
+        dr_step_hear();
+    } else if (enc == EN_K3) {    /* the next pad without a hit here */
+        uint32_t taken = dr_step_pads();
+        int32_t np = (int32_t)pad, d = e > 0 ? 1 : -1;
+        for (; e; e -= d) {
+            int32_t q = np + d;
+            while (q >= 0 && q < (int32_t)HR_PADS && (taken >> q & 1u))
+                q += d;
+            if (q < 0 || q >= (int32_t)HR_PADS)
+                break;
+            np = q;
+        }
+        if ((uint32_t)np != pad) {
+            r = hr_move(p, dr.st, pad, dr.st, (uint32_t)np, sq_scratch);
+            dr_step_show((uint32_t)np);
+            dr_step_hear();
+        }
+    }
+    if (r)
+        app_say("MEMORY FULL", "");
+    sq_dirty = 1;
+}
+
+/* a pad played in STEP EDIT (hr_service): in at the place */
+static void dr_step_add(uint32_t pad, uint32_t vel)
+{
+    uint32_t p = hrp.pattern;
+    (void)dr_step_hit(0);
+    if (!sq.pattern[p].beats)     /* (its length now its own: the default it showed) */
+        sq.pattern[p].beats = HR_DEFAULT_BEATS;
+    if (hr_add(p, dr.st, pad, vel, sq_scratch) != 0) {
+        app_say("MEMORY FULL", "");
+        return;
+    }
+    dr_step_show(pad);
+    sq_dirty = 1;
 }
 
 static void dr_algo(int32_t d)
@@ -97,6 +253,17 @@ static void dr_turn(uint32_t enc, int32_t e, uint32_t btn)
         return;
     }
     switch (dr.fn) {
+    case DF_STEP:
+        if (enc == EN_SELECT) {
+            dr_step_turn(e, (int)(btn >> B_SEL & 1u));
+        } else if (enc == EN_K4) {   /* the grid: the steps it stops at */
+            set.dr_quant = (uint8_t)clamp((int32_t)set.dr_quant + e, 0, HR_GRIDS - 1);
+            hrp.quant = set.dr_quant;
+            set_dirty = 1;
+        } else {
+            dr_step_change(enc, e, (int)(btn >> B_SEL & 1u));
+        }
+        break;
     case DF_PLAY:
         if (enc == EN_K1) {
             uint32_t f = plat_lock();
@@ -173,6 +340,15 @@ static void dr_rec(uint32_t btn)
     int r = 0;
     int stopped = sqp.state == SQP_STOPPED && !sqp.aux;
     switch (dr.fn) {
+    case DF_STEP: {               /* the hit shown out */
+        const uint8_t *h = dr_step_hit(0);
+        if (!h)
+            return;
+        r = hr_remove(p, dr.st, h[2], sq_scratch);
+        if (r == 0)
+            (void)dr_step_hit(0);
+        break;
+    }
     case DF_LENGTH:
         if (!stopped) {
             app_say("STOP FIRST", "");
@@ -298,6 +474,42 @@ static void dr_draw(int sel_held)
         }
         lcd_row(1, t);
         return;
+    case DF_STEP: {               /* "STEP 001 + 00/96", "SNARE  V100 1/2" */
+        uint32_t nh;
+        const uint8_t *h = dr_step_hit(&nh);
+        str_cat(t, "STEP ");
+        fmt_uint(n, dr.st / SQ_PPQN + 1u, 3, '0');
+        str_cat(t, n);
+        str_cat(t, " + ");
+        fmt_uint(n, dr.st % SQ_PPQN, 2, '0');
+        str_cat(t, n);
+        str_cat(t, "/96");
+        lcd_row(0, t);
+        t[0] = 0;
+        if (!h) {
+            str_cat(t, "EMPTY");
+        } else {
+            const char *nm = hr_pad_name(h[2]);
+            for (i = 0; i < HR_NAME; i++)   /* the pad's name, six wide */
+                t[i] = ' ';
+            for (i = 0; i < HR_NAME && nm[i]; i++)
+                t[i] = nm[i];
+            t[HR_NAME] = 0;
+            str_cat(t, " V");
+            fmt_uint(n, h[3], 3, ' ');
+            str_cat(t, n);
+            if (nh > 1u) {
+                str_cat(t, " ");
+                fmt_uint(n, dr.hi + 1u, 0, ' ');
+                str_cat(t, n);
+                str_cat(t, "/");
+                fmt_uint(n, nh, 0, ' ');
+                str_cat(t, n);
+            }
+        }
+        lcd_row(1, t);
+        return;
+    }
     case DF_LENGTH:
         str_cat(t, "LENGTH  PATT ");
         fmt_uint(n, hrp.pattern, 2, '0');
@@ -376,6 +588,16 @@ static void dr_draw(int sel_held)
     }
 }
 
+/* the pads a function has: its pad; in STEP EDIT those with a hit at the place */
+static uint32_t dr_chosen(void)
+{
+    if (dr.fn == DF_STEP)
+        return dr_step_pads();
+    if ((dr.fn == DF_SOUND || dr.fn == DF_MIDI || dr.fn == DF_ERASE) && dr.pad < HR_PADS)
+        return 1u << dr.pad;
+    return 0;
+}
+
 /* the strip under the LCD: the sixteen pads (lit as they sound, dim with a sound, dark without), the settings */
 static uint32_t dr_lit_now;       /* pads lit, and when they were */
 static uint32_t dr_lit_ms[HR_PADS];
@@ -397,12 +619,12 @@ static void dr_lights_take(void)
 static void dr_status(void)
 {
     char t[24], n[8];
-    uint32_t i, pct = (uint32_t)sq.used * 100u / SQ_ARENA;
+    uint32_t i, pct = (uint32_t)sq.used * 100u / SQ_ARENA, ch = dr_chosen();
     cv_begin(240, STATUS_H, C_BLACK);
     for (i = 0; i < HR_PADS; i++) {
         int32_t x = 6 + (int32_t)(i % 8u) * 29, y = 2 + (int32_t)(i / 8u) * 18;
         int has = hr_pad[i].sound != HR_NO_SOUND, lit = (int)(dr_lit_now >> i & 1u);
-        int chosen = (dr.fn == DF_SOUND || dr.fn == DF_MIDI || dr.fn == DF_ERASE) && dr.pad == i;
+        int chosen = (int)(ch >> i & 1u);
         uint16_t c = lit ? RGB(240, 200, 60) : chosen ? C_HI : has ? C_DIM : C_LINE;
         const char *nm = hr_pad_name(i);
         cv_rect(x, y, 26, 16, c);
@@ -441,9 +663,9 @@ static void dr_status(void)
 /* the pad keys' lights: lit as they sound (and the pad a function has), dim with a sound */
 static void dr_key_lights(uint32_t *lit, uint32_t *dim)
 {
-    uint32_t i;
+    uint32_t i, ch = dr_chosen();
     for (i = 0; i < HR_PADS; i++) {
-        int chosen = (dr.fn == DF_SOUND || dr.fn == DF_MIDI || dr.fn == DF_ERASE) && dr.pad == i;
+        int chosen = (int)(ch >> i & 1u);
         if ((dr_lit_now >> i & 1u) || chosen)
             *lit |= 1u << WHITE[i];
         else if (hr_pad[i].sound != HR_NO_SOUND)

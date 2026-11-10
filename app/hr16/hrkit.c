@@ -5,12 +5,12 @@
 #include "fastmath.h"
 
 #if defined(__has_include)
-#if __has_include("rom/hr_kit.h")
-#include "rom/hr_kit.h"
+#if __has_include("hr_kit.h")
+#include "hr_kit.h"               /* the build's (fm1.toml gen: tools/mkkit.py from resources/kit) */
 #endif
 #endif
 #ifndef HR_KIT_N
-#define HR_KIT_N 0u               /* a build without a kit: the pads play the sampler's slots, or nothing */
+#define HR_KIT_N 0u               /* none (the unit tests: hr_kit_use): the pads play the sampler's slots, or nothing */
 #define HR_KIT_PADS 0u
 static const hr_kit_sound_t HR_KIT[1];
 static const hr_kit_pad_t HR_KIT_PAD[1];

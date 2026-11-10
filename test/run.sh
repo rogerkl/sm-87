@@ -15,16 +15,13 @@ for t in test/*_test.c; do
     "build/test/$n" ../Axs7SdsW/web/test/fixtures
 done
 "$PY" -I test/gen_sysex_test.py
-# the scripts expect the X7000's empty memory and no drum kit: the samples and the kit built in (app/rom/rom_samples.h,
-# tools/mkrom.py; app/rom/hr_kit.h, tools/mkkit.py) are set aside meanwhile, and put back however this ends
+# the scripts expect the X7000's empty memory: samples built in (app/rom/rom_samples.h, tools/mkrom.py) are set
+# aside meanwhile, and put back however this ends. (The drum kit, resources/kit, is the build's: always in)
 ROM=app/rom/rom_samples.h
-KIT=app/rom/hr_kit.h
-mkdir -p build/test/yours
-rm -f build/test/yours/*
-for f in "$ROM" "$KIT"; do
-    [ -f "$f" ] && mv "$f" build/test/yours/
-done
-trap 'for f in build/test/yours/*; do [ -f "$f" ] && mv "$f" app/rom/; done' EXIT
+if [ -f "$ROM" ]; then
+    mv "$ROM" build/test/rom_samples.h.yours
+    trap 'mv build/test/rom_samples.h.yours "$ROM"' EXIT
+fi
 build_host() { (cd fm1-base && "$PY" tools/build.py ../app --host >../build/test/host_build.log 2>&1) || { cat build/test/host_build.log; exit 1; }; }
 run_scripts() {
     for s in "$@"; do
@@ -40,12 +37,6 @@ run_scripts app/tests/*.txt
 build_host
 run_scripts app/tests/rom/*.txt
 rm -f "$ROM"
-# a drum kit built in: four sounds made for the test
-"$PY" -I test/make_test_kit.py build/test/kit
-"$PY" -I tools/mkkit.py build/test/kit/kit.txt --dir build/test/kit >/dev/null
-build_host
-run_scripts app/tests/kit/*.txt
-rm -f "$KIT"
 build_host
 # the browser emulator as built (fm1-base tools/build.py ../app --web, with Emscripten), if there is one
 if [ -f app/build/emu/app.wasm ]; then
