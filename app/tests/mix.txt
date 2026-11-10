@@ -1,0 +1,70 @@
+# The mix (GLO, then GLO again): each sampler slot's level and pan, and the drums' bus. The test tone (slot 1, in
+# program 1) at full, then at 0, silent; a pad with the drums' bus at 0, silent; all of it kept.
+wait 600
+tap GLO
+wait 30
+expect page 11
+tap GLO
+wait 30
+expect page 12
+expect mixlev1 99
+expect mixpan1 0
+expect drumlev 99
+peakreset
+midi 90 3C 7F
+wait 300
+expect peak_db_min -50
+midi 80 3C 40
+wait 500
+# K1: slot 1's level to 0
+turn K1 -99 1
+wait 30
+expect mixlev1 0
+peakreset
+midi 90 3C 7F
+wait 300
+expect peak_db_max -100
+midi 80 3C 40
+wait 500
+turn K1 99 1
+# K2: its pan, hard left
+turn K2 -50 1
+wait 30
+expect mixpan1 -50
+shot mix_page.png
+# K3, as SELECT: the slot
+turn K3 1
+wait 30
+expect slot 2
+expect mixlev2 99
+turn SELECT -1
+wait 30
+expect slot 1
+# K4: the drums' bus to 0: a pad plays, unheard
+turn K4 -99 1
+wait 30
+expect drumlev 0
+peakreset
+midi 99 24 7F
+wait 30
+expect drvoices 1
+wait 170
+expect peak_db_max -100
+turn K4 99 1
+wait 30
+peakreset
+midi 99 24 7F
+wait 200
+expect peak_db_min -50
+# GLO again: back to MIDI
+tap GLO
+wait 30
+expect page 11
+# kept
+tap SAVE
+wait 300
+reboot
+wait 600
+expect mixpan1 -50
+expect mixlev1 99
+expect drumlev 99

@@ -1,0 +1,133 @@
+# A pattern's own sounds (hr16/hr.h; the HR-16's VOICE, TUNE and MIX stored with a pattern), on the drum page's PAD
+# SOUND: a pattern without its own plays the global set-up (an edit is the set-up's); REC keeps the pads' sounds with
+# the pattern (an edit then the pads' until stored: another pattern taken, gone); the pads take a pattern's sounds as
+# it is chosen, and as it comes in playing; SEL + REC lets its own go; COPY to an empty pattern takes them too; kept
+# across a power cycle. The kit: KICK SNARE CLHAT OPHAT CYMBL (sounds 0..4); pad 1 KICK.
+wait 600
+tap ARP
+wait 30
+turn ALGO 6
+wait 30
+expect drfn 6
+expect drsndp 0
+expect drown 0
+# a global edit: the kick pad to the snare's sound, the global set-up's too
+turn K1 1
+wait 30
+expect padsnd1 1
+expect stdsnd1 1
+shot drumsnd_global.png
+# REC: kept with pattern 00
+tap REC
+wait 30
+expect patown0 1
+expect drown 1
+expect dredited 0
+# its own edited: the pads', not the global set-up's, until stored
+turn K1 1
+wait 30
+expect padsnd1 2
+expect stdsnd1 1
+expect dredited 1
+wait 1500
+shot drumsnd_edited.png
+tap REC
+wait 30
+expect dredited 0
+turn K2 3 20
+wait 30
+expect padtune1 3
+expect dredited 1
+# pattern 01 (PRESET): the global set-up's; 00 again: as stored, the edit gone
+turn PRESET 1
+wait 30
+expect drsndp 1
+expect drown 0
+expect padsnd1 1
+expect padtune1 0
+wait 1500
+shot drumsnd_other.png
+turn PRESET -1
+wait 30
+expect drsndp 0
+expect drown 1
+expect padsnd1 2
+expect padtune1 0
+expect dredited 0
+# playing: pattern 00 one beat long, 01 queued, its sounds as it comes in
+turn ALGO -4
+wait 30
+expect drfn 2
+turn K1 -7 20
+wait 30
+tap REC
+wait 30
+expect drbeats 1
+turn ALGO -2
+wait 30
+expect drfn 0
+tap PLAY
+wait 100
+expect aux 1
+expect drsndp 0
+turn PRESET 1
+wait 30
+expect drnext 1
+expect padsnd1 2
+wait 600
+expect drpat 1
+expect drsndp 1
+expect padsnd1 1
+tap PLAY
+wait 30
+expect aux 0
+turn PRESET -1
+wait 30
+expect drsndp 0
+expect padsnd1 2
+# SEL + REC: its own let go, the global set-up's again
+turn ALGO 6
+wait 30
+press SEL
+tap REC
+release SEL
+wait 30
+expect patown0 0
+expect drown 0
+expect padsnd1 1
+# the global set-up's kick pad on the closed hat, kept with 00 and changed there to the snare; COPY to an empty
+# pattern (05) takes them too
+turn K1 1
+wait 30
+expect stdsnd1 2
+tap REC
+wait 30
+expect patown0 1
+turn K1 -1
+wait 30
+expect dredited 1
+expect stdsnd1 2
+tap REC
+wait 30
+expect padsnd1 1
+turn ALGO -2
+wait 30
+expect drfn 4
+turn K1 5 20
+wait 30
+tap REC
+wait 30
+expect patown5 1
+turn ALGO 2
+wait 30
+# kept across a power cycle: the pattern's own, the global set-up
+tap SAVE
+wait 300
+reboot
+wait 600
+expect patown0 1
+expect patown5 1
+expect drsndp 0
+expect drown 1
+expect padsnd1 1
+expect stdsnd1 2

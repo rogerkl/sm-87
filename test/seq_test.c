@@ -481,17 +481,18 @@ static void test_song_offsets(void)
     sqp.song_mode = 0;
 }
 
-/* a memory saved before the song offsets (version 1: its tables 8 + 512 bytes shorter) loads, with none */
+/* a memory saved by an older version loads: version 1 (no song offsets), 3 (two-byte song steps), 4 (no pattern's
+ * own sounds) */
 static void test_image_versions(void)
 {
     static uint8_t img[sizeof(sq_mem_t)];
-    uint32_t t1 = sq_image_tables(1), t3 = sq_image_tables(3), t4 = sq_image_tables(SQ_VERSION), used, i;
+    uint32_t t1 = sq_image_tables(1), t3 = sq_image_tables(3), t4 = sq_image_tables(4), t5 = sq_image_tables(5), used, i;
     sq_raw_t t[2];
     uint8_t part, mask;
-    CHECK(t4 == (uint32_t)(sq.arena - (uint8_t *)&sq) && t1 == t3 - SQ_TRACKS - SQ_MMT8_HDR &&
+    CHECK(SQ_VERSION == 5u && t5 == (uint32_t)(sq.arena - (uint8_t *)&sq) && t1 == t3 - SQ_TRACKS - SQ_MMT8_HDR &&
               sq_image_tables(2) == t3 - SQ_MMT8_HDR && t4 == t3 + SQ_PATTERNS * 4u + SQ_PATTERNS * 2u &&
-              !sq_image_tables(9),
-          "tables: %u, version 3 %u, version 1 %u", t4, t3, t1);
+              t5 == t4 + SQ_PATTERNS * 4u && !sq_image_tables(9),
+          "tables: %u, version 4 %u, version 3 %u, version 1 %u", t5, t4, t3, t1);
     sq_clear();
     raw(&t[0], 0, 0x90, 60, 100);
     raw(&t[1], 20, 0x80, 60, 0);
@@ -540,6 +541,40 @@ static void test_image_versions(void)
         used += sq_len(SQ_PAT(i)) + sq.pattern[i].beats;
     CHECK(sq.offset[3] == -7 && sq.mmt8[0xCF] == 0x42 && used == 0 && sq_events(4, 2) == 1u,
           "its offsets and header moved, no drum patterns: offset %d, header %02X", sq.offset[3], sq.mmt8[0xCF]);
+
+    /* version 4, as it was saved: the drum patterns' blobs but not their sounds', then the offsets, the header, the
+     * patterns' lengths */
+    sq_clear();
+    sq_commit(4, 2, t, 2, 3, scratch);
+    sq_song_set(2, 0, 4, 0xFF, scratch);
+    sq_song_set_drums(2, 0, 7);
+    {
+        uint8_t hits[8] = {0, 0, 0, 100, 48, 0, 2, 90};
+        uint32_t blobs4 = (uint32_t)offsetof(sq_mem_t, blob) + SQ_PAT(SQ_PATTERNS) * sizeof(sq_blob_t);
+        uint32_t tail = (uint32_t)(offsetof(sq_mem_t, arena) - offsetof(sq_mem_t, offset));
+        sq_replace(SQ_PAT(7), hits, 8);
+        sq.pattern[7].beats = 2;
+        sq.offset[5] = 9;
+        sq.mmt8[3] = 0x33;
+        used = sq.used;
+        memcpy(img, &sq, blobs4);
+        img[4] = 4;
+        memcpy(img + blobs4, &sq.offset, tail);
+        CHECK(blobs4 + tail == t4, "version 4's tables: %u", blobs4 + tail);
+        memcpy(img + t4, sq.arena, used);
+        memset(&sq, 0x55, sizeof sq);
+        memcpy(&sq, img, t4);
+        memcpy(sq.arena, img + t4, used);
+    }
+    CHECK(sq_image_upgrade(scratch) == 0 && sq.version == SQ_VERSION && sq_valid(), "version 4 loaded: valid %d",
+          sq_valid());
+    for (i = 0, used = 0; i < SQ_PATTERNS; i++)
+        used += sq_len(SQ_PSND(i));
+    CHECK(sq_len(SQ_PAT(7)) == 8u && sq_data(SQ_PAT(7))[6] == 2u && sq.pattern[7].beats == 2u &&
+              sq_song_drums(2, 0) == 7u && sq.offset[5] == 9 && sq.mmt8[3] == 0x33 && used == 0 &&
+              sq_events(4, 2) == 1u,
+          "its drum patterns, song, offsets and header kept, no pattern's sounds: beats %u, offset %d",
+          sq.pattern[7].beats, sq.offset[5]);
 }
 
 /* MIDI clock in, as app_render has it: the clocks that came during a block given at its start (midi_in) */

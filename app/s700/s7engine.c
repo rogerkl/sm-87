@@ -478,12 +478,39 @@ uint32_t s7_voices_active(void)
     return n;
 }
 
-void s7_render(float *out, uint32_t n)
+/* the mix: each slot's gains, left and right (s7_mix) */
+static float mix_l[S7_SLOTS] = {1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f,
+                                1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f};
+static float mix_r[S7_SLOTS] = {1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f,
+                                1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f};
+
+void s7_mix(uint32_t slot, float gl, float gr)
 {
-    uint32_t i;
-    for (i = 0; i < S7_VOICES; i++)
-        if (vc[i].stage != ENV_OFF)
-            voice_render(&vc[i], out, n);
+    if (slot < S7_SLOTS) {
+        mix_l[slot] = gl;
+        mix_r[slot] = gr;
+    }
+}
+
+/* the voices, each as its slot's level and pan put it (a voice a stretch of 64 at a time, then into the two) */
+void s7_render(float *l, float *r, uint32_t n)
+{
+    float tmp[64];
+    uint32_t i, k, at, m;
+    for (i = 0; i < S7_VOICES; i++) {
+        voice_t *x = &vc[i];
+        float gl = mix_l[x->slot % S7_SLOTS], gr = mix_r[x->slot % S7_SLOTS];
+        for (at = 0; at < n && x->stage != ENV_OFF; at += m) {
+            m = n - at < 64u ? n - at : 64u;
+            for (k = 0; k < m; k++)
+                tmp[k] = 0.0f;
+            voice_render(x, tmp, m);
+            for (k = 0; k < m; k++) {
+                l[at + k] += tmp[k] * gl;
+                r[at + k] += tmp[k] * gr;
+            }
+        }
+    }
 }
 
 /* ------------------------------------------------------------------------------------- the drum machine --- */

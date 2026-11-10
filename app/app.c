@@ -2,6 +2,7 @@
  * FM-1. The app's glue: the sound (app_render), MIDI in, the panel and the screen. Part of fm1-base's unity build
  * (device/unity.c, host/plat_host.c), after the platform: gfx.c and announce.c are in scope. The sampler (s700/), the
  * sequencer (mmt8/) and the drums (hr16/) are compiled apart, at -O2. */
+#include <stddef.h>
 #include "fastmath.h"
 #include "s700/s7.h"
 #include "s700/s7mem.h"
@@ -34,9 +35,16 @@ typedef struct {
     uint8_t dr_channel;           /* their MIDI channel, 0..15 (10: 9) */
     uint8_t dr_quant, dr_swing;   /* recording's quantize (hr16/hr.h HR_GRID's index) and swing, % */
     uint8_t dr_kit_n;             /* the kit's sounds when the pads were saved (hr_pads_rekit) */
-    hr_pad_t pads[HR_PADS];
+    hr_pad_t pads[HR_PADS];       /* their global set-up (hr16/hr.h hr_std) */
+    /* the mix (the MIX page; an object saved before it: each slot at full, in the middle, as the S700 is) */
+    uint8_t mix_level[S7_SLOTS];  /* each slot's, 0..99 (99: as it is) */
+    int8_t mix_pan[S7_SLOTS];     /* -50 (left) .. 50 */
+    uint8_t drum_level;           /* the drums' bus, 0..99 */
+    uint8_t rsv2[3];
 } settings_t;
 #define SET_V1_LEN 12u            /* (to the drums') */
+#define SET_V2_LEN offsetof(settings_t, mix_level)   /* (to the mix) */
+#define MIX_PAN_MAX 50
 static settings_t set;
 static uint8_t set_dirty;
 
@@ -46,8 +54,20 @@ static void drums_defaults(void)
     set.dr_channel = 9;
     set.dr_quant = 3;             /* 1/16 */
     set.dr_swing = 50;
-    for (i = 0; i < HR_PADS; i++)
+    for (i = 0; i < HR_PADS; i++) {
         hr_pad_default(i);
+        hr_std[i] = hr_pad[i];
+    }
+}
+
+static void mix_defaults(void)
+{
+    uint32_t i;
+    for (i = 0; i < S7_SLOTS; i++) {
+        set.mix_level[i] = 99;
+        set.mix_pan[i] = 0;
+    }
+    set.drum_level = 99;
 }
 
 static void settings_defaults(void)
@@ -60,33 +80,58 @@ static void settings_defaults(void)
     set.clock_out_off = 0;
     set.s7_mode = S7_OMNI_OFF;
     drums_defaults();
+    mix_defaults();
 }
 
-/* the settings as they load: an older (shorter) object's drums the defaults, the pads as the kit is now */
+/* the settings as they load: what an older (shorter) object lacks, the defaults (the drums', the mix); the pads as
+ * the kit is now */
 static void settings_load(void)
 {
     int n = plat_store_load(OBJ_SETTINGS, &set, sizeof set);
-    uint32_t i;
+    uint32_t i, bad = 0;
     if (n < (int)SET_V1_LEN || set.magic != SET_MAGIC || set.s7_channel > 15u || set.bend_range > 12u ||
         set.octave < -2 || set.octave > 2 || set.s7_mode > S7_MULTI) {
         settings_defaults();
         return;
     }
-    if (n < (int)sizeof set || set.dr_channel > 15u || set.dr_quant >= HR_GRIDS || set.dr_swing < 50u ||
+    if (n < (int)SET_V2_LEN || set.dr_channel > 15u || set.dr_quant >= HR_GRIDS || set.dr_swing < 50u ||
         set.dr_swing > HR_SWING_MAX) {
         drums_defaults();
+        mix_defaults();
         return;
     }
     for (i = 0; i < HR_PADS; i++)
-        hr_pad[i] = set.pads[i];
+        hr_std[i] = set.pads[i];
     hr_pads_rekit(set.dr_kit_n);
+    for (i = 0; i < HR_PADS; i++)
+        hr_pad[i] = hr_std[i];
+    for (i = 0; i < S7_SLOTS; i++)
+        bad |= set.mix_level[i] > 99u || set.mix_pan[i] > MIX_PAN_MAX || set.mix_pan[i] < -MIX_PAN_MAX;
+    if (n < (int)sizeof set || bad || set.drum_level > 99u)
+        mix_defaults();
+}
+
+/* the mix into the sound: a slot's level (squared: a fader's), its pan (a balance: in the middle both at full) */
+static float dr_gain = 1.0f;      /* the drums' bus */
+static float mix_gain(uint32_t level)
+{
+    float g = (float)level / 99.0f;
+    return g * g;
+}
+static void mix_apply(uint32_t slot)
+{
+    float g = mix_gain(set.mix_level[slot]), p = (float)set.mix_pan[slot] / (float)MIX_PAN_MAX;
+    uint32_t f = plat_lock();
+    s7_mix(slot, p > 0.0f ? g * (1.0f - p) : g, p < 0.0f ? g * (1.0f + p) : g);
+    dr_gain = mix_gain(set.drum_level);
+    plat_unlock(f);
 }
 
 static int settings_save(void)
 {
     uint32_t i;
     for (i = 0; i < HR_PADS; i++)
-        set.pads[i] = hr_pad[i];
+        set.pads[i] = hr_std[i];
     set.dr_kit_n = (uint8_t)hr_kit_sounds();
     return plat_store_save(OBJ_SETTINGS, &set, sizeof set);
 }
@@ -229,11 +274,13 @@ void sqp_click(int accent)
     click_inc = (accent ? 2000.0f : 1400.0f) / SM_FS;
 }
 
-static void click_render(float *out, uint32_t n)
+static void click_render(float *l, float *r, uint32_t n)
 {
     uint32_t i;
     for (i = 0; i < n && click_env > 1e-3f; i++) {
-        out[i] += 900.0f * click_env * fm_sin_turns(click_ph);
+        float v = 900.0f * click_env * fm_sin_turns(click_ph);
+        l[i] += v;
+        r[i] += v;
         click_ph += click_inc;
         if (click_ph >= 1.0f)
             click_ph -= 1.0f;
@@ -284,7 +331,7 @@ static void midi_in(void)         /* audio interrupt: the packets that came in *
 }
 
 /* ------------------------------------------------------------------------------------------------- sound --- */
-static float mix[APP_BLOCK], drl[APP_BLOCK], drr[APP_BLOCK];
+static float mixl[APP_BLOCK], mixr[APP_BLOCK], drl[APP_BLOCK], drr[APP_BLOCK];
 static float gain_now;
 
 void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
@@ -302,25 +349,25 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
     }
     midi_in();
     for (i = 0; i < n; i++)
-        mix[i] = drl[i] = drr[i] = 0.0f;
+        mixl[i] = mixr[i] = drl[i] = drr[i] = 0.0f;
     /* in stretches to the sequencer's next tick, so its events land on their frame */
     while (done < n) {
         uint32_t seg = sqp_frames_to_tick();
         if (seg > n - done)
             seg = n - done;
         if (seg) {
-            s7_render(mix + done, seg);
+            s7_render(mixl + done, mixr + done, seg);
             hr_render(drl + done, drr + done, seg);
-            click_render(mix + done, seg);
+            click_render(mixl + done, mixr + done, seg);
         }
         done += seg;
         sqp_advance(seg);
     }
-    for (i = 0; i < n; i++) {     /* the S700 is mono, the drums panned */
+    for (i = 0; i < n; i++) {     /* the sampler's slots as the mix puts them, the drums' pads panned, their bus */
         float l, r;
         gain_now += (gain - gain_now) * 0.004f;   /* MASTER glides: no zipper */
-        l = (mix[i] + drl[i]) * gain_now;
-        r = (mix[i] + drr[i]) * gain_now;
+        l = (mixl[i] + drl[i] * dr_gain) * gain_now;
+        r = (mixr[i] + drr[i] * dr_gain) * gain_now;
         lr[2 * i] = l > 8388607.0f ? 8388607 : l < -8388607.0f ? -8388607 : (int32_t)l;
         lr[2 * i + 1] = r > 8388607.0f ? 8388607 : r < -8388607.0f ? -8388607 : (int32_t)r;
     }
@@ -458,6 +505,11 @@ static void hr_service(void)
     }
     if (full)
         app_say("MEMORY FULL", "");
+    if (sqp.state == SQP_STOPPED && !sqp.aux && hr_snd.p != hrp.pattern) {
+        uint32_t f = plat_lock();     /* stopped: the pads have the sounds of the pattern chosen */
+        hr_sounds_apply(hrp.pattern);
+        plat_unlock(f);
+    }
 }
 
 /* a take done: made into its track (the sorting outside the lock, the move inside) */
@@ -493,9 +545,15 @@ void app_init(void)
     s7_init(SM_FS);
     s7_bend_range(set.bend_range);
     s7_midi_mode(set.s7_mode);
+    {
+        uint32_t i;
+        for (i = 0; i < S7_SLOTS; i++)
+            mix_apply(i);
+    }
     s7mem_init();
     sds_init(stage[0], stage[1]);
     sq_load();
+    hr_sounds_apply(hrp.pattern);
     sqp_init(SM_FS);
     sqp.clock_in = set.clock_in ? 1u : 0u;
     sqp.clock_out = set.clock_out_off ? 0u : 1u;
@@ -659,9 +717,13 @@ int app_sysex(const uint8_t *p, uint32_t n)
     return 1;
 }
 
-/* the main loop's part of the S700's MIDI: dumps into the flash, a dump out, the save once the transfer is over */
+static void acks_service(void);
+
+/* the main loop's part of the S700's MIDI: the ACKS owed, dumps into the flash, a dump out, the save once the transfer
+ * is over */
 static void s700_midi_service(void)
 {
+    acks_service();
     dumps_flush();
     if (dump_request >= 0 && !tx.on) {
         uint32_t slot = (uint32_t)dump_request;
@@ -692,6 +754,25 @@ static struct {
     uint8_t on;
     uint32_t n, k, m;             /* the dump's bytes; the MIDI bytes sent, of m */
 } mdtx;
+
+/* the ACKS a dump coming in is owed (sds.h sds_acks), out as the USB ring has room: a sender that waits for each
+ * (closed loop) gets it within a frame, one that doesn't counts them. Not while a dump of ours streams out (the ring
+ * is its own then); more than a dump's worth behind (nobody reading), given up */
+static uint32_t acks_sent;
+static void acks_service(void)
+{
+    static const uint8_t ACKS[4] = {0xF0, 0x7E, 0x7F, 0xF7};
+    uint32_t owed = sds_acks - acks_sent;
+    if (owed > 2u * 547u) {
+        acks_sent = sds_acks;
+        return;
+    }
+    for (; owed && !tx.on && !mdtx.on && plat_sysex_room() >= 6u; owed--) {   /* (two packets of three bytes) */
+        if (plat_sysex_send(ACKS, sizeof ACKS) != 0)
+            break;
+        acks_sent++;
+    }
+}
 
 #define MD_TX_A_FRAME 2048u       /* MIDI bytes a frame */
 
@@ -791,6 +872,92 @@ static void page_midi(void)
     t[14] = n[0], t[15] = n[1];
     lcd_row(0, "CH  OMNI BEND DR");
     lcd_row(1, t);
+}
+
+#define PG_MIX (PG_N + 3u)        /* GLO again: the mix, each slot's level and pan, the drums' bus */
+
+/* CLEAR (EDIT's last page): "CLEAR    SLOT 05" / what it holds, "BUILT-IN SAMPLE", "SAMPLE       48K" (the flash it
+ * takes) or "TEST TONE" (nothing to clear). Its name is on the strip under */
+static void page_clear(uint32_t slot)
+{
+    char t[LCD_COLS + 1], n[12] = "SLOT ", m[4];
+    fmt_uint(m, slot + 1u, 2, '0');
+    str_cat(n, m);
+    ed_lr(t, "CLEAR", n);
+    lcd_row(0, t);
+    if (s7mem_is_rom(slot)) {
+        lcd_row(1, "BUILT-IN SAMPLE");
+    } else if (s7mem_has_sample(slot)) {
+        fmt_uint(n, S7M_SECTORS_FOR(s7_slot[slot].words) * (S7M_SECTOR / 1024u), 0, ' ');
+        str_cat(n, "K");
+        ed_lr(t, "SAMPLE", n);
+        lcd_row(1, t);
+    } else {
+        lcd_row(1, "TEST TONE");
+    }
+}
+
+/* REC on CLEAR: the slot's sample gone, a built-in one or one received (its flash free for the next), as an X7000's
+ * empty slot: the test tone, its parameters as the sampler starts them, in no program. SAVE keeps it, or a dump
+ * received after it (until then a power cycle brings the sample back; a dump into its flash saves the slots first,
+ * s7mem_write). Not while the slot goes out as a dump: the dump reads it */
+static void slot_clear(uint32_t slot)
+{
+    if (tx.on) {
+        app_say("BUSY", "SENDING A DUMP");
+        return;
+    }
+    if (!s7mem_has_sample(slot)) {
+        say_slot("NOTHING TO CLEAR", "SLOT ", slot);
+        return;
+    }
+    s7mem_clear(slot);
+    say_slot("CLEARED", "SLOT ", slot);
+}
+
+/* "LEV PAN SLOT DRM" / "99  L20  01  99" */
+static void page_mix(uint32_t slot)
+{
+    char t[LCD_COLS + 1], n[4];
+    uint32_t i;
+    int32_t p = set.mix_pan[slot];
+    for (i = 0; i < LCD_COLS; i++)
+        t[i] = ' ';
+    t[LCD_COLS] = 0;
+    fmt_uint(n, set.mix_level[slot], 2, ' ');
+    t[0] = n[0], t[1] = n[1];
+    if (p) {                      /* "L20", "R50", the middle " C" */
+        t[4] = p < 0 ? 'L' : 'R';
+        fmt_uint(n, (uint32_t)(p < 0 ? -p : p), 2, '0');
+        t[5] = n[0], t[6] = n[1];
+    } else {
+        t[5] = 'C';
+    }
+    fmt_uint(n, slot + 1u, 2, '0');
+    t[9] = n[0], t[10] = n[1];
+    fmt_uint(n, set.drum_level, 2, ' ');
+    t[13] = n[0], t[14] = n[1];
+    lcd_row(0, "LEV PAN SLOT DRM");
+    lcd_row(1, t);
+}
+
+/* K1 the slot's level, K2 its pan, K3 the slot (as SELECT), K4 the drums' bus */
+static void mix_turn(uint32_t k, int32_t e, uint8_t *slot)
+{
+    uint32_t s = *slot;
+    if (k == EN_K1)
+        set.mix_level[s] = (uint8_t)clamp((int32_t)set.mix_level[s] + e, 0, 99);
+    else if (k == EN_K2)
+        set.mix_pan[s] = (int8_t)clamp(set.mix_pan[s] + e, -MIX_PAN_MAX, MIX_PAN_MAX);
+    else if (k == EN_K3) {
+        *slot = (uint8_t)clamp((int32_t)s + e, 0, S7_SLOTS - 1);
+        return;
+    } else if (k == EN_K4)
+        set.drum_level = (uint8_t)clamp((int32_t)set.drum_level + e, 0, 99);
+    else
+        return;
+    mix_apply(s);
+    set_dirty = 1;
 }
 
 /* K1 the sampler's channel, K2 its mode, K3 the bend's range, K4 the drums' channel */
@@ -1138,6 +1305,10 @@ static void input(void)
             dr_rec(btn);
             ui.rec_used = 1;
             ui.redraw = 1;
+        } else if (k == B_REC && ui.page == PG_CLEAR) {
+            slot_clear(ui.slot);
+            ui.rec_used = 1;
+            ui.redraw = 1;
         } else if (k == B_ARP) {             /* the drums (from a function of theirs: back to the pattern) */
             if (ui.page == PG_DRUM)
                 dr.fn = DF_PLAY;
@@ -1161,8 +1332,10 @@ static void input(void)
             }
             ui.page = PG_SEQ;
             ui.redraw = 1;
-        } else if (k == B_EDIT) {            /* EDIT: the points, the loop, the tuning, the keys, round */
-            ui.page = ui.page >= PG_POINTS && ui.page < PG_KEYS ? (uint8_t)(ui.page + 1u) : PG_POINTS;
+        } else if (k == B_EDIT) {            /* EDIT: the points, the loop, the tuning, the keys, CLEAR, round */
+            ui.page = ui.page >= PG_POINTS && ui.page < PG_KEYS ? (uint8_t)(ui.page + 1u)
+                      : ui.page == PG_KEYS                    ? (uint8_t)PG_CLEAR
+                                                              : (uint8_t)PG_POINTS;
             ui.redraw = 1;
         } else if (k == B_ENV) {             /* ENV: the S700's OUT, then its velocity amounts */
             ui.page = ui.page == PG_OUT1 ? PG_OUT2 : PG_OUT1;
@@ -1170,8 +1343,8 @@ static void input(void)
         } else if (k == B_LFO) {
             ui.page = PG_LFO;
             ui.redraw = 1;
-        } else if (k == B_GLO) {             /* GLO: MIDI */
-            ui.page = PG_MIDI;
+        } else if (k == B_GLO) {             /* GLO: MIDI, again the MIX, round */
+            ui.page = ui.page == PG_MIDI ? PG_MIX : PG_MIDI;
             ui.redraw = 1;
         } else if (k == B_HOME) {
             ui.page = PG_HOME;
@@ -1212,6 +1385,9 @@ static void input(void)
         } else if (ui.page == PG_MIDI) {
             midi_turn(k, e);
             ui.redraw = 1;
+        } else if (ui.page == PG_MIX && k != EN_SELECT) {   /* (SELECT: the slot, as on the sampler's pages) */
+            mix_turn(k, e, &ui.slot);
+            ui.redraw = 1;
         } else if (k == EN_SELECT) {         /* SELECT: the slot the sampler's pages edit */
             int32_t sl = (int32_t)ui.slot + e;
             ui.slot = (uint8_t)(sl < 0 ? 0 : sl > 15 ? 15 : sl);
@@ -1225,7 +1401,7 @@ static void input(void)
     ui.btn = btn;
     /* the lights: the held, SAVE while something is not saved, the transport, the page's button */
     lit_btn = btn | (unsaved() ? 1u << B_SAVE : 0u) | (sqp.rec_armed || hrp.rec ? 1u << B_REC : 0u);
-    lit_btn |= ui.page == PG_SEQ ? 1u << B_SEQ : ui.page == PG_DRUM ? 1u << B_ARP : ui.page == PG_MIDI ? 1u << B_GLO : 0u;
+    lit_btn |= ui.page == PG_SEQ ? 1u << B_SEQ : ui.page == PG_DRUM ? 1u << B_ARP : ui.page == PG_MIDI || ui.page == PG_MIX ? 1u << B_GLO : 0u;
     if (sqp.state != SQP_STOPPED || sqp.aux)
         lit_btn |= LED_PLAY_GREEN;
     lit_keys = keys;
@@ -1359,8 +1535,12 @@ void app_frame(void)
         dr_draw((int)(ui.btn >> B_SEL & 1u));
     } else if (ui.page == PG_MIDI) {
         page_midi();
+    } else if (ui.page == PG_MIX) {
+        page_mix(ui.slot);
     } else if (ui.page == PG_HOME) {
         page_home();
+    } else if (ui.page == PG_CLEAR) {
+        page_clear(ui.slot);
     } else {
         page_s700_draw(ui.page, ui.slot, s7_current_program());
     }
@@ -1386,6 +1566,12 @@ int app_expect(const char *what, int *got)
         *got = (int)s7_current_program() + 1;
     else if (!strcmp(what, "voices"))
         *got = (int)s7_voices_active();
+    else if (!strncmp(what, "mixlev", 6))   /* mixlevN: slot N's level in the mix */
+        *got = set.mix_level[(atoi(what + 6) - 1) & 15];
+    else if (!strncmp(what, "mixpan", 6))   /* mixpanN: its pan, -50..50 */
+        *got = set.mix_pan[(atoi(what + 6) - 1) & 15];
+    else if (!strcmp(what, "drumlev"))      /* the drums' bus */
+        *got = set.drum_level;
     else if (!strcmp(what, "s7mode"))       /* the sampler's MIDI mode: 0 OMNI OFF, 1 OMNI ON, 2 MULTI */
         *got = set.s7_mode;
     else if (!strcmp(what, "s7ch"))         /* its basic channel, 1..16 */
@@ -1427,7 +1613,7 @@ int app_expect(const char *what, int *got)
         *got = hrp.quant;
     else if (!strcmp(what, "drswing"))
         *got = hrp.swing;
-    else if (!strcmp(what, "drfn"))         /* the drums' function shown: 0 none, 1 LENGTH .. 5 PAD MIDI */
+    else if (!strcmp(what, "drfn"))         /* the drums' function shown: 0 none, 1 STEP EDIT .. 7 PAD MIDI */
         *got = dr.fn;
     else if (!strcmp(what, "drpad"))        /* the pad a function has (from 1; 17: the whole pattern) */
         *got = dr.pad + 1;
@@ -1466,6 +1652,16 @@ int app_expect(const char *what, int *got)
         *got = hr_pad[(atoi(what + 8) - 1) & 15].level;
     else if (!strncmp(what, "padpan", 6))
         *got = hr_pad[(atoi(what + 6) - 1) & 15].pan;
+    else if (!strncmp(what, "stdsnd", 6))   /* stdsndN: pad N's sound in the global set-up (-1 none) */
+        *got = hr_std[(atoi(what + 6) - 1) & 15].sound == HR_NO_SOUND ? -1 : hr_std[(atoi(what + 6) - 1) & 15].sound;
+    else if (!strcmp(what, "drsndp"))       /* the pattern the pads have the sounds of */
+        *got = hr_snd.p == 0xFFu ? -1 : hr_snd.p;
+    else if (!strcmp(what, "drown"))        /* they are its own */
+        *got = hr_snd.own;
+    else if (!strcmp(what, "dredited"))     /* its own edited, not stored */
+        *got = hr_snd.edited;
+    else if (!strncmp(what, "patown", 6))   /* patownN: pattern N keeps its own sounds */
+        *got = hr_sounds_own((uint32_t)atoi(what + 6) % SQ_PATTERNS);
     else if (!strncmp(what, "stepdr", 6))   /* stepdrN: the song's step N's drum pattern (-1 none) */
         *got = sq_song_drums(sqp.song, (uint32_t)atoi(what + 6) - 1u) == SQ_NO_DRUMS
                    ? -1

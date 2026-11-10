@@ -31,7 +31,7 @@ expect voices 0
 # GLO: MIDI; K2 to MULTI
 tap GLO
 wait 30
-expect page 10
+expect page 11
 turn K2 2 20
 wait 30
 expect s7mode 2
@@ -88,9 +88,12 @@ reboot
 wait 600
 expect s7mode 2
 expect bendrange 4
-# OMNI ON: every channel plays the program shown (kept: P21)
+# OMNI ON: every channel plays the program shown (kept: P21). (HOME first: GLO on the MIDI page goes to the MIX)
+tap HOME
+wait 30
 tap GLO
 wait 30
+expect page 11
 turn K2 -1
 wait 30
 expect s7mode 1

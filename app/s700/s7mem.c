@@ -38,6 +38,18 @@ typedef struct {
 
 static dir_t dir;
 static uint8_t dirty;
+/* the slots' sectors as the store has them, until it is saved again: a sample cleared or replaced since is free in
+ * dir, but a power cut would bring back the store's directory, pointing at it (s7mem_write) */
+static uint16_t kept_sector[S7_SLOTS], kept_words[S7_SLOTS];
+
+static void kept_take(void)
+{
+    uint32_t i;
+    for (i = 0; i < S7_SLOTS; i++) {
+        kept_sector[i] = dir.slot[i].sector;
+        kept_words[i] = dir.slot[i].words;
+    }
+}
 
 /* the X7000's test tone, in every slot nothing was loaded into: 360 words looping at rate code 48 (7849 Hz), root
  * C3. Ours: 12 cycles of 30 words, so C3 plays at 262 Hz; a mellow wave (a sine and two quieter harmonics). */
@@ -164,6 +176,9 @@ void s7mem_init(void)
         s7_slot[i].pressure = dir.slot[i].pressure;
         slot_point(i);
     }
+    /* as the store has them (a built-in sample's slot changed above takes no sector): nothing at all when the store
+     * held no directory of ours */
+    kept_take();
     dirty = 0;
 }
 
@@ -173,6 +188,18 @@ static int sector_used(uint32_t k, uint32_t except)
     for (i = 0; i < S7_SLOTS; i++) {
         uint32_t s = dir.slot[i].sector;
         if (i != except && s != NONE && !is_rom(s) && k >= s && k < s + S7M_SECTORS_FOR(dir.slot[i].words))
+            return 1;
+    }
+    return 0;
+}
+
+/* the store's directory points at one of sectors at .. at + n - 1 */
+static int kept_in(uint32_t at, uint32_t n)
+{
+    uint32_t i;
+    for (i = 0; i < S7_SLOTS; i++) {
+        uint32_t s = kept_sector[i];
+        if (s != NONE && !is_rom(s) && s < at + n && at < s + S7M_SECTORS_FOR(kept_words[i]))
             return 1;
     }
     return 0;
@@ -234,6 +261,7 @@ int s7mem_save(void)
     sync_params_to_dir();
     if (plat_store_save(OBJ_SAMPLES, &dir, sizeof dir) != 0)
         return -1;
+    kept_take();
     dirty = 0;
     return 0;
 }
@@ -268,6 +296,11 @@ int s7mem_write(uint32_t slot, const uint8_t *packed, uint32_t words)
     at = find_run(n, S7_SLOTS);
     if (at < 0)
         return -1;
+    /* sectors the store's directory still points at (a sample cleared or replaced since it was saved, this slot's
+     * own old one too): the directory saved first, without it. Else a power cut before the next save (3 s after a
+     * dump) would bring back a slot pointing at this sample's data; now it finds that slot empty */
+    if (kept_in((uint32_t)at, n) && s7mem_save() != 0)
+        return -2;
     for (k = 0; k < n; k++) {
         uint32_t off = S7M_BASE + ((uint32_t)at + k) * S7M_SECTOR, m = bytes - k * S7M_SECTOR, i;
         if (m > S7M_SECTOR)

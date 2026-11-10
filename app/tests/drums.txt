@@ -27,7 +27,7 @@ wait 200
 # the drum page (ARP); a white key plays its pad
 tap ARP
 wait 30
-expect page 9
+expect page 10
 tapkey w1
 expect drvoices 1
 wait 300
@@ -129,7 +129,7 @@ expect drfn 0
 # with the MMT-8's part (PLAY on its page): its K4 the drums' pattern, played beside the part (an empty one here)
 tap SEQ
 wait 30
-expect page 8
+expect page 9
 turn K4 1
 wait 30
 expect drpat 1

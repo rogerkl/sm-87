@@ -1,6 +1,7 @@
 // SM-87 in the browser emulator (fm1-base tools/build.py ../app --web), under node with fm1-base's harness: the
 // worklet and app.wasm as a browser runs them. As Axs7 talks to an X7000 through the emulator's MIDI part:
-// ROVS, a whole dump (32,752 words, 66,632 bytes, one frame), RSPRM, RSD back word for word, then the slot played;
+// ROVS, a whole dump (32,752 words, 66,632 bytes, one frame) and its ACKS, RSPRM, RSD back word for word, then the
+// slot played;
 // an MMT-8 memory dump in and back; a drum pattern recorded from MIDI and played out.
 //   node test/emu_test.mjs [app/build/emu]
 import { startEmu, check, done } from "../fm1-base/tests/emu_harness.mjs";
@@ -38,6 +39,9 @@ dump.push(0xf7);
 check(dump.length === 66632, `the dump is ${dump.length} bytes`);
 midi(dump);
 emu.run(1500);                                // into the flash (the simulated one): the sound stops a moment
+// ACKS, as an X7000 answers a dump even when the sender doesn't wait: the header's and each block's
+const acks = out().filter((m) => m.length === 4 && m[0] === 0xf0 && m[1] === 0x7e && m[2] === 0x7f && m[3] === 0xf7);
+check(acks.length === 1 + 546, `ACKS for the header and each block: ${acks.length}`);
 
 // RSPRM: its parameters, as the sampler leaves them after a dump
 midi([0xf0, 0x47, 0x00, 0x04, 0x41, SLOT, 0x00, 0xf7]);

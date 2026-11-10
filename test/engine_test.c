@@ -140,14 +140,15 @@ static void slot_setup(uint32_t words)
     s7_program(0);
 }
 
-static float out[1 << 20];
+static float out[1 << 20], out_r[1 << 20];
 
-static void render(uint32_t n)
+static void render(uint32_t n)        /* the left channel in out (the right in out_r) */
 {
     uint32_t i;
     memset(out, 0, n * sizeof out[0]);
+    memset(out_r, 0, n * sizeof out_r[0]);
     for (i = 0; i < n; i += 128u)
-        s7_render(out + i, n - i < 128u ? n - i : 128u);
+        s7_render(out + i, out_r + i, n - i < 128u ? n - i : 128u);
 }
 
 static float rms_db(const float *x, uint32_t n)
@@ -389,6 +390,29 @@ static void test_multi(void)
     s7_kill();
 }
 
+/* the mix: a slot's gains left and right; another slot's voice untouched */
+static void test_mix(void)
+{
+    float l, r, l0;
+    (void)make_sine(1000.0f, 32000, 1800.0f);
+    slot_setup(32000);
+    s7_note_on(0, 60, 100);
+    render(4410);
+    l0 = rms_db(out + 1000, 3000);
+    CHECK(fabsf(rms_db(out_r + 1000, 3000) - l0) < 0.01f, "as it was: both sides the same");
+    s7_mix(0, 0.5f, 0.0f);                /* half, hard left: as it plays */
+    render(4410);
+    l = rms_db(out + 1000, 3000);
+    r = rms_db(out_r + 1000, 3000);
+    CHECK(fabsf(l - (l0 - 6.0206f)) < 0.05f && r < -200.0f, "half, left: %.2f dB (%.2f), right %.1f", l - l0, l0, r);
+    s7_mix(1, 0.0f, 0.0f);                /* another slot's: nothing here */
+    render(4410);
+    CHECK(fabsf(rms_db(out + 1000, 3000) - l) < 0.01f, "another slot's mix: not this one's");
+    s7_mix(0, 1.0f, 1.0f);
+    s7_mix(1, 1.0f, 1.0f);
+    s7_kill();
+}
+
 int main(void)
 {
     s7_init(FS);
@@ -401,6 +425,7 @@ int main(void)
     test_level();
     test_vibrato();
     test_multi();
+    test_mix();
     printf("engine: %d checks, %d failed\n", checks, fails);
     return fails != 0;
 }

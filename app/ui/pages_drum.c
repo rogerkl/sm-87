@@ -4,9 +4,14 @@
  * SEL + a pad held erases that pad's hits as they come by); OCT+ held is the HR-16's FILL (a pad held repeats at the
  * quantize rate, recorded too); PLAY plays the drums alone, SEL + PLAY continues.
  * ALGO turns to its functions: STEP EDIT (below), LENGTH, ERASE (a pad's hits, or the pattern), COPY (appended to
- * another), OFFSET (a pad's hits or all moved by clocks, -99..99, round at the ends), PAD SOUND (a pad's sound,
- * tuning, level, pan; REC: as the kit has it), PAD MIDI (its note, group, voices; the drums' channel), each done
- * with REC. A pad key on a pad's function chooses it. Part of the unity build (app.c, after ui/pages_seq.c).
+ * another), OFFSET (a pad's hits or all moved by clocks, -99..99, round at the ends), PAD SOUND, PAD MIDI (its note,
+ * group, voices; the drums' channel; REC: the pad as the kit has it, SEL: all of them), each done with REC. A pad key
+ * on a pad's function chooses it. Part of the unity build (app.c, after ui/pages_seq.c).
+ *
+ * PAD SOUND: a pad's sound, tuning, level, pan, as the pattern playing (stopped: chosen) has them, the HR-16's VOICE,
+ * TUNE and MIX: "01 KICK   GLOBAL" while it has none of its own (an edit is the global set-up's, every such
+ * pattern's), "01 KICK   PAT 05" with its own (an edit, PAT 05*, the pads' until REC stores it; another pattern
+ * taken, gone). REC: the pads' sounds kept with the pattern; SEL + REC: its own let go (the global set-up's again).
  *
  * STEP EDIT, the HR-16's: "STEP 001 + 00/96", the beat and the clock in it, over the hit there ("SNARE  V100 1/2",
  * EMPTY without one). SELECT goes from place to place: each step of the quantize grid (swung), and each hit, on or
@@ -301,7 +306,8 @@ static void dr_turn(uint32_t enc, int32_t e, uint32_t btn)
         else if (enc == EN_K2)    /* the pads, then all of them */
             dr.pad = (uint8_t)clamp((int32_t)dr.pad + e, 0, HR_PADS);
         break;
-    case DF_SOUND:
+    case DF_SOUND: {              /* (the player changes the pads' sounds as the pattern changes: held) */
+        uint32_t f = plat_lock();
         if (enc == EN_K1) {       /* none, the kit's, the slots */
             int32_t s = p->sound == HR_NO_SOUND ? -1 : (int32_t)p->sound;
             s = clamp(s + e, -1, (int32_t)hr_sounds() - 1);
@@ -313,9 +319,14 @@ static void dr_turn(uint32_t enc, int32_t e, uint32_t btn)
         } else if (enc == EN_K4) {
             p->pan = (int8_t)clamp(p->pan + e, -HR_PAN_MAX, HR_PAN_MAX);
         }
-        set_dirty = 1;
+        hr_pad_changed(dr.pad % HR_PADS);
+        if (!hr_snd.own)
+            set_dirty = 1;        /* (the global set-up's) */
+        plat_unlock(f);
         break;
-    case DF_MIDI:
+    }
+    case DF_MIDI: {
+        uint32_t f = plat_lock();
         if (enc == EN_K1)
             p->note = (uint8_t)clamp((int32_t)p->note + e, 0, 127);
         else if (enc == EN_K2)
@@ -324,8 +335,11 @@ static void dr_turn(uint32_t enc, int32_t e, uint32_t btn)
             p->poly = (uint8_t)clamp((int32_t)p->poly + e, 1, 2);
         else if (enc == EN_K4)
             set.dr_channel = (uint8_t)clamp((int32_t)set.dr_channel + e, 0, 15);
+        hr_pad_changed(dr.pad % HR_PADS);
+        plat_unlock(f);
         set_dirty = 1;
         break;
+    }
     default:
         break;
     }
@@ -385,14 +399,39 @@ static void dr_rec(uint32_t btn)
         r = hr_offset(p, dr.pad, dr.off, sq_scratch);
         dr_say(r, dr.pad < HR_PADS ? "PAD MOVED" : "PATTERN MOVED");
         break;
-    case DF_SOUND:
-    case DF_MIDI:                 /* the pad as the kit has it; SEL: all of them */
+    case DF_SOUND: {              /* the pads' sounds kept with the pattern; SEL: its own let go */
+        char n[4], t[LCD_COLS + 1];
+        uint32_t sp = hr_snd.p;
+        if (sp >= SQ_PATTERNS)
+            return;
+        t[0] = 0;
+        str_cat(t, "PATT ");
+        fmt_uint(n, sp, 2, '0');
+        str_cat(t, n);
+        if (btn >> B_SEL & 1u) {
+            r = hr_sounds_drop(sp);
+            app_say("GLOBAL SOUNDS", t);
+        } else {
+            if ((r = hr_sounds_store(sp)) != 0) {
+                app_say("MEMORY FULL", "");
+                return;
+            }
+            app_say("SOUNDS STORED", t);
+        }
+        break;
+    }
+    case DF_MIDI: {               /* the pad as the kit has it; SEL: all of them */
+        uint32_t f = plat_lock();
         for (i = 0; i < HR_PADS; i++)
-            if ((btn >> B_SEL & 1u) || i == dr.pad)
+            if ((btn >> B_SEL & 1u) || i == dr.pad) {
                 hr_pad_default(i);
+                hr_pad_changed(i);
+            }
+        plat_unlock(f);
         set_dirty = 1;
         app_say((btn >> B_SEL & 1u) ? "PADS AS THE KIT" : "PAD AS THE KIT", "");
         return;
+    }
     default:
         return;
     }
@@ -574,8 +613,23 @@ static void dr_draw(int sel_held)
         ed_lr(t, dr.pad < HR_PADS ? hr_pad_name(dr.pad) : "ALL PADS", n);
         lcd_row(1, t);
         return;
-    case DF_SOUND:
-        dr_pad_title(t, dr.pad);
+    case DF_SOUND: {              /* "01 KICK   GLOBAL", "06 RIDE  PAT 05*" */
+        const char *nm = hr_pad_name(dr.pad % HR_PADS);
+        char l[LCD_COLS + 1];
+        fmt_uint(l, dr.pad % HR_PADS + 1u, 2, '0');
+        if (!(nm[0] == 'P' && nm[1] == 'A' && nm[2] == 'D' && nm[3] == ' ')) {   /* (unnamed: its number) */
+            str_cat(l, " ");
+            str_cat(l, nm);
+        }
+        n[0] = 0;
+        if (hr_snd.own) {
+            str_cat(n, "PAT ");
+            fmt_uint(n + 4, hr_snd.p, 2, '0');
+            str_cat(n, hr_snd.edited ? "*" : "");
+        } else {
+            str_cat(n, "GLOBAL");
+        }
+        ed_lr(t, l, n);
         lcd_row(0, t);
         for (i = 0; i < LCD_COLS; i++)   /* "CYMBL  -3 85 <>" */
             t[i] = ' ';
@@ -597,6 +651,7 @@ static void dr_draw(int sel_held)
         }
         lcd_row(1, t);
         return;
+    }
     case DF_MIDI:
         dr_pad_title(t, dr.pad);
         lcd_row(0, t);

@@ -14,11 +14,179 @@ index dca067b..c4f5e05 100644
  #define WEB_SX_MAX 640u
  static uint8_t wsx_in[WEB_SX_IN];
  __attribute__((used, visibility("default"))) uint8_t *web_sx_in_buf(void) { return wsx_in; }
+diff --git a/web/emu/parts/midi.js b/web/emu/parts/midi.js
+index ab599d5..0fd66e2 100644
+--- a/web/emu/parts/midi.js
++++ b/web/emu/parts/midi.js
+@@ -6,9 +6,11 @@
+ // (an app with APP_SYSEX gets and sends whole frames). The choice is kept in this browser and asked again on the
+ // next visit only if it was made before.
+ // Other parts reach the same MIDI (the port part: another page): toDevice(bytes) and fromDevice(fn) below.
++// What goes wrong shows on the page (its alert line): a port that would not open, a message the browser would not
++// send, a SysEx the FM-1 sent with no MIDI out to go to, what the worklet's side lost (a frame too long for the app).
+ // The worklet's side is midi_worklet.js.
+ 
+-let post = null;
++let post = null, say = null, said = "";
+ const listeners = new Set();
+ 
+ /** whole MIDI messages (a Uint8Array or an array of bytes) into the FM-1, as from its USB port */
+@@ -21,12 +23,29 @@ export function fromDevice(fn) {
+   return () => listeners.delete(fn);
+ }
+ export function message(m) {
++  if (m.error) tell(m.error);
+   for (const msg of m.msgs || []) for (const fn of listeners) fn(msg);
+ }
+ 
++// ------------------------------------------------------------------ what went wrong, on the page's alert line
++const hex = (m) => Array.from(m.slice(0, 6), (b) => b.toString(16).padStart(2, "0")).join(" ") +
++  (m.length > 6 ? ` … (${m.length} bytes)` : "");
++const why = (e) => (e && (e.name && e.message ? `${e.name}: ${e.message}` : e.message)) || String(e);
++function tell(text) {
++  said = text;
++  if (say) say(text); else console.warn(text);
++}
++function untell() {                       // (a new choice: the last word said taken back, if it is still the one shown)
++  const a = document.getElementById("alert");
++  if (said && say && a && a.textContent === said) say("");
++  said = "";
++}
++
+ // ------------------------------------------------------------------ Web MIDI ports
+ const NONE = "";
+ let access = null, input = null, output = null, prefsKey = "", prefs = {};
++let unsent = 0, warned = false;           // since the ports were chosen: messages the browser would not send; a SysEx
++                                          // with no MIDI out said
+ const readPrefs = () => { try { return JSON.parse(localStorage.getItem(prefsKey) || "{}"); } catch { return {}; } };
+ const savePrefs = () => { try { localStorage.setItem(prefsKey, JSON.stringify(prefs)); } catch { /* private window */ } };
+ 
+@@ -42,15 +61,46 @@ function fill(sel, ports, want) {
+   sel.value = [...sel.options].some((o) => o.value === want) ? want : NONE;
+ }
+ function onInput(e) { toDevice(e.data); }
++// a port newly chosen opened now, so that one the system will not give (in use by another program, say) is told
++function opening(port, dir) {
++  if (!port.open) return;
++  port.open().then(() => {
++    if (port.connection !== "open") tell(`MIDI ${dir} ${port.name}: ${port.connection}, not open`);
++  }, (e) => tell(`MIDI ${dir} ${port.name} could not be opened: ${why(e)}`));
++}
+ function choose(ui, save) {
++  const was = { input, output };
+   if (input) input.onmidimessage = null;
+   input = [...access.inputs.values()].find((p) => p.name === ui.inSel.value) || null;
+   output = [...access.outputs.values()].find((p) => p.name === ui.outSel.value) || null;
+   if (input) input.onmidimessage = onInput;
++  if (save) { untell(); unsent = 0; warned = false; }
++  if (input && input !== was.input) opening(input, "in");
++  if (output && output !== was.output) opening(output, "out");
+   if (!save) return;                      // (a port gone for now stays the choice for when it comes back)
+   prefs = { on: true, in: ui.inSel.value, out: ui.outSel.value };
+   savePrefs();
+ }
++// what the FM-1 sends, out of the chosen output
++function send(msg) {
++  if (!access) return;                    // (MIDI ports not asked for: nothing is meant to go out)
++  if (!output || output.state === "disconnected") {
++    // a SysEx is a reply or a dump something waits for: told once (notes and clock with no output are a choice)
++    if (msg[0] === 0xf0 && !warned) {
++      const name = output ? output.name : prefs.out;
++      tell(`The FM-1 sent ${hex(msg)}, but ` + (name ? `MIDI out ${name} is not there.` : "no MIDI out is chosen."));
++      warned = true;
++    }
++    return;
++  }
++  try {
++    output.send(msg);
++  } catch (e) {
++    unsent++;
++    tell(`MIDI out ${output.name}: ${unsent === 1 ? "a message" : unsent + " messages"} not sent, the last ` +
++      `${hex(msg)}: ${why(e)}`);
++  }
++}
+ function refresh(ui) {
+   fill(ui.inSel, access.inputs, input ? input.name : prefs.in);
+   fill(ui.outSel, access.outputs, output ? output.name : prefs.out);
+@@ -73,13 +123,10 @@ async function open(ui, status) {
+ 
+ export function attach(ctx) {
+   post = ctx.post;
++  say = ctx.status || null;
+   prefsKey = `${ctx.id}-emu-midi`;
+   prefs = readPrefs();
+-  fromDevice((msg) => {
+-    if (output && output.state !== "disconnected") {
+-      try { output.send(msg); } catch { /* the port went meanwhile: statechange follows */ }
+-    }
+-  });
++  fromDevice(send);
+   if (!ctx.bar) return;
+   const box = el("span", { class: "midi" });
+   const ask = el("button", { type: "button" }, "MIDI ports");
 diff --git a/web/emu/parts/midi_worklet.js b/web/emu/parts/midi_worklet.js
-index 05c04c2..3999e7c 100644
+index 05c04c2..8083a99 100644
 --- a/web/emu/parts/midi_worklet.js
 +++ b/web/emu/parts/midi_worklet.js
-@@ -53,7 +53,7 @@ function sysexIn(ex, frame) {
+@@ -5,11 +5,14 @@
+ // as USB-MIDI packets (web_midi_in, PORT_USB), a SysEx frame whole to the app (web_sx_in, an app with APP_SYSEX;
+ // dropped otherwise, as a device without a SysEx handler drops it). Out, before each render quantum: what the app
+ // sent (web_out_pkts, as USB-MIDI packets; web_sx_out_*, its SysEx frames) as whole messages to the page,
+-// { msgs: [Uint8Array, ...] }. The page's side is midi.js.
++// { msgs: [Uint8Array, ...] }. What is lost on the way (a frame too long for the app, one cut short) goes to the page
++// as { error: text }, which shows it. The page's side is midi.js.
+ 
+ const PORT_USB = 0;
+ const dataLen = (s) => (s >= 0xf8 || s === 0xf6 ? 0 : s === 0xf1 || s === 0xf3 || (s & 0xe0) === 0xc0 ? 1 : 2);
+ const CIN_BYTES = [0, 0, 2, 3, 3, 1, 2, 3, 3, 3, 3, 3, 2, 2, 3, 1];   // a USB-MIDI packet's bytes by its code index
++const hex = (m) => Array.from(m.slice(0, 6), (b) => b.toString(16).padStart(2, "0")).join(" ") + (m.length > 6 ? " …" : "");
++const lost = (fm1, text) => fm1.part("midi", { error: text });
+ 
+ function packet(m) {
+   const s = m[0];
+@@ -18,7 +21,7 @@ function packet(m) {
+ }
+ 
+ // the bytes in: SysEx collected, channel messages with running status, real time anywhere
+-let sx = null, status = 0, cur = [];
++let sx = null, status = 0, cur = [], told = false;
+ function feed(fm1, bytes) {
+   const ex = fm1.ex;
+   for (const b of bytes) {
+@@ -27,10 +30,11 @@ function feed(fm1, bytes) {
+     if (sx) {
+       if (b < 0x80 || b === 0xf7) {
+         sx.push(b);
+-        if (b === 0xf7) { sysexIn(ex, sx); sx = null; }
++        if (b === 0xf7) { sysexIn(fm1, sx); sx = null; }
+         continue;
+       }
+-      sx = null;                            // (a status byte inside: the frame is lost, the status taken)
++      lost(fm1, `MIDI in: a SysEx (${hex(sx)}, ${sx.length} bytes) lost, a status byte ${hex([b])} inside it`);
++      sx = null;                            // (the status taken)
+     }
+     if (b & 0x80) {
+       if (b === 0xf7) continue;
+@@ -46,14 +50,24 @@ function feed(fm1, bytes) {
+     if (cur.length === 1 + dataLen(cur[0])) { ex.web_midi_in(PORT_USB, packet(cur)); cur = []; }
+   }
+ }
+-function sysexIn(ex, frame) {
+-  if (!ex.web_sx_in || frame.length > ex.web_sx_in_max()) return;
++function sysexIn(fm1, frame) {
++  const ex = fm1.ex;
++  if (!ex.web_sx_in) {                      // (once: the app takes none, as it means to)
++    if (!told) lost(fm1, `MIDI in: a SysEx (${hex(frame)}) not taken, this app has no APP_SYSEX`);
++    told = true;
++    return;
++  }
++  if (frame.length > ex.web_sx_in_max()) {
++    lost(fm1, `MIDI in: a SysEx (${hex(frame)}) of ${frame.length} bytes lost, the emulator takes ${ex.web_sx_in_max()} ` +
++      "(APP_WEB_SX_IN in the app's app.h)");
++    return;
++  }
+   new Uint8Array(ex.memory.buffer, ex.web_sx_in_buf(), frame.length).set(frame);
+   ex.web_sx_in(frame.length);
  }
  
  // the bytes out: packets (a SysEx in packets too, CIN 4..7) and the app's frames, as whole messages
@@ -27,7 +195,7 @@ index 05c04c2..3999e7c 100644
  function drain(fm1) {
    const ex = fm1.ex, msgs = [];
    const n = ex.web_out_n();
-@@ -74,12 +74,18 @@ function drain(fm1) {
+@@ -74,12 +88,22 @@ function drain(fm1) {
      ex.web_out_clear();
    }
    if (ex.web_sx_out_len && ex.web_sx_out_len()) {
@@ -37,7 +205,11 @@ index 05c04c2..3999e7c 100644
      for (let at = 0; at < all.length;) {
 -      let k = at + 1;
 +      let k = at;
-+      if (all[k] === 0xf0) { ostream = []; k++; }
++      if (all[k] === 0xf0) {
++        if (ostream) lost(fm1, `MIDI out: a SysEx the app sent (${hex(ostream)}, ${ostream.length} bytes) lost, cut short by the next F0`);
++        ostream = [];
++        k++;
++      }
        while (k < all.length && all[k] !== 0xf7 && all[k] !== 0xf0) k++;
 -      const end = k < all.length && all[k] === 0xf7 ? k + 1 : k;   // (a frame cut short: up to the next F0)
 -      if (all[end - 1] === 0xf7) msgs.push(all.slice(at, end));

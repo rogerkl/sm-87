@@ -1,6 +1,6 @@
 /* SM-87: the HR-16: its patterns (hits in, out, a pad's out, the length, COPY), quantize with swing, the player (alone,
- * with the sequencer's part, a song's steps), recording as it loops, and the pads' voices (the hats' group, a pad's
- * poly, the pan). Built and run by test/run.sh */
+ * with the sequencer's part, a song's steps), recording as it loops, the pads' voices (the hats' group, a pad's poly,
+ * the pan), and a pattern's own sounds. Built and run by test/run.sh */
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -446,11 +446,111 @@ static void test_voices(void)
     hr_note(49, 100);
     CHECK(hr_voices_active() == 1u && hr_pad_of(49) == 3 && hr_pad_of(99) == -1, "note 49: the crash");
     hr_kill();
-    /* a slot as a pad's sound, renumbered when the kit grows: SLOT01 of a kit of 3, then of 5 */
-    hr_pad[7].sound = 3;
+    /* a slot as a pad's sound in the global set-up, renumbered when the kit changes: SLOT01 of a kit of 3, then of 2 */
+    hr_std[7].sound = 3;
     hr_kit_use(KIT, 2, KIT_PAD, 4);
     hr_pads_rekit(3);
-    CHECK(hr_pad[7].sound == 2u, "the kit one shorter: SLOT01 is sound %u", hr_pad[7].sound);
+    CHECK(hr_std[7].sound == 2u, "the kit one shorter: SLOT01 is sound %u", hr_std[7].sound);
+}
+
+/* a pattern's own sounds: stored, edited (the pads' until stored), taken as the pattern changes, copied, let go */
+static void same_as_std(int *ok)
+{
+    uint32_t i;
+    for (i = 0; i < HR_PADS; i++)
+        *ok &= hr_pad[i].sound == hr_std[i].sound && hr_pad[i].tune == hr_std[i].tune &&
+               hr_pad[i].level == hr_std[i].level && hr_pad[i].pan == hr_std[i].pan;
+}
+
+static void test_sounds(void)
+{
+    uint32_t i;
+    int ok = 1;
+    sq_clear();
+    sqp_init(FS);
+    hr_kit_use(KIT, 3, KIT_PAD, 4);
+    for (i = 0; i < HR_PADS; i++) {
+        hr_pad_default(i);
+        hr_std[i] = hr_pad[i];
+    }
+    hr_sounds_apply(0);
+    CHECK(hr_snd.p == 0u && !hr_snd.own && !hr_sounds_own(0), "pattern 0: the global set-up's");
+    /* an edit of the global set-up's: the set-up's too */
+    hr_pad[1].tune = 5;
+    hr_pad_changed(1);
+    CHECK(hr_std[1].tune == 5 && !hr_snd.edited, "a global edit: in the set-up (%d)", hr_std[1].tune);
+
+    /* kept with pattern 2: an edit its own, until stored; another pattern taken, gone */
+    hr_sounds_apply(2);
+    hr_pad[0].sound = 3 + 1;              /* SLOT02 */
+    hr_pad[0].level = 40;
+    hr_pad[0].pan = -2;
+    hr_pad_changed(0);                    /* (still the global set-up's: it takes them) */
+    CHECK(hr_sounds_store(2) == 0 && hr_sounds_own(2) && hr_snd.own && hr_snd.p == 2u && !hr_snd.edited &&
+              sq_len(SQ_PSND(2)) == SQ_SOUNDS_LEN,
+          "stored with pattern 2");
+    hr_std[0].sound = 0;                  /* (the set-up as it was) */
+    hr_std[0].level = 99;
+    hr_std[0].pan = 0;
+    hr_pad[2].level = 10;
+    hr_pad_changed(2);
+    CHECK(hr_snd.edited && hr_std[2].level == 99u, "its own edited: not the set-up's (%u)", hr_std[2].level);
+    hr_pad[2].level = 99;
+    hr_pad_changed(2);
+    CHECK(!hr_snd.edited, "edited back: as stored");
+    hr_pad[2].level = 10;
+    hr_pad_changed(2);
+    hr_sounds_apply(3);
+    same_as_std(&ok);
+    CHECK(ok && !hr_snd.own && hr_snd.p == 3u, "pattern 3: the set-up's");
+    hr_sounds_apply(2);
+    CHECK(hr_snd.own && !hr_snd.edited && hr_pad[2].level == 99u && hr_pad[0].sound == 4u && hr_pad[0].level == 40u &&
+              hr_pad[0].pan == -2 && hr_pad[1].tune == 5,
+          "pattern 2 again: as stored, the edit gone (%u)", hr_pad[2].level);
+
+    /* the player: the pads take the sounds of the pattern as it changes */
+    hr_set_length(2, 1, scratch);
+    hr_set_length(3, 1, scratch);
+    hrp.pattern = 3;
+    hr_sounds_apply(3);
+    sqp_aux_play(0);
+    ticks(2);
+    CHECK(!hr_snd.own && hr_snd.p == 3u, "playing pattern 3");
+    hrp.next = 2;
+    ticks(96);
+    CHECK(hrp.pattern == 2u && hr_snd.own && hr_snd.p == 2u && hr_pad[0].sound == 4u,
+          "pattern 2 at 3's end: its sounds (pad 1: %u)", hr_pad[0].sound);
+    sqp_stop();
+
+    /* the kit grown: a slot stays the slot, a kit sound its number */
+    hr_kit_use(KIT, 2, KIT_PAD, 4);
+    hr_sounds_apply(2);
+    CHECK(hr_pad[0].sound == 3u && hr_pad[1].sound == 1u, "a kit of 2: SLOT02 is %u", hr_pad[0].sound);
+    hr_kit_use(KIT, 1, KIT_PAD, 4);
+    hr_sounds_apply(2);
+    CHECK(hr_pad[0].sound == 2u && hr_pad[1].sound == HR_NO_SOUND, "a kit of 1: the snare gone (%u)",
+          hr_pad[1].sound);
+    hr_kit_use(KIT, 3, KIT_PAD, 4);
+
+    /* COPY: to a pattern without hits, its sounds too; to one with, that one's kept */
+    hr_add(2, 0, 0, 100, scratch);
+    CHECK(hr_copy(2, 5, scratch) == 0 && hr_sounds_own(5) &&
+              !memcmp(sq_data(SQ_PSND(5)), sq_data(SQ_PSND(2)), SQ_SOUNDS_LEN),
+          "copied to an empty pattern: its sounds too");
+    hr_add(6, 0, 1, 100, scratch);
+    CHECK(hr_copy(2, 6, scratch) == 0 && !hr_sounds_own(6) && hr_hits(6) == 2u, "appended: 6's (none) kept");
+    CHECK(hr_copy(3, 5, scratch) == 0 && hr_sounds_own(5), "appended to 5: its own kept");
+    hr_erase(5, HR_PADS, scratch);
+    CHECK(hr_sounds_own(5), "erased: its sounds kept");
+    CHECK(hr_copy(3, 5, scratch) == 0 && !hr_sounds_own(5), "3 copied to 5 (erased): 3's, none");
+
+    /* let go: the set-up's again */
+    hr_sounds_apply(2);
+    CHECK(hr_sounds_drop(2) == 0 && !hr_sounds_own(2) && !hr_snd.own && sq_len(SQ_PSND(2)) == 0u, "2's let go");
+    ok = 1;
+    same_as_std(&ok);
+    CHECK(ok, "the pads: the set-up's");
+    CHECK(sq_valid(), "the memory holds together");
 }
 
 int main(void)
@@ -461,6 +561,7 @@ int main(void)
     test_step();
     test_offset_fill();
     test_voices();
+    test_sounds();
     printf("hr16: %d checks, %d failed\n", checks, fails);
     return fails != 0;
 }

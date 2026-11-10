@@ -50,6 +50,8 @@ on an FM-1 yet** (see *On the device*).
     built into the firmware (`resources/kit`), or any of the sampler's 16 slots.
   - 100 patterns of up to 682 beats, in the sequencer's memory. Recorded as they loop, each hit quantized (1/4 ..
     1/64, or off) and swung (50-75%) as it goes in, the HR-16's way. Its STEP EDIT, OFFSET and FILL too.
+  - A pattern can keep its own sounds, as the HR-16 stores VOICE, TUNE and MIX with a pattern; one without them
+    plays the pads' global set-up.
   - With the MMT-8: one clock and tempo. A song step chooses the drum pattern that plays with it (or none). Playing
     a part, the drums loop their own pattern beside it. On their own page they play alone.
 - **The screen** is a 2 × 16 character LCD, drawn dot by dot, with a status strip under it.
@@ -70,12 +72,12 @@ on an FM-1 yet** (see *On the device*).
 | ALGO (SEQ) | The MMT-8's functions, below; SEQ goes back to the part or song |
 | SELECT / K3 (SONG, stopped) | The step / its part (at the END: appends the last part; past 99: the song ends there) |
 | ARP | The drum machine's page (below); from one of its functions: back to the pattern |
-| EDIT | The sampler's pages round: POINTS (START, END), LOOP (LOOP, MODE), TUNE (ROOT, FINE, RATE), KEYS (LO, HI, TRANSPOSE, CONSTANT) |
+| EDIT | The sampler's pages round: POINTS (START, END), LOOP (LOOP, MODE), TUNE (ROOT, FINE, RATE), KEYS (LO, HI, TRANSPOSE, CONSTANT), CLEAR (REC empties the slot) |
 | ENV | OUT (FILTER, RELEASE, LEVEL), then the velocity amounts |
 | LFO | SPEED, DEPTH, DELAY, PRESSURE |
 | SELECT / K1-K4 (sampler pages) | The slot / the page's values. The strip under the LCD shows the slot, its sample and the program |
 | HOME | The sampler's overview |
-| GLO | MIDI: K1 the sampler's channel, K2 its mode (OMNI OFF, ON, MULTI), K3 the pitch bend's range, K4 the drums' channel |
+| GLO | MIDI: K1 the sampler's channel, K2 its mode (OMNI OFF, ON, MULTI), K3 the pitch bend's range, K4 the drums' channel. GLO again: the MIX (below) |
 | SAVE | Lit when something isn't saved: settings, the sample parameters, the sequencer (stopped) |
 
 ### MIDI modes (GLO)
@@ -96,6 +98,17 @@ from the keys then plays P5 when its channel is UNCHANGED. To give an existing t
 Channel 10 is the drums' too. In MULTI it also plays program 10.
 
 OVS (Akai's overall settings) carries the mode both ways.
+
+### The mix (GLO, then GLO again)
+
+`LEV PAN SLOT DRM` / `99  L20  01  99`:
+- K1 sets a sampler slot's level (0-99, a fader's curve), and K2 its pan (L50 .. C .. R50).
+- K3 or SELECT chooses the slot.
+- K4 sets the drums' bus level; the pads are panned on their own (PAD SOUND).
+
+The S700 is mono, so by default every slot is at full level in the middle, and sounds as before. The level and pan
+belong to the slot, like a mixer's channel strip, so a sample sent to the slot keeps them. They act at once, on notes
+already sounding too, and are kept in the settings (SAVE).
 
 ### The drum machine (ARP)
 
@@ -124,10 +137,26 @@ when the drums play alone, or beside a part; it doesn't record in a song.
 | ERASE | A pad, or all (a pad's key chooses it) | | | | Erases that pad's hits, or the whole pattern |
 | COPY | The pattern to | | | | Appends the pattern to the other (an empty one gets a copy; itself: twice as long) |
 | OFFSET | Clocks, -99..99 (384ths; SEL: tens) | A pad, or all (a pad's key chooses it) | | | Moves the hits that much later (+) or earlier; past the end round to the start, and back. Again: as much again |
-| PAD SOUND | The sound: the kit's, then SLOT01-16 | Tuning, ±24 | Level | Pan, <3 .. 3> | The pad as the kit sets it; SEL + REC: all of them |
-| PAD MIDI | Its note | Its group (pads that cut each other) | Voices, 1 or 2 | The drums' channel | As PAD SOUND |
+| PAD SOUND | The sound: the kit's, then SLOT01-16 | Tuning, ±24 | Level | Pan, <3 .. 3> | Keeps the pads' sounds with the pattern; SEL + REC: lets them go (the global set-up again) |
+| PAD MIDI | Its note | Its group (pads that cut each other) | Voices, 1 or 2 | The drums' channel | The pad as the kit sets it (sound and MIDI); SEL + REC: all of them |
 
 On a pad's function, a pad's key chooses it (and plays it); so does SELECT.
+
+**A pattern's own sounds** are the HR-16's VOICE, TUNE and MIX stored with a pattern: each pad's sound, tuning,
+level and pan. PAD SOUND's top line says whose the pads have:
+- **`01 KICK   GLOBAL`**: the pattern has none of its own and plays the global set-up. An edit changes the set-up,
+  for every pattern without its own, and is kept with the settings (as before patterns had sounds).
+- **`01 KICK   PAT 05`**: pattern 05's own. An edit shows `PAT 05*` and lasts until REC stores it, or until another
+  pattern is chosen or comes in, which loses it, as on the HR-16.
+- **REC keeps the pads' sounds with the pattern**, all 16 pads at once. **SEL + REC lets them go**: the pattern plays
+  the global set-up again.
+- **The pads change with the pattern** as it starts: one queued, or a song step's. When stopped, they have the
+  chosen pattern's sounds.
+- **COPY** to an empty pattern copies its sounds too; appending to a pattern with hits keeps that pattern's. ERASE
+  keeps them.
+- **A pad's MIDI** (note, group, voices) is the same in every pattern.
+- Each pattern's sounds take 64 bytes of the sequencer's memory. They keep a kit sound by its number and a slot as
+  the slot, so a kit grown later leaves them as they were. A memory saved before this loads with none.
 
 **STEP EDIT** is the HR-16's step mode. `STEP 001 + 24/96` is beat 1, clock 24 of 96, and below it is the hit there
 (`CLHAT  V 40 2/2`: the closed hat at velocity 40, the second of two hits), or EMPTY.
@@ -237,8 +266,23 @@ while the slot isn't in the program (the strip says OUT). One detent of K1 (LO) 
 keyboard, C0-D#6; then K1 raises the low key and K2 lowers the high one. Turning LO past HI (or HI under LO) takes the
 slot out again, and one detent back puts it in on the same keys. SAVE keeps it.
 
-Samples received over MIDI are written to the flash at once, and their parameters are saved 3 s after the transfer
-goes quiet.
+**Clearing a slot:** EDIT to the CLEAR page (the last of the round), SELECT to the slot, then REC.
+- The page shows what the slot holds: `BUILT-IN SAMPLE`, `SAMPLE 48K` (the flash it takes), or `TEST TONE`, where
+  there's nothing to clear. The strip under the LCD gives the sample's name.
+- REC takes the sample out, whether it was built in or received over MIDI. The slot is then as an X7000's empty one:
+  the test tone, its parameters as the sampler starts them, in no program. A received sample's flash is free for the
+  next.
+- SAVE keeps it, and so does a sample received after it (that saves the slots, see below). Until then, a power cycle
+  brings the sample back. A built-in sample stays cleared until a firmware with other built-in samples is installed,
+  which fills the empty slots with its own.
+- The drum kit's sounds aren't in the slots, so CLEAR doesn't touch them. A pad set to play a slot plays the test tone
+  once that slot is cleared.
+
+Samples received over MIDI are written to the flash at once. The slots (the sample each one plays, and every slot's
+parameters, panel edits too) are saved 3 s after the transfer goes quiet. If the power goes before that, the slots
+come back as they were last saved. A slot cleared or replaced since then comes back empty (the test tone) when the new
+sample took its flash, never playing the new sample's data: a dump saves the slots first before writing over a sample
+they still name.
 
 ## Layout
 
@@ -247,7 +291,7 @@ goes quiet.
 | `app/` | The firmware: `app.c` (glue, routing, render, pages), `fm1.toml`, `app.h` (contract, flash map) |
 | `app/s700/` | The sampler: `s7engine.c` (voices), `s7mem.c` (flash pool, directory), `sds.c` (sample dump, SPRM, OVS) |
 | `app/mmt8/` | The sequencer: `seq.c` (memory, takes, edits), `player.c` (clock, MIDI clock in, playback, recording, songs), `mmtdump.c` (the MMT-8's SysEx dump) |
-| `app/hr16/` | The drum machine: `hrkit.c` (the kit, the pads, their voices), `hrpat.c` (patterns, their player, recording) |
+| `app/hr16/` | The drum machine: `hrkit.c` (the kit, the pads, a pattern's own sounds, their voices), `hrpat.c` (patterns, their player, recording) |
 | `app/ui/` | The LCD (`lcd.c`, a 5 × 7 font) and the pages; `seq_edit.c` the MMT-8's functions, `pages_drum.c` the HR-16's page |
 | `app/tests/` | Scripts for the host simulator (`sysex.txt` is generated by `test/gen_sysex_test.py`) |
 | `test/` | C unit tests against the X7000 measurements, Axs7's fixtures and the MMT-8's behaviour; `run.sh` runs all |
@@ -283,7 +327,8 @@ without a sampler or computer sending any:
   other WAVs give their `smpl` loop and root key, and are resampled to the nearest of the sampler's rates.
 - It takes S700/X7000 `.qd` disk images, with all their parameters and programs.
 - It writes `app/rom/rom_samples.h`. That file is not in the repository (the sounds aren't ours to publish) and is
-  built in while it exists. A dump sent to a slot replaces its built-in sample; `--none` removes the file.
+  built in while it exists. A dump sent to a slot replaces its built-in sample, CLEAR (EDIT) empties the slot, and
+  `--none` removes the file.
 
     W=../Axs7SdsW/sounds/wav
     .venv/bin/python tools/mkrom.py $W/85_grand_piano_e1.wav $W/86_grand_piano_c2.wav $W/87_grand_piano_a2.wav \
@@ -327,28 +372,46 @@ To talk to Axs7, make two virtual MIDI cables, e.g. "to SM87" and "from SM87" wi
 - **Emulator:** MIDI ports, input "to SM87", output "from SM87".
 - **Axs7:** output "to SM87", input "from SM87".
 
-Axs7 finds it as it finds an X7000, on channel 1, and sends and fetches samples (open loop: the FM-1 doesn't wait for
-ACKs and ignores them).
+Axs7 finds it as it finds an X7000, on channel 1, and sends and fetches samples. It answers a dump coming in with
+ACKS, one for the header and one for each block, as an X7000 does, so Axs7 says `SENT TO SLOT n`. Its own dumps go
+out open loop: it doesn't wait for ACKS and ignores them.
+
+Axs7 sends a sample's parameters (START, loop, scan mode, sound, key ranges) only after the sampler has answered its
+request for the slot's. It asks once, on the channel and identifier it remembers from the last answer, so after
+using a real X7000 on another channel it may not find SM-87. Its MIDI log then says `No parameters of slot n on
+channel c`, and the sample arrives without them. Either set the sampler's channel on SM-87 (GLO), or press REQUEST
+PARAMETERS in Axs7's system view once: it asks on every channel and remembers the answer.
+
+When MIDI goes wrong in the emulator, it says so in red under its bar:
+- a port that won't open (another program has it, say);
+- a message the browser won't send;
+- a SysEx the FM-1 sent with no MIDI out chosen, or with the chosen one gone;
+- a SysEx coming in that was lost (too long, or cut by a status byte).
+
+If Axs7 still hears nothing back and the page shows nothing, the replies did leave the browser, so look at the cable:
+the port names on both sides, and loopMIDI's activity for it.
 
 `node test/emu_test.mjs` drives the built `app.wasm` as a browser runs it (fm1-base's harness):
-- ROVS, a whole 32,752-word dump in, RSPRM, RSD back word for word, then the slot played.
+- ROVS, a whole 32,752-word dump in and its 547 ACKS, RSPRM, RSD back word for word, then the slot played.
 - An MMT-8 memory dump in, and back out.
 - A drum pattern recorded from MIDI and played out.
 
 `test/run.sh` runs it when there is a build.
 
-Two small changes to the fm1-base submodule make whole dumps work in the emulator. They're in
-`patches/fm1-base-emu-sysex.patch` (the submodule stays at upstream's commit); apply them after cloning, before
-building the emulator:
+Three small changes to the fm1-base submodule make whole dumps work in the emulator and show what goes wrong.
+They're in `patches/fm1-base-emu-sysex.patch` (the submodule stays at upstream's commit); apply them after cloning,
+before building the emulator:
 
     git -C fm1-base apply ../patches/fm1-base-emu-sysex.patch
 
-Both are worth sending upstream:
+All are worth sending upstream:
 - `web/emu/emu_web.c`: the frame size comes from `APP_WEB_SX_IN` in `app.h` (8 KB before), so a 66 KB dump arrives
   in one frame.
 - `web/emu/parts/midi_worklet.js`: a SysEx frame streamed over several frames of the main loop (plat_sysex_begin ..
   end, as the device allows) reaches the page whole. Before, only frames that were complete within one render
   quantum did.
+- `web/emu/parts/midi.js` and `midi_worklet.js`: MIDI that fails shows on the page's alert line (the list above).
+  Before, a failed send, a port that wouldn't open and a frame lost on the way all went unnoticed.
 
 ### On the device
 
@@ -381,6 +444,4 @@ The first things to measure on a device, before more is built on these assumptio
 
 ## Next
 
-- More of the HR-16: a pattern's sounds kept with it (the HR-16 stores its pads' voice, tuning and mix with a
-  pattern).
 - A dump sent to a real MMT-8, and MIDI clock in with `midi_stamp` (fm1.toml) for timing finer than a block.

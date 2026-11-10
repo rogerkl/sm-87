@@ -1,6 +1,6 @@
-/* SM-87: the HR-16's kit, pads and voices, see hr.h. The pads' voices: one a pad (a hit cuts its last), two for a pad
- * of poly 2 (the HR-16's crash), the hats one between them (a group: a hit cuts the others of its group); a voice
- * for a hit: a free one, else the oldest fading, else the oldest. */
+/* SM-87: the HR-16's kit, pads, a pattern's own sounds and the voices, see hr.h. The pads' voices: one a pad (a hit
+ * cuts its last), two for a pad of poly 2 (the HR-16's crash), the hats one between them (a group: a hit cuts the
+ * others of its group); a voice for a hit: a free one, else the oldest fading, else the oldest. */
 #include "hr.h"
 #include "fastmath.h"
 
@@ -17,7 +17,9 @@ static const hr_kit_pad_t HR_KIT_PAD[1];
 #endif
 
 hr_pad_t hr_pad[HR_PADS];
+hr_pad_t hr_std[HR_PADS];
 volatile uint32_t hr_lit;
+volatile hr_snd_t hr_snd = {0xFFu, 0u, 0u};
 
 static const hr_kit_sound_t *kit = HR_KIT;
 static uint32_t kit_n = HR_KIT_N;
@@ -101,7 +103,7 @@ void hr_pads_rekit(uint32_t was)
 {
     uint32_t i;
     for (i = 0; i < HR_PADS; i++) {
-        hr_pad_t *p = &hr_pad[i];
+        hr_pad_t *p = &hr_std[i];
         if (p->sound == HR_NO_SOUND)
             continue;
         if (p->sound >= was)      /* a slot: after the kit as it is now */
@@ -118,6 +120,144 @@ void hr_pads_rekit(uint32_t was)
             p->poly = 1;
         p->note &= 0x7Fu;
     }
+}
+
+/* ---------------------------------------------------------------------------- a pattern's own sounds --- */
+/* a sound as a pattern keeps it: the kit's by number (0..127), a slot as 0x80 + its number, none 0xFF */
+static uint8_t sound_code(uint32_t s)
+{
+    return s < kit_n ? (uint8_t)s : s < kit_n + S7_SLOTS ? (uint8_t)(0x80u + s - kit_n) : HR_NO_SOUND;
+}
+
+static uint8_t sound_from(uint32_t c)
+{
+    if (c < 0x80u)
+        return c < kit_n ? (uint8_t)c : HR_NO_SOUND;
+    return c - 0x80u < S7_SLOTS ? (uint8_t)(kit_n + c - 0x80u) : HR_NO_SOUND;
+}
+
+static int8_t in_range(int8_t v, int32_t max) { return v > max || v < -max ? 0 : v; }
+
+/* pad i's sound, tuning, level and pan, as pattern sounds d keep them, into x */
+static void take(hr_pad_t *x, const uint8_t *d, uint32_t i)
+{
+    d += 4u * i;
+    x->sound = sound_from(d[0]);
+    x->tune = in_range((int8_t)d[1], HR_TUNE_MAX);
+    x->level = d[2] > 99u ? 99u : d[2];
+    x->pan = in_range((int8_t)d[3], HR_PAN_MAX);
+}
+
+int hr_sounds_own(uint32_t p) { return p < SQ_PATTERNS && sq_len(SQ_PSND(p)) == SQ_SOUNDS_LEN; }
+
+void hr_sounds_apply(uint32_t p)
+{
+    int own = hr_sounds_own(p);
+    const uint8_t *d = own ? sq_data(SQ_PSND(p)) : 0;
+    uint32_t i;
+    for (i = 0; i < HR_PADS; i++) {
+        hr_pad_t *x = &hr_pad[i];
+        if (own) {
+            take(x, d, i);
+        } else {
+            x->sound = hr_std[i].sound;
+            x->tune = hr_std[i].tune;
+            x->level = hr_std[i].level;
+            x->pan = hr_std[i].pan;
+        }
+    }
+    hr_snd.p = p < SQ_PATTERNS ? (uint8_t)p : 0xFFu;
+    hr_snd.own = (uint8_t)own;
+    hr_snd.edited = 0;
+}
+
+/* the pads' sounds differ from the pattern's own */
+static int differs(uint32_t p)
+{
+    const uint8_t *d = sq_data(SQ_PSND(p));
+    uint32_t i;
+    hr_pad_t x;
+    for (i = 0; i < HR_PADS; i++) {
+        const hr_pad_t *y = &hr_pad[i];
+        take(&x, d, i);
+        if (x.sound != y->sound || x.tune != y->tune || x.level != y->level || x.pan != y->pan)
+            return 1;
+    }
+    return 0;
+}
+
+void hr_pad_changed(uint32_t pad)
+{
+    hr_pad_t *p, *g;
+    if (pad >= HR_PADS)
+        return;
+    p = &hr_pad[pad];
+    g = &hr_std[pad];
+    g->note = p->note;
+    g->group = p->group;
+    g->poly = p->poly;
+    if (hr_snd.own && hr_sounds_own(hr_snd.p)) {
+        hr_snd.edited = (uint8_t)differs(hr_snd.p);
+        return;
+    }
+    g->sound = p->sound;
+    g->tune = p->tune;
+    g->level = p->level;
+    g->pan = p->pan;
+}
+
+/* the pads take p's sounds again if they have them (its own changed) */
+static void again(uint32_t p)
+{
+    sq_lock();
+    if (hr_snd.p == p)
+        hr_sounds_apply(p);
+    sq_unlock();
+}
+
+int hr_sounds_store(uint32_t p)
+{
+    uint8_t b[SQ_SOUNDS_LEN];
+    uint32_t i;
+    if (p >= SQ_PATTERNS)
+        return -1;
+    for (i = 0; i < HR_PADS; i++) {
+        const hr_pad_t *x = &hr_pad[i];
+        b[4u * i] = sound_code(x->sound);
+        b[4u * i + 1u] = (uint8_t)x->tune;
+        b[4u * i + 2u] = x->level;
+        b[4u * i + 3u] = (uint8_t)x->pan;
+    }
+    if (sq_replace(SQ_PSND(p), b, SQ_SOUNDS_LEN) != 0)
+        return -1;
+    again(p);                     /* (the pads as they were: edits kept are stored now) */
+    return 0;
+}
+
+int hr_sounds_drop(uint32_t p)
+{
+    if (p >= SQ_PATTERNS)
+        return -1;
+    if (sq_len(SQ_PSND(p)) && sq_replace(SQ_PSND(p), 0, 0) != 0)
+        return -1;
+    again(p);
+    return 0;
+}
+
+int hr_sounds_copy(uint32_t a, uint32_t b)
+{
+    uint8_t t[SQ_SOUNDS_LEN];
+    uint32_t i;
+    if (a == b || a >= SQ_PATTERNS || b >= SQ_PATTERNS)
+        return 0;
+    if (!hr_sounds_own(a))
+        return hr_sounds_drop(b);
+    for (i = 0; i < SQ_SOUNDS_LEN; i++)   /* (out of the arena: sq_replace moves it) */
+        t[i] = sq_data(SQ_PSND(a))[i];
+    if (sq_replace(SQ_PSND(b), t, SQ_SOUNDS_LEN) != 0)
+        return -1;
+    again(b);
+    return 0;
 }
 
 /* ------------------------------------------------------------------------------------------- the voices --- */

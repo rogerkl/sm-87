@@ -101,12 +101,17 @@ int hr_copy(uint32_t a, uint32_t b, uint8_t *scratch)
     const uint8_t *d;
     if (!na && !sq.pattern[a].beats)
         return SQ_E_NONE;
-    if (!nb) {                    /* b without hits: a copy of a */
-        sq.pattern[b].beats = sq.pattern[a].beats;
+    if (!nb) {                    /* b without hits: a copy of a, its sounds too (the HR-16's) */
+        uint32_t snd = hr_sounds_own(a) ? SQ_SOUNDS_LEN : 0u;
         if (a == b)
             return 0;
+        if (na + snd > sq_free() + sq_len(SQ_PSND(b)))
+            return SQ_E_ROOM;     /* (all or nothing) */
+        sq.pattern[b].beats = sq.pattern[a].beats;
         copy(scratch, sq_data(SQ_PAT(a)), na);
-        return sq_replace(SQ_PAT(b), scratch, na) != 0 ? SQ_E_ROOM : 0;
+        if (sq_replace(SQ_PAT(b), scratch, na) != 0 || hr_sounds_copy(a, b) != 0)
+            return SQ_E_ROOM;
+        return 0;
     }
     beats = hr_beats(a) + hr_beats(b);
     if (beats > SQ_MAX_BEATS)
@@ -354,6 +359,8 @@ void hrp_tick(void)
         t = sqp.tick % (hr_beats(p) * SQ_PPQN);
         quiet = hrp.mute;
     }
+    if (p != hr_snd.p)
+        hr_sounds_apply(p);       /* another pattern: the pads take its sounds (edits not stored: gone) */
     hrp.playing = quiet ? 0xFFu : (uint8_t)p;
     hrp.at = (uint16_t)t;
     if (p != cur_p || (int32_t)t != cur_t + 1 || moved) {

@@ -172,7 +172,7 @@ static void test_buffers(void)
     static const uint8_t hdr[] = {0xF0, 0x7E, 0x01, 0x03, 0x00, 0x0C, 0x41, 0x45, 0x01,
                                   0x3C, 0x00, 0x00, 0x00, 0x00, 0x00, 0x3C, 0x00, 0x00, 0x00};
     uint8_t blk[SDS_BLOCK];
-    uint32_t i, k, chk = 0;
+    uint32_t i, k, chk = 0, acks0 = sds_acks;
     sds_init(mem0, mem1);
     blk[0] = 0;
     for (i = 0; i < 120u; i++) {
@@ -189,6 +189,8 @@ static void test_buffers(void)
     }
     CHECK(sds_buf[0].state == SDS_READY && sds_buf[1].state == SDS_READY && sds_refused == 1u,
           "buffers: %u %u refused %u", sds_buf[0].state, sds_buf[1].state, sds_refused);
+    CHECK(sds_acks - acks0 == 4u, "ACKS owed: the header and the block of each dump taken, %u (the refused one none)",
+          sds_acks - acks0);
     CHECK(sds_buf[0].words == 60u && s7_w12(sds_buf[0].data, 5) == 0, "buffers: words %u", sds_buf[0].words);
     /* a dump cut short (another F0) leaves its buffer free */
     sds_buf[0].state = SDS_FREE;

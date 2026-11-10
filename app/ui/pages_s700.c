@@ -1,6 +1,7 @@
 /* SM-87: the sampler's pages, as the S700's menus: a slot's points, its tuning, its key range in the program, its
  * OUT (filter, release, level and their velocity amounts) and its LFO. Two or four values a page, a column each on the
- * LCD, K1..K4 turning them; SELECT picks the slot, PRESET the program. Part of the unity build (app.c). */
+ * LCD, K1..K4 turning them; SELECT picks the slot, PRESET the program. CLEAR (EDIT's last) has none: REC empties the
+ * slot (app.c). Part of the unity build (app.c). */
 
 enum {
     PV_BYTE,                      /* a value 0..max */
@@ -28,7 +29,7 @@ typedef struct {
     pval_t v[4];
 } page_t;
 
-enum { PG_HOME, PG_POINTS, PG_LOOP, PG_TUNE, PG_KEYS, PG_OUT1, PG_OUT2, PG_LFO, PG_N };
+enum { PG_HOME, PG_POINTS, PG_LOOP, PG_TUNE, PG_KEYS, PG_OUT1, PG_OUT2, PG_LFO, PG_CLEAR, PG_N };
 
 static const page_t PAGES[PG_N] = {
     [PG_HOME] = {"HOME", 0, {{0}}},
@@ -62,6 +63,7 @@ static const page_t PAGES[PG_N] = {
                  {"DPT", PV_BYTE, S7_P_LFDP, 0, 99},
                  {"DLY", PV_BYTE, S7_P_LFDL, 0, 99},
                  {"PRS", PV_PRESSURE, 0, 0, 99}}},
+    [PG_CLEAR] = {"CLEAR", 0, {{0}}},
 };
 static const uint8_t MODE_CODE[4] = {S7_ONESHOT, S7_LOOP, S7_ALT, S7_DRUM};
 static const char *const MODE_NAME[4] = {"ONE", "LOOP", "ALT", "DRUM"};

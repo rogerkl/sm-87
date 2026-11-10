@@ -25,6 +25,7 @@ ROOT = Path(__file__).resolve().parent.parent
 KIT = ROOT / "resources" / "kit" / "kit.txt"
 NAME = 6
 PADS = 16
+SOUNDS = 127                    # a pattern keeps a kit sound as a number under 128 (the slots above: hrkit.c)
 
 
 def parse(path):
@@ -54,6 +55,8 @@ def parse(path):
             raise SystemExit(f"{s['at']}: {s['name']} twice")
         if not 0 <= s["vel"] <= 99:
             raise SystemExit(f"{s['at']}: vel 0..99")
+    if len(sounds) > SOUNDS:
+        raise SystemExit(f"{path}: more than {SOUNDS} sounds")
     if len(pads) > PADS:
         raise SystemExit(f"{path}: more than {PADS} pads")
     for p in pads:

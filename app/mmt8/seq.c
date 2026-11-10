@@ -63,10 +63,11 @@ void sq_clear_mmt8(void)
 {
     uint32_t at = 0, last = 0, i, k;
     sq_lock();
-    /* the drum patterns to the arena's start, in the order they are in (each moves down: copied forward) */
+    /* the drum patterns and their sounds to the arena's start, in the order they are in (each moves down: copied
+     * forward) */
     for (;;) {
         sq_blob_t *b = 0;
-        for (i = SQ_PAT(0); i < SQ_PAT(SQ_PATTERNS); i++)
+        for (i = SQ_PAT(0); i < SQ_BLOBS; i++)
             if (sq.blob[i].len && sq.blob[i].off >= last && (!b || sq.blob[i].off < b->off))
                 b = &sq.blob[i];
         if (!b)
@@ -87,14 +88,19 @@ void sq_clear_mmt8(void)
 }
 
 /* the tables as each version had them: to the parts' and songs' blobs (1), then the offsets (2), the MMT-8 header
- * (3); 4 put the drum patterns' blobs after the songs', and their lengths at the end */
+ * (3); 4 put the drum patterns' blobs after the songs', and their lengths at the end; 5 their sounds' blobs after
+ * theirs */
 #define SQ_BLOBS_V3 (SQ_PARTS * SQ_TRACKS + SQ_SONGS)
+#define SQ_BLOBS_V4 (SQ_BLOBS_V3 + SQ_PATTERNS)
 #define SQ_TABLES_V1 (offsetof(sq_mem_t, blob) + SQ_BLOBS_V3 * sizeof(sq_blob_t))
+#define SQ_TAIL (offsetof(sq_mem_t, arena) - offsetof(sq_mem_t, offset))   /* after the blobs, as 4 has it */
 uint32_t sq_image_tables(uint32_t version)
 {
     switch (version) {
     case SQ_VERSION:
         return (uint32_t)offsetof(sq_mem_t, arena);
+    case 4u:
+        return (uint32_t)(offsetof(sq_mem_t, blob) + SQ_BLOBS_V4 * sizeof(sq_blob_t) + SQ_TAIL);
     case 3u:
         return (uint32_t)(SQ_TABLES_V1 + SQ_TRACKS + SQ_MMT8_HDR);
     case 2u:
@@ -108,13 +114,14 @@ uint32_t sq_image_tables(uint32_t version)
 
 int sq_image_upgrade(uint8_t *scratch)
 {
-    uint32_t v = sq.version, i, s;
+    uint32_t v = sq.version, i, s, blobs = v < 4u ? SQ_BLOBS_V3 : SQ_BLOBS_V4;
+    uint32_t end = (uint32_t)(offsetof(sq_mem_t, blob) + blobs * sizeof(sq_blob_t));
     uint8_t *b = (uint8_t *)&sq;
     if (v >= SQ_VERSION || v == 0u)
         return 0;
-    /* the offsets and the header (as far as it had them) after the drum patterns' blobs, which start empty */
-    copy(b + offsetof(sq_mem_t, offset), b + SQ_TABLES_V1, sq_image_tables(v) - (uint32_t)SQ_TABLES_V1);
-    for (i = SQ_BLOBS_V3; i < SQ_BLOBS; i++)
+    /* what followed the blobs (as far as it had it) after the blobs now, the new ones empty */
+    copy(b + offsetof(sq_mem_t, offset), b + end, sq_image_tables(v) - end);
+    for (i = blobs; i < SQ_BLOBS; i++)
         sq.blob[i].off = sq.blob[i].len = 0;
     if (v < 2u)
         for (i = 0; i < SQ_TRACKS; i++)
@@ -122,9 +129,11 @@ int sq_image_upgrade(uint8_t *scratch)
     if (v < 3u)
         for (i = 0; i < SQ_MMT8_HDR; i++)
             sq.mmt8[i] = 0;
+    sq.version = SQ_VERSION;
+    if (v >= 4u)
+        return 0;
     for (i = 0; i < SQ_PATTERNS; i++)
         sq.pattern[i].beats = 0;
-    sq.version = SQ_VERSION;
     /* the songs' steps: part and tracks, now with no drum pattern */
     for (s = 0; s < SQ_SONGS; s++) {
         uint32_t n = sq_len(SQ_SONG(s)) / 2u;
@@ -162,7 +171,8 @@ int sq_valid(void)
         if (sq_len(SQ_SONG(i)) % SQ_STEP)
             return 0;
     for (i = 0; i < SQ_PATTERNS; i++)
-        if (sq_len(SQ_PAT(i)) % SQ_HIT_LEN || sq.pattern[i].beats > SQ_MAX_BEATS)
+        if (sq_len(SQ_PAT(i)) % SQ_HIT_LEN || sq.pattern[i].beats > SQ_MAX_BEATS ||
+            (sq_len(SQ_PSND(i)) && sq_len(SQ_PSND(i)) != SQ_SOUNDS_LEN))
             return 0;
     return sum == sq.used;        /* every byte someone's, none twice */
 }

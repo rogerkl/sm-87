@@ -34,6 +34,9 @@ typedef struct {
 
 extern sds_dump_t sds_buf[SDS_BUFS];
 extern volatile uint32_t sds_refused;   /* dumps refused: no buffer free, or reception off (SECRD) */
+/* the ACKS owed, counted up: one for a dump's header and one for each of its blocks, as the X7000 answers whether the
+ * sender waits for them or not. The receiver counts them (the USB interrupt), the main loop sends them */
+extern volatile uint32_t sds_acks;
 extern volatile uint8_t sds_enabled;    /* SECRE / SECRD */
 
 void sds_init(uint8_t *mem0, uint8_t *mem1);

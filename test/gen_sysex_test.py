@@ -149,6 +149,7 @@ def main():
     (ROOT / "app" / "tests" / "sysex.txt").write_text("\n".join(lines) + "\n")
     mmt8_test()
     clock_test()
+    powercut_test()
 
 
 # ---- the MMT-8's memory dump, as documentation/MMT-8 SYSEX.odt has it (with mmt8utils' finding: the BCD beats are
@@ -359,5 +360,81 @@ def clock_test():
     (ROOT / "app" / "tests" / "clockin.txt").write_text("\n".join(lines) + "\n")
 
 
+# ---- the power cut before a dump is saved: the slots as the store had them, none pointing at the new sample ----
+def powercut_test():
+    a = [2048 + int(1500 * math.sin(2 * math.pi * 3 * i / 60)) for i in range(60)]
+    b = [2048 + int(900 * math.sin(2 * math.pi * 7 * i / 120)) for i in range(120)]
+    lines = [
+        "# A power cut after a dump, before it is saved (3 s after): made by test/gen_sysex_test.py, do not",
+        "# edit. The store's directory then comes back; a dump into sectors it points at (a sample cleared or",
+        "# replaced since) saves the directory without them first, so no slot comes back playing the new",
+        "# sample's data",
+        "wait 600",
+        "usb plug",
+        "# slot 3: 60 words, in the first sector; saved once quiet",
+        "sysex " + hx(dump(2, a, 0, len(a))),
+        "wait 100",
+        "expect words3 60",
+        "expect free 72",
+        "wait 3500",
+        "expect unsaved 0",
+        "# CLEAR (EDIT's last page) slot 3, not saved; slot 4's dump takes its sector; the power cut",
+        "tap EDIT",
+        "tap EDIT",
+        "tap EDIT",
+        "tap EDIT",
+        "tap EDIT",
+        "wait 30",
+        "expect page 8",
+        "turn SELECT 2",
+        "wait 30",
+        "expect slot 3",
+        "tap REC",
+        "wait 30",
+        "expect words3 0",
+        "expect free 73",
+        "expect unsaved 1",
+        "sysex " + hx(dump(3, b, 0, len(b))),
+        "wait 100",
+        "expect words4 120",
+        "expect free 72",
+        "reboot",
+        "wait 600",
+        "# slot 3 cleared (saved before the dump), slot 4 empty as before it",
+        "expect words3 0",
+        "expect words4 0",
+        "expect free 73",
+        "expect unsaved 0",
+        "# slot 3 again, saved; then a dump replacing it, into its own sector; the power cut: the slot empty",
+        "usb plug",
+        "sysex " + hx(dump(2, a, 0, len(a))),
+        "wait 100",
+        "expect words3 60",
+        "wait 3500",
+        "expect unsaved 0",
+        "sysex " + hx(dump(2, b, 0, len(b))),
+        "wait 100",
+        "expect words3 120",
+        "expect free 72",
+        "reboot",
+        "wait 600",
+        "expect words3 0",
+        "expect free 73",
+        "# a dump into a sector the store doesn't point at: saved as before, 3 s after",
+        "usb plug",
+        "sysex " + hx(dump(3, b, 0, len(b))),
+        "wait 100",
+        "expect words4 120",
+        "expect unsaved 1",
+        "wait 3500",
+        "expect unsaved 0",
+        "reboot",
+        "wait 600",
+        "expect words4 120",
+    ]
+    (ROOT / "app" / "tests" / "powercut.txt").write_text("\n".join(lines) + "\n")
+
+
 if __name__ == "__main__":
     main()
+

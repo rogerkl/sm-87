@@ -29,7 +29,9 @@ const char *s7mem_name(uint32_t slot);   /* a built-in sample's name, else 0 */
 
 void s7mem_init(void);            /* boot: the directory (or the X7000's empty memory), the slots pointed at */
 /* a sample into a slot, written to the flash (erases: the sound stops for a moment). The slot's voices stop first.
- * packed: S7_PACKED(words) bytes. Its parameters are not changed. 0 = done, -1 no room, -2 flash failed */
+ * packed: S7_PACKED(words) bytes. Its parameters are not changed. Sectors the saved directory still points at (a
+ * sample cleared or replaced since) are taken only after the directory is saved without them (s7mem_save): a power
+ * cut before the next save finds that slot empty, not playing this one. 0 = done, -1 no room, -2 flash failed */
 int s7mem_write(uint32_t slot, const uint8_t *packed, uint32_t words);
 void s7mem_clear(uint32_t slot);  /* the slot back to the test tone, in no program; its sectors free */
 uint32_t s7mem_free_sectors(void);

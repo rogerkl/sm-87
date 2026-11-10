@@ -3,6 +3,7 @@
 
 sds_dump_t sds_buf[SDS_BUFS];
 volatile uint32_t sds_refused;
+volatile uint32_t sds_acks;
 volatile uint8_t sds_enabled = 1;
 
 /* ------------------------------------------------------------------------------------------ receiving --- */
@@ -83,6 +84,7 @@ static void rx_start(void)
     rx.d = d;
     rx.st = RX_BLOCKS;
     rx.n = 0;
+    sds_acks++;                   /* the header's */
 }
 
 static void rx_block(void)
@@ -144,6 +146,7 @@ void sds_rx_byte(uint8_t b)
             if (rx.d->blocks < 546u)
                 rx_block();
             rx.n = 0;
+            sds_acks++;           /* (a bad one too: it is kept, its words as they came) */
         }
         break;
     default:

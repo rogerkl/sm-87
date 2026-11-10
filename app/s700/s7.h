@@ -114,7 +114,9 @@ void s7_all_off(void);            /* every voice released */
 void s7_channel_off(uint32_t ch); /* a channel's voices released (all notes off) */
 void s7_kill(void);               /* every voice silent now */
 void s7_kill_slot(uint32_t slot); /* the voices playing a slot silent now (before its sample changes) */
-void s7_render(float *out, uint32_t n);   /* adds n samples (mono) to out */
+/* the mix (the MIX page): a slot's voices' gains, left and right (1, 1: as the S700 is, mono, at its level) */
+void s7_mix(uint32_t slot, float gl, float gr);
+void s7_render(float *l, float *r, uint32_t n);   /* adds n samples, each voice at its slot's mix */
 uint32_t s7_voices_active(void);
 
 /* ---- the drum machine's voices (hr16/): the sampler's, from any sound in its format (a slot, or one of the drum

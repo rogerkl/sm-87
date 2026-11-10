@@ -47,16 +47,41 @@ typedef struct {                  /* a pad as the kit sets it up */
     hr_pad_t pad;
 } hr_kit_pad_t;
 
-extern hr_pad_t hr_pad[HR_PADS]; /* the pads (the app's settings keep them) */
+extern hr_pad_t hr_pad[HR_PADS]; /* the pads as they play now: the global set-up, the pattern's own sounds over it */
+extern hr_pad_t hr_std[HR_PADS]; /* the global set-up (the app's settings keep it): the pads' MIDI, and the sounds
+                                  * of a pattern without its own */
 extern volatile uint32_t hr_lit;  /* the pads hit since the main loop last took them, a bit each */
 
 uint32_t hr_kit_sounds(void);     /* the kit's sounds (0: a build without one) */
 uint32_t hr_sounds(void);         /* the sounds a pad can have: the kit's, then the 16 slots */
 void hr_sound_name(uint32_t sound, char *b);   /* "KICK", "SLOT01", "-----" (HR_NAME + 1 bytes) */
 const char *hr_pad_name(uint32_t pad);         /* the kit's name for it, else "PAD 07" */
-void hr_pad_default(uint32_t pad);             /* as the kit sets it up */
-/* the pads saved when the kit had kit_n sounds, as the kit is now: the slots renumbered after it, a sound gone none */
+void hr_pad_default(uint32_t pad);             /* the pad now as the kit sets it up (then hr_pad_changed) */
+/* the global set-up saved when the kit had kit_n sounds, as the kit is now: the slots renumbered after it, a sound
+ * gone none */
 void hr_pads_rekit(uint32_t kit_n);
+
+/* ---- a pattern's own sounds (the HR-16's VOICE, TUNE and MIX stored with a pattern): each pad's sound, tuning,
+ * level and pan, in the sequencer's memory (SQ_PSND). The pads take the sounds of the pattern that plays (the player,
+ * as it changes) or is chosen (the app, stopped): its own, else the global set-up's. An edit of a pattern's own is
+ * the pads' until stored (another pattern taken: gone, as the HR-16's); of the global set-up's, the set-up's. The
+ * kit's sounds are kept by number, the slots as slots: a kit grown leaves them as they were */
+typedef struct {
+    uint8_t p;                    /* the pattern the pads have the sounds of (0xFF: none yet, the global set-up's) */
+    uint8_t own;                  /* its own (else the global set-up's) */
+    uint8_t edited;               /* its own changed on the pads, not stored */
+} hr_snd_t;
+extern volatile hr_snd_t hr_snd;
+int hr_sounds_own(uint32_t p);    /* the pattern keeps sounds of its own */
+void hr_sounds_apply(uint32_t p); /* the pads take the pattern's sounds (the audio interrupt, or under plat_lock) */
+/* a pad changed on the pads (sound, MIDI or both; the main loop, under plat_lock): its MIDI the global set-up's;
+ * its sound the set-up's too unless the pads have a pattern's own (an edit of those: hr_snd.edited) */
+void hr_pad_changed(uint32_t pad);
+/* the pads' sounds kept with the pattern (sq_replace: -1 no room), or its own let go (then hr_sounds_apply, if the
+ * pads have its sounds); a copy of a's (its own, or none) for b (hr_copy, b without hits) */
+int hr_sounds_store(uint32_t p);
+int hr_sounds_drop(uint32_t p);
+int hr_sounds_copy(uint32_t a, uint32_t b);
 /* for tests: another kit than the one built in */
 void hr_kit_use(const hr_kit_sound_t *s, uint32_t n, const hr_kit_pad_t *pads, uint32_t np);
 
@@ -81,7 +106,8 @@ int hr_add(uint32_t p, uint32_t tick, uint32_t pad, uint32_t vel, uint8_t *scrat
 int hr_remove(uint32_t p, uint32_t tick, uint32_t pad, uint8_t *scratch);   /* that hit out (none: 0 too) */
 int hr_erase(uint32_t p, uint32_t pad, uint8_t *scratch);   /* the pad's hits; HR_PADS: all, the length too */
 int hr_set_length(uint32_t p, uint32_t beats, uint8_t *scratch);   /* 1..682: hits past the end go */
-/* COPY: a's hits after b's, b as long as both (b without hits: a copy of a; a = b: twice as long). SQ_E_* */
+/* COPY: a's hits after b's, b as long as both (b without hits: a copy of a, its sounds too; a = b: twice as long).
+ * SQ_E_* */
 int hr_copy(uint32_t a, uint32_t b, uint8_t *scratch);
 /* where a hit played at tick goes: the nearest place on the grid (clocks), every second one swung (50..75%) */
 uint32_t hr_quantize(uint32_t tick, uint32_t grid, uint32_t swing);
