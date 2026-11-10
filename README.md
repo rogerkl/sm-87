@@ -64,7 +64,7 @@ on an FM-1 yet** (see *On the device*).
 | REC + first 8 white keys | The record track |
 | PRESET | The part or song (SEQ page), else the sampler's program |
 | K1 / K2 (SEQ) | Tempo / the record track's channel (UNCHANGED, 1-16) |
-| K4 (SEQ) | The drum pattern that plays with the parts; in a song (stopped): the step's drum pattern, or none |
+| K4 (SEQ) | The drum pattern that plays with the parts; in a song (stopped): the step's drum pattern, or none (the step's row shows it: `P05 12345678 D07`, `D--` none) |
 | ALGO (SEQ) | The MMT-8's functions, below; SEQ goes back to the part or song |
 | SELECT / K3 (SONG, stopped) | The step / its part (at the END: appends the last part; past 99: the song ends there) |
 | ARP | The drum machine's page (below); from one of its functions: back to the pattern |
@@ -124,8 +124,10 @@ PLAY was started:
 - **From the SEQ page, in PART mode:** the sequencer's PLAY plays the part, and the drums loop their pattern beside
   it, each on its own length. K4 chooses the drum pattern, queued while playing. SEL + the 9th white key mutes the
   drums.
-- **From the SEQ page, in SONG mode:** each step's drum pattern (K4 on the step) starts with the step, and is cut
-  at the step's end. A step without one is quiet. A new step takes the drums of the step before.
+- **From the SEQ page, in SONG mode:** each step's drum pattern (K4 on the step, or in the song's EDIT) starts with
+  the step, and is cut at the step's end. A step without one is quiet. A new step takes the drums of the step
+  before. A step lasts as long as its part: a part without a length (an empty one) is passed over, as the MMT-8
+  does, and its drums with it.
 - **From the drum page:** PLAY plays the drums alone, as pressing PLAY on an HR-16 would.
 
 The drums' hits go out over USB on the drums' channel (10 unless set), and notes coming in on that channel play the

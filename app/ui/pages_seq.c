@@ -29,6 +29,38 @@ static uint32_t track_key_bits(void)
     return m;
 }
 
+/* a song step's drum pattern as its row shows it: "D07", "D--" none */
+static void step_drums_text(char *t, uint32_t d)
+{
+    char n[4];
+    str_cat(t, "D");
+    if (d >= SQ_PATTERNS) {
+        str_cat(t, "--");
+    } else {
+        fmt_uint(n, d, 2, '0');
+        str_cat(t, n);
+    }
+}
+
+/* K4 on a song step: its drum pattern, none or 00..99 (stopped; the END has none: at says what makes a step) */
+static void seq_step_drums(int32_t e, const char *at_end)
+{
+    uint32_t d;
+    int32_t v;
+    if (sqp.state != SQP_STOPPED) {
+        app_say("STOP FIRST", "TO EDIT A STEP");
+        return;
+    }
+    if (seq_song_step >= sq_song_steps(sqp.song)) {
+        app_say("END OF SONG", at_end);
+        return;
+    }
+    d = sq_song_drums(sqp.song, seq_song_step);
+    v = clamp((d >= SQ_PATTERNS ? -1 : (int32_t)d) + e, -1, (int32_t)SQ_PATTERNS - 1);
+    sq_song_set_drums(sqp.song, seq_song_step, v < 0 ? SQ_NO_DRUMS : (uint32_t)v);
+    sq_dirty = 1;
+}
+
 #include "seq_edit.c"             /* the MMT-8's functions (ALGO) */
 
 static void seq_draw(int sel_held)
@@ -85,10 +117,10 @@ static void seq_draw(int sel_held)
         }
     } else if (sqp.song_mode && sqp.state == SQP_STOPPED) {
         uint32_t steps = sq_song_steps(sqp.song);
-        if (seq_song_step < steps) {
+        if (seq_song_step < steps) {      /* "P05 12345678 D07": its part, tracks, drum pattern */
             uint8_t part, mask;
             sq_song_step(sqp.song, seq_song_step, &part, &mask);
-            str_cat(t, "PART ");
+            str_cat(t, "P");
             fmt_uint(n, part, 2, '0');
             str_cat(t, n);
             str_cat(t, " ");
@@ -96,6 +128,8 @@ static void seq_draw(int sel_held)
                 char c[2] = {mask >> i & 1u ? (char)('1' + i) : '-', 0};
                 str_cat(t, c);
             }
+            str_cat(t, " ");
+            step_drums_text(t, sq_song_drums(sqp.song, seq_song_step));
         } else {
             str_cat(t, "END OF SONG");
         }

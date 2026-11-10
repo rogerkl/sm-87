@@ -940,13 +940,8 @@ static void seq_turn(uint32_t enc, int32_t e)
         }
     } else if (enc == EN_K4 && !sqp.song_mode) {   /* the drums' pattern with the part */
         dr_pattern_turn(e);
-    } else if (enc == EN_K4 && sqp.state == SQP_STOPPED) {   /* the song step's drum pattern: none, 00..99 */
-        if (seq_song_step < sq_song_steps(sqp.song)) {
-            uint32_t d = sq_song_drums(sqp.song, seq_song_step);
-            int32_t v = clamp((d >= SQ_PATTERNS ? -1 : (int32_t)d) + e, -1, (int32_t)SQ_PATTERNS - 1);
-            sq_song_set_drums(sqp.song, seq_song_step, v < 0 ? SQ_NO_DRUMS : (uint32_t)v);
-            sq_dirty = 1;
-        }
+    } else if (enc == EN_K4) {               /* the song step's drum pattern: none, 00..99 */
+        seq_step_drums(e, "K3 ADDS A STEP");
     } else if (enc == EN_K2) {               /* the record track's channel: UNCHANGED, 1..16 */
         int32_t c = (int32_t)sq.part[sqp.part].chan[sqp.rec_track] + e;
         sq.part[sqp.part].chan[sqp.rec_track] = (uint8_t)(c < 0 ? 0 : c > 16 ? 16 : c);

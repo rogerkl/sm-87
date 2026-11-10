@@ -177,6 +177,31 @@ wait 30
 expect stepdr1 1
 wait 1300
 shot drums_song.png
+# at the END there is no step to have drums: nothing changes (the LCD says K3 adds one)
+turn SELECT 1
+wait 30
+expect songstep 2
+turn K4 1
+wait 30
+expect steps 1
+expect stepdr1 1
+shot drums_songend.png
+turn SELECT -1
+wait 1300
+# the song's EDIT (ALGO): K4 the step's drums too
+turn ALGO 5
+wait 30
+expect fn 9
+turn K4 -1
+wait 30
+expect stepdr1 0
+shot drums_songedit.png
+turn K4 1
+wait 30
+expect stepdr1 1
+turn ALGO -5
+wait 30
+expect fn 0
 out
 tap PLAY
 wait 100

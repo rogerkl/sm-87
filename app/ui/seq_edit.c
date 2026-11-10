@@ -261,11 +261,13 @@ static void ed_turn_event(uint32_t enc, int32_t d, int sel)
     sq_dirty = 1;
 }
 
-/* EDIT, a song: SELECT the step, K1 its part (past the end: the part REC adds) */
+/* EDIT, a song: SELECT the step, K1 its part (past the end: the part REC adds), K4 its drum pattern */
 static void ed_turn_step(uint32_t enc, int32_t d)
 {
     uint8_t part, mask;
-    if (enc == EN_SELECT) {
+    if (enc == EN_K4) {
+        seq_step_drums(d, "REC ADDS A STEP");
+    } else if (enc == EN_SELECT) {
         seq_song_step = (uint32_t)ed_clamp((int32_t)seq_song_step + d, 0, (int32_t)sq_song_steps(sqp.song));
     } else if (enc == EN_K1) {
         if (ed_step(&part, &mask)) {
@@ -791,11 +793,13 @@ static void ed_draw(void)
         if (ed_step(&part, &mask)) {
             ed_num(x, "PART ", part, 2);
             ed_lr(a, a, x);
-            str_cat(b, "TRACKS  ");
+            str_cat(b, "TRK ");   /* its tracks, its drum pattern: "TRK 12345678 D07" */
             for (i = 0; i < SQ_TRACKS; i++) {
                 char c[2] = {mask >> i & 1u ? (char)('1' + i) : '-', 0};
                 str_cat(b, c);
             }
+            str_cat(b, " ");
+            step_drums_text(b, sq_song_drums(sqp.song, seq_song_step));
         } else {
             ed_lr(a, a, "END");
             ed_num(b, "REC ADDS PART ", seq_last_part, 2);
