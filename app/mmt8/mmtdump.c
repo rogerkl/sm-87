@@ -34,6 +34,8 @@ uint8_t md_packed_byte(const uint8_t *img, uint32_t n, uint32_t k)
 void md_rx_byte(md_rx_t *rx, uint8_t b, uint8_t *(*take_buf)(uint32_t *max))
 {
     static const uint8_t PRE[MD_PREFIX] = {0xF0, 0x00, 0x00, 0x0E, 0x00};
+    const uint8_t *pre = rx->prefix ? rx->prefix : PRE;
+    uint32_t plen = rx->prefix ? rx->plen : MD_PREFIX;
     if (rx->st == MD_RX_DONE)
         return;                   /* the last one not taken in yet: nothing until it is */
     if (b == 0xF0u) {
@@ -48,9 +50,9 @@ void md_rx_byte(md_rx_t *rx, uint8_t b, uint8_t *(*take_buf)(uint32_t *max))
     }
     switch (rx->st) {
     case MD_RX_PREFIX:
-        if (b != PRE[rx->pre]) {
+        if (b != pre[rx->pre]) {
             rx->st = b == 0xF7u ? MD_RX_IDLE : MD_RX_SKIP;
-        } else if (++rx->pre == MD_PREFIX) {
+        } else if (++rx->pre == plen) {
             rx->buf = take_buf(&rx->max);
             rx->acc = rx->n = 0;
             rx->bits = rx->over = 0;

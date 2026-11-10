@@ -11,6 +11,7 @@
 #include "mmt8/player.h"
 #include "mmt8/mmtdump.h"
 #include "hr16/hr.h"
+#include "hr16/hrdump.h"
 #include "ui/lcd.c"
 #include "ui/pages_s700.c"
 
@@ -570,12 +571,15 @@ static int32_t dump_request = -1; /* RSD: the slot to send, from the main loop *
 static void say_slot(const char *a, const char *b, uint32_t slot);
 
 static md_rx_t mdrx;              /* an MMT-8 dump coming in (mmt8/mmtdump.h) */
+static md_rx_t hdrx = {.prefix = HD_PRE, .plen = HD_PREFIX};   /* an HR-16's (hr16/hrdump.h), packed the same */
+static uint8_t hd_requested;      /* an HR-16's request for our dump: sent from the main loop, when stopped */
 static uint8_t *md_take(uint32_t *max);
 
 void app_sysex_byte(uint8_t b)
 {
     sds_rx_byte(b);
     md_rx_byte(&mdrx, b, md_take);
+    md_rx_byte(&hdrx, b, md_take);
 }
 
 /* the dumps received, into the flash, in the order they came (before any SPRM after them is taken) */
@@ -653,6 +657,14 @@ int app_sysex(const uint8_t *p, uint32_t n)
 {
     uint32_t ch = set.s7_channel;
     dumps_flush();
+    if (n >= 5u && p[0] == 0x00u && p[1] == 0x00u && p[2] == 0x0Eu && p[3] == HD_ID) {   /* the HR-16's */
+        static const uint8_t ANSWER[8] = {0xF0, 0x00, 0x00, 0x0E, HD_ID, HD_CMD_TEST, 0x01, 0xF7};
+        if (p[4] == HD_CMD_REQUEST)
+            hd_requested = 1;
+        else if (p[4] == HD_CMD_TEST && n >= 6u && p[5] == 0x00u)   /* the MIDI test: answered */
+            (void)plat_sysex_send(ANSWER, sizeof ANSWER);
+        return 1;                            /* (a dump comes by the byte path) */
+    }
     if (n >= 1u && p[0] == 0x7Eu) {          /* the sample dump's: a request, the handshake, a dump (byte path) */
         if (n >= 3u && p[1] == 0x00u)        /* RSD: F0 7E 00 nn 00 F7 */
             dump_request = p[2] < S7_SLOTS ? (int32_t)p[2] : -1;
@@ -739,9 +751,11 @@ static void s700_midi_service(void)
     }
 }
 
-/* ------------------------------------------------------------------------------------------- the MMT-8's MIDI --- */
-/* its memory dump (mmt8/mmtdump.h), in and out over USB, in the sample dumps' staging buffers (98 KB, lent while
- * neither holds a dump): one coming in replaces the sequencer's memory; MIDI DUMP (ALGO on the SEQ page) sends ours */
+/* ------------------------------------------------------------------------------ the MMT-8's and HR-16's MIDI --- */
+/* their memory dumps (mmt8/mmtdump.h, hr16/hrdump.h), in and out over USB, in the sample dumps' staging buffers
+ * (98 KB, lent while neither holds a dump): an MMT-8's coming in replaces the sequencer's parts and songs, an
+ * HR-16's its drum patterns; MIDI DUMP (ALGO on the SEQ page, and on the drum page) sends ours, as does an HR-16's
+ * request */
 static uint8_t *md_take(uint32_t *max)    /* the USB interrupt: the buffers, when free */
 {
     if (!sds_hold())
@@ -753,6 +767,7 @@ static uint8_t *md_take(uint32_t *max)    /* the USB interrupt: the buffers, whe
 static struct {
     uint8_t on;
     uint32_t n, k, m;             /* the dump's bytes; the MIDI bytes sent, of m */
+    const char *busy, *done;      /* what the LCD says meanwhile, and after */
 } mdtx;
 
 /* the ACKS a dump coming in is owed (sds.h sds_acks), out as the USB ring has room: a sender that waits for each
@@ -776,40 +791,73 @@ static void acks_service(void)
 
 #define MD_TX_A_FRAME 2048u       /* MIDI bytes a frame */
 
-/* MIDI DUMP: ours, as an MMT-8's, out over USB */
-static void md_send(void)
+/* the staging buffers for a dump going out: 1 held (0: one is sending or coming in, said) */
+static int dump_hold(void)
 {
-    static const uint8_t PRE[MD_PREFIX] = {0xF0, 0x00, 0x00, 0x0E, 0x00};
-    int32_t n;
     uint32_t f;
     int ok;
     if (mdtx.on || tx.on) {
         app_say("SENDING ALREADY", "");
-        return;
+        return 0;
     }
     f = plat_lock();
-    ok = mdrx.st != MD_RX_DATA && mdrx.st != MD_RX_DONE && sds_hold();
+    ok = mdrx.st != MD_RX_DATA && mdrx.st != MD_RX_DONE && hdrx.st != MD_RX_DATA && hdrx.st != MD_RX_DONE &&
+         sds_hold();
     plat_unlock(f);
-    if (!ok) {
+    if (!ok)
         app_say("BUSY", "A DUMP COMING IN");
-        return;
-    }
-    n = md_export(&stage[0][0], MD_MAX);
+    return ok;
+}
+
+/* a dump made in the buffers (n bytes; -1 too big) out: its prefix now, its bytes packed a frame at a time */
+static void dump_go(const uint8_t *pre, uint32_t npre, int32_t n, const char *what)
+{
+    static char busy[LCD_COLS + 1], done[LCD_COLS + 1];
     if (n < 0) {
         sds_release();
-        app_say("TOO BIG", "FOR AN MMT-8");
+        busy[0] = 0;
+        str_cat(busy, "FOR AN ");
+        str_cat(busy, what);
+        app_say("TOO BIG", busy);
         return;
     }
-    if (plat_sysex_begin() != 0 || plat_sysex_put(PRE, MD_PREFIX) != 0) {
+    if (plat_sysex_begin() != 0 || plat_sysex_put(pre, npre) != 0) {
         (void)plat_sysex_end();
         sds_release();
         app_say("USB NOT READY", "");
         return;
     }
+    busy[0] = done[0] = 0;
+    str_cat(busy, "SENDING ");
+    str_cat(busy, what);
+    str_cat(done, what);
+    str_cat(done, " DUMP SENT");
     mdtx.on = 1;
     mdtx.n = (uint32_t)n;
     mdtx.k = 0;
     mdtx.m = md_packed_len((uint32_t)n);
+    mdtx.busy = busy;
+    mdtx.done = done;
+}
+
+/* MIDI DUMP: ours, as an MMT-8's, out over USB */
+static void md_send(void)
+{
+    static const uint8_t PRE[MD_PREFIX] = {0xF0, 0x00, 0x00, 0x0E, 0x00};
+    if (dump_hold())
+        dump_go(PRE, MD_PREFIX, md_export(&stage[0][0], MD_MAX), "MMT-8");
+}
+
+/* MIDI DUMP on the drum page, or an HR-16's request: the drum patterns, as an HR-16's dump */
+static void hd_send(void)
+{
+    hd_settings_t s;
+    s.quant = set.dr_quant;
+    s.swing = set.dr_swing;
+    s.channel = set.dr_channel;
+    s.tempo = sqp.tempo;
+    if (dump_hold())
+        dump_go(HD_PRE, HD_PREFIX, hd_export(&stage[0][0], HD_MAX, &s), "HR-16");
 }
 
 static void md_send_service(void)
@@ -840,7 +888,7 @@ static void md_send_service(void)
         fmt_uint(n, mdtx.n, 0, ' ');
         str_cat(t, n);
         str_cat(t, " BYTES");
-        app_say("MMT-8 DUMP SENT", t);
+        app_say(mdtx.done, t);
     }
 }
 
@@ -988,6 +1036,47 @@ static void midi_turn(uint32_t k, int32_t e)
     set_dirty = 1;
 }
 
+/* an HR-16's dump in: the drums stopped, their patterns replaced, its swing and quantize the recording's */
+static void hd_service(void)
+{
+    hd_report_t r;
+    char t[LCD_COLS + 1] = "", n[8];
+    uint32_t f;
+    if (hdrx.over || hdrx.n < HD_HDR) {
+        app_say("HR-16 DUMP", hdrx.over ? "NOT TAKEN" : "TOO SHORT");
+        return;
+    }
+    f = plat_lock();
+    sqp_stop();
+    hrp.rec = 0;
+    hrp.next = 0xFFu;
+    plat_unlock(f);
+    (void)hd_import(&stage[0][0], hdrx.n, sq_scratch, &r);
+    if (r.quant >= 0)
+        set.dr_quant = (uint8_t)r.quant;
+    if (r.swing >= 0)
+        set.dr_swing = (uint8_t)r.swing;
+    f = plat_lock();
+    hrp.quant = set.dr_quant;
+    hrp.swing = set.dr_swing;
+    hr_sounds_apply(hrp.pattern);   /* (the pads: the chosen pattern's sounds, as they came) */
+    plat_unlock(f);
+    dr.beats = (uint16_t)hr_beats(hrp.pattern);
+    set_dirty = 1;
+    sq_dirty = 1;
+    if (r.lost) {                 /* the sequencer's memory full: from this pattern on not taken */
+        fmt_uint(n, (uint32_t)r.first_lost, 2, '0');
+        str_cat(t, "FROM PATT ");
+        str_cat(t, n);
+        app_say("MEMORY FULL", t);
+        return;
+    }
+    fmt_uint(n, r.patterns, 0, ' ');
+    str_cat(t, n);
+    str_cat(t, " PATTERNS");
+    app_say(r.songs ? "SONGS NOT TAKEN" : "HR-16 DUMP IN", t);
+}
+
 /* a dump in: the sequencer stopped, its memory replaced */
 static void md_service(void)
 {
@@ -1029,6 +1118,16 @@ static void md_service(void)
         }
         sds_release();
         mdrx.st = MD_RX_IDLE;
+    }
+    if (hdrx.st == MD_RX_DONE) {
+        hd_service();
+        sds_release();
+        hdrx.st = MD_RX_IDLE;
+    }
+    if (hd_requested) {           /* (as the HR-16: not while playing) */
+        hd_requested = 0;
+        if (sqp.state == SQP_STOPPED && !sqp.aux && !mdtx.on)
+            hd_send();
     }
     md_send_service();
 }
@@ -1513,11 +1612,11 @@ void app_frame(void)
     md_service();
     take_service();
     hr_service();
-    if (mdrx.st == MD_RX_DATA || mdtx.on) {  /* an MMT-8 dump coming in or going out: its bytes */
+    if (mdrx.st == MD_RX_DATA || hdrx.st == MD_RX_DATA || mdtx.on) {   /* an MMT-8 or HR-16 dump in or out */
         char t[LCD_COLS + 1] = "BYTES ", n[8];
-        fmt_uint(n, mdtx.on ? mdtx.k * 7u / 8u : mdrx.n, 5, ' ');
+        fmt_uint(n, mdtx.on ? mdtx.k * 7u / 8u : mdrx.st == MD_RX_DATA ? mdrx.n : hdrx.n, 5, ' ');
         str_cat(t, n);
-        lcd_row(0, mdtx.on ? "SENDING MMT-8" : "MMT-8 DUMP IN");
+        lcd_row(0, mdtx.on ? mdtx.busy : mdrx.st == MD_RX_DATA ? "MMT-8 DUMP IN" : "HR-16 DUMP IN");
         lcd_row(1, t);
     } else if (sds_rx_progress()) {          /* a dump coming in: its progress, as the sampler shows it */
         char t[LCD_COLS + 1] = "WORDS ", n[8];
@@ -1595,6 +1694,18 @@ int app_expect(const char *what, int *got)
         *got = hr_hit_at(hrp.pattern, (uint32_t)atoi(what + 5) - 1u)
                    ? (int)hr_hit_tick(hr_hit_at(hrp.pattern, (uint32_t)atoi(what + 5) - 1u))
                    : -1;
+    else if (!strncmp(what, "drhvel", 6))   /* drhvelN: their pattern's hit N's velocity (from 1; -1 none) */
+        *got = hr_hit_at(hrp.pattern, (uint32_t)atoi(what + 6) - 1u)
+                   ? hr_hit_at(hrp.pattern, (uint32_t)atoi(what + 6) - 1u)[3]
+                   : -1;
+    else if (!strncmp(what, "drhpad", 6))   /* drhpadN: its pad (from 1; -1 none) */
+        *got = hr_hit_at(hrp.pattern, (uint32_t)atoi(what + 6) - 1u)
+                   ? hr_hit_at(hrp.pattern, (uint32_t)atoi(what + 6) - 1u)[2] + 1
+                   : -1;
+    else if (!strncmp(what, "drbeats", 7) && what[7])   /* drbeatsN: pattern N's length */
+        *got = (int)hr_beats((uint32_t)atoi(what + 7) % SQ_PATTERNS);
+    else if (!strcmp(what, "hr16hdr"))      /* an HR-16's dump header kept */
+        *got = hd_has_header();
     else if (!strncmp(what, "drhits", 6))   /* drhitsN: pattern N's */
         *got = (int)hr_hits((uint32_t)atoi(what + 6) % SQ_PATTERNS);
     else if (!strcmp(what, "drbeats"))
@@ -1613,7 +1724,7 @@ int app_expect(const char *what, int *got)
         *got = hrp.quant;
     else if (!strcmp(what, "drswing"))
         *got = hrp.swing;
-    else if (!strcmp(what, "drfn"))         /* the drums' function shown: 0 none, 1 STEP EDIT .. 7 PAD MIDI */
+    else if (!strcmp(what, "drfn"))         /* the drums' function shown: 0 none, 1 STEP EDIT .. 8 MIDI DUMP */
         *got = dr.fn;
     else if (!strcmp(what, "drpad"))        /* the pad a function has (from 1; 17: the whole pattern) */
         *got = dr.pad + 1;

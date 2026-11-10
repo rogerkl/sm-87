@@ -46,13 +46,16 @@ int md_has_header(void);          /* an MMT-8's header kept: a dump of ours an M
 uint32_t md_packed_len(uint32_t n);
 uint8_t md_packed_byte(const uint8_t *img, uint32_t n, uint32_t k);
 
-/* the receiver: every byte of every SysEx (F0 and F7 too), the dump's unpacked into buf as it comes */
+/* the receiver: every byte of every SysEx (F0 and F7 too), the dump's unpacked into buf as it comes. The HR-16's
+ * dump is packed the same (hr16/hrdump.h): a receiver of its own, with its prefix */
 enum { MD_RX_IDLE, MD_RX_PREFIX, MD_RX_DATA, MD_RX_DONE, MD_RX_SKIP };
 typedef struct {
     volatile uint8_t st;
     uint8_t pre, bits, over;      /* over: more than buf holds (the dump not taken) */
     uint32_t acc, n, max;
     uint8_t *buf;
+    const uint8_t *prefix;        /* the bytes before the data, F0 first (0: the MMT-8's, F0 00 00 0E 00) */
+    uint8_t plen;
 } md_rx_t;
 /* buf: where a dump goes; the app's to give (0: none free now, a dump is refused). Returns 1 while it is one */
 void md_rx_byte(md_rx_t *rx, uint8_t b, uint8_t *(*take_buf)(uint32_t *max));

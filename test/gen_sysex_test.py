@@ -150,6 +150,7 @@ def main():
     mmt8_test()
     clock_test()
     powercut_test()
+    hr16_test()
 
 
 # ---- the MMT-8's memory dump, as documentation/MMT-8 SYSEX.odt has it (with mmt8utils' finding: the BCD beats are
@@ -359,6 +360,154 @@ def clock_test():
     ]
     (ROOT / "app" / "tests" / "clockin.txt").write_text("\n".join(lines) + "\n")
 
+
+# ---- the HR-16's memory dump, as its service manual has it (documentation/hr16-sysex.md) ----
+HR16_PAD = [0, 1, 2, 6, 3, 7, 14, 15, 8, 9, 10, 11, 5, 4, 12, 13]   # its drums on SM-87's pads (the README's table)
+
+
+def hr16_waits(n):
+    """clocks to wait: 126 at most a byte"""
+    out = []
+    while n > 0:
+        c = min(n, 126)
+        out.append(0x80 | c)
+        n -= c
+    return bytes(out)
+
+
+def hr16_memory(patterns, keep):
+    """patterns {no: (beats, [(sound, level, pan << 5 | pitch)] for its 16 drums, [(clock, drum, dynamics)])}, keep
+    {address: byte}: the header's other bytes. Its events in time order; a clock's drums in the order of SM-87's pads,
+    as SM-87 sends them"""
+    mem = bytearray(0x400)
+    for a, v in keep.items():
+        mem[a] = v
+    mem[0xFE], mem[0xFF] = 0x27, 0xB5
+    for p in sorted(patterns):
+        beats, voices, hits = patterns[p]
+        mem[0x200 + 2 * p:0x202 + 2 * p] = (len(mem) + 0x8200).to_bytes(2, "big")
+        pat = bytearray(0x34)
+        pat[2:4] = int(str(beats), 16).to_bytes(2, "little")
+        for d, v in enumerate(voices):
+            pat[4 + 3 * d:7 + 3 * d] = bytes(v)
+        t = 0
+        for clock, drum, dyn in sorted(hits, key=lambda h: (h[0], HR16_PAD[h[1]])):
+            pat += hr16_waits(clock - t)
+            t = clock
+            pat.append(dyn << 4 | drum)
+        pat += hr16_waits(beats * 96 - t) + bytes([0xFF])
+        pat[0:2] = len(pat).to_bytes(2, "little")
+        mem += pat
+    mem[0x302 + 2 * 99:0x304 + 2 * 99] = (len(mem) + 0x8200).to_bytes(2, "big")   # song 99, empty: it must be
+    mem += bytes([3, 0, 0xFF])
+    end = len(mem) + 0x8200
+    mem[0x2CD:0x2CF] = end.to_bytes(2, "little")
+    mem[0x2D1:0x2D3] = (0xFF00 - end).to_bytes(2, "little")
+    return mem
+
+
+def hr16_test():
+    # each drum's sound, level, pan and pitch (the pitch's steps ones SM-87's semitones give back)
+    sounds = [7, 13, 24, 27, 26, 46, 32, 33, 18, 19, 20, 21, 29, 30, 42, 45]
+    levels = [90, 80, 70, 60, 75, 85, 50, 55, 65, 66, 67, 68, 72, 99, 40, 0]
+    pans = [3, 2, 4, 3, 1, 5, 0, 6, 3, 3, 3, 3, 4, 2, 3, 3]
+    pitch = [16, 18, 14, 16, 20, 16, 11, 16, 18, 16, 14, 16, 16, 16, 16, 16]
+    voices = [(sounds[d], levels[d], pans[d] << 5 | pitch[d]) for d in range(16)]
+    patterns = {
+        0: (2, voices, [(0, 0, 7), (0, 13, 5), (0, 3, 2), (48, 1, 6), (96, 2, 3), (100, 8, 4), (191, 15, 0)]),
+        3: (1, voices, [(0, 0, 7), (24, 4, 1), (72, 12, 2)]),
+        12: (4, voices, []),
+        40: (3, voices, [(130, 9, 4), (287, 10, 7)]),
+    }
+    notes = [35, 38, 42, 44, 46, 39, 60, 61, 50, 48, 45, 41, 51, 49, 62, 63]
+    keep = {0x10: 0x11, 0x50: 0x22, 0xC8: 9, 0xC9: 1, 0xCA: 1, 0xCB: 37, 0xE6: 1, 0x120: 0x33, 0x2C8: 0x44,
+            0x2D5: 6, 0x2D8: 112, 0x2D9: 24, 0x2DA: 4, 0x3D3: 0x55}
+    keep.update({0xCC + d: n for d, n in enumerate(notes)})
+    keep.update({0xE7 + i: c for i, c in enumerate(b" 1.07")})
+    dump = [0xF0, 0x00, 0x00, 0x0E, 0x01, 0x00] + mmt8_sysex(hr16_memory(patterns, keep))[5:]
+    lines = [
+        "# The HR-16's memory dump: made by test/gen_sysex_test.py from its service manual's format, do not edit. A",
+        "# dump from an HR-16 replaces the drum patterns (hits, lengths, each one's VOICE, TUNE and MIX); MIDI DUMP",
+        "# (the drum page's last function) and its request send them back the same, its header as it was.",
+        "wait 600",
+        "usb plug",
+        "tap ARP",
+        "wait 30",
+        "expect hr16hdr 0",
+        "sysex " + hx(dump),
+        "wait 200",
+        "expect hr16hdr 1",
+        "expect drbeats0 2",
+        "expect drhits0 7",
+        "expect drbeats3 1",
+        "expect drhits3 3",
+        "expect drbeats12 4",
+        "expect drhits12 0",
+        "expect drbeats40 3",
+        "expect drhits40 2",
+        "expect patown0 1",
+        "expect patown12 1",
+        "expect patown5 0",
+        "expect drquant 3",
+        "expect drswing 56",
+        "expect drch 10",
+        "expect unsaved 1",
+        "# pattern 00's first hits: the kick, the crash (pad 5), the mid hat (pad 7), each dynamics as a velocity",
+        "expect drhpad1 1",
+        "expect drhvel1 127",
+        "expect drhpad2 5",
+        "expect drhvel2 95",
+        "expect drhpad3 7",
+        "expect drhvel3 47",
+        "# its sounds on the pads: kinds the kit has (a gated kick the KICK, a crash the cymbal, the foot hat the",
+        "# closed one), a tom none (the pad's own); levels, pans, tunings",
+        "expect padsnd1 0",
+        "expect padlevel1 90",
+        "expect padpan1 0",
+        "expect padsnd2 1",
+        "expect padtune2 1",
+        "expect padpan2 -1",
+        "expect padsnd5 4",
+        "expect padlevel5 99",
+        "expect padsnd7 2",
+        "expect padsnd9 -1",
+        "expect padtune9 1",
+        "expect padlevel9 65",
+        "wait 1300",
+        "shot hr16_in.png",
+        "# MIDI DUMP (the drum page's last function): REC sends them back, byte for byte the dump that came",
+        "turn ALGO 8",
+        "wait 30",
+        "expect drfn 8",
+        "wait 1300",
+        "shot hr16_dump.png",
+        "sysex_out",
+        "tap REC",
+        "wait 300",
+        "expect_sysex " + hx(dump),
+        "# an HR-16's request for its dump: the same",
+        "sysex_out",
+        "sysex F0 00 00 0E 01 07 F7",
+        "wait 300",
+        "expect_sysex " + hx(dump),
+        "# its MIDI test: answered",
+        "sysex_out",
+        "sysex F0 00 00 0E 01 09 00 F7",
+        "wait 30",
+        "expect_sysex F0 00 00 0E 01 09 01 F7",
+        "# kept with SAVE: after a power cycle the patterns and the HR-16's header are there",
+        "tap SAVE",
+        "wait 500",
+        "expect unsaved 0",
+        "reboot",
+        "wait 600",
+        "expect hr16hdr 1",
+        "expect drbeats0 2",
+        "expect drhits0 7",
+        "expect patown3 1",
+        "expect drswing 56",
+    ]
+    (ROOT / "app" / "tests" / "hr16.txt").write_text("\n".join(lines) + "\n")
 
 # ---- the power cut before a dump is saved: the slots as the store had them, none pointing at the new sample ----
 def powercut_test():

@@ -215,20 +215,36 @@ static void again(uint32_t p)
     sq_unlock();
 }
 
-int hr_sounds_store(uint32_t p)
+int hr_sounds_put(uint32_t p, const hr_pad_t *pads)
 {
     uint8_t b[SQ_SOUNDS_LEN];
     uint32_t i;
     if (p >= SQ_PATTERNS)
         return -1;
     for (i = 0; i < HR_PADS; i++) {
-        const hr_pad_t *x = &hr_pad[i];
+        const hr_pad_t *x = &pads[i];
         b[4u * i] = sound_code(x->sound);
         b[4u * i + 1u] = (uint8_t)x->tune;
         b[4u * i + 2u] = x->level;
         b[4u * i + 3u] = (uint8_t)x->pan;
     }
-    if (sq_replace(SQ_PSND(p), b, SQ_SOUNDS_LEN) != 0)
+    return sq_replace(SQ_PSND(p), b, SQ_SOUNDS_LEN);
+}
+
+void hr_sounds_get(uint32_t p, hr_pad_t *pads)
+{
+    int own = hr_sounds_own(p);
+    uint32_t i;
+    for (i = 0; i < HR_PADS; i++) {
+        pads[i] = hr_std[i];
+        if (own)
+            take(&pads[i], sq_data(SQ_PSND(p)), i);
+    }
+}
+
+int hr_sounds_store(uint32_t p)
+{
+    if (hr_sounds_put(p, hr_pad) != 0)
         return -1;
     again(p);                     /* (the pads as they were: edits kept are stored now) */
     return 0;

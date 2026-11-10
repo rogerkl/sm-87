@@ -482,17 +482,18 @@ static void test_song_offsets(void)
 }
 
 /* a memory saved by an older version loads: version 1 (no song offsets), 3 (two-byte song steps), 4 (no pattern's
- * own sounds) */
+ * own sounds), 5 (no HR-16 header) */
 static void test_image_versions(void)
 {
     static uint8_t img[sizeof(sq_mem_t)];
-    uint32_t t1 = sq_image_tables(1), t3 = sq_image_tables(3), t4 = sq_image_tables(4), t5 = sq_image_tables(5), used, i;
+    uint32_t t1 = sq_image_tables(1), t3 = sq_image_tables(3), t4 = sq_image_tables(4), t5 = sq_image_tables(5);
+    uint32_t t6 = sq_image_tables(6), used, i;
     sq_raw_t t[2];
     uint8_t part, mask;
-    CHECK(SQ_VERSION == 5u && t5 == (uint32_t)(sq.arena - (uint8_t *)&sq) && t1 == t3 - SQ_TRACKS - SQ_MMT8_HDR &&
+    CHECK(SQ_VERSION == 6u && t6 == (uint32_t)(sq.arena - (uint8_t *)&sq) && t1 == t3 - SQ_TRACKS - SQ_MMT8_HDR &&
               sq_image_tables(2) == t3 - SQ_MMT8_HDR && t4 == t3 + SQ_PATTERNS * 4u + SQ_PATTERNS * 2u &&
-              t5 == t4 + SQ_PATTERNS * 4u && !sq_image_tables(9),
-          "tables: %u, version 4 %u, version 3 %u, version 1 %u", t5, t4, t3, t1);
+              t5 == t4 + SQ_PATTERNS * 4u && t6 == t5 + SQ_HR16_HDR + SQ_HR16_DRUMS && !sq_image_tables(9),
+          "tables: %u, version 5 %u, version 4 %u, version 3 %u, version 1 %u", t6, t5, t4, t3, t1);
     sq_clear();
     raw(&t[0], 0, 0x90, 60, 100);
     raw(&t[1], 20, 0x80, 60, 0);
@@ -551,7 +552,7 @@ static void test_image_versions(void)
     {
         uint8_t hits[8] = {0, 0, 0, 100, 48, 0, 2, 90};
         uint32_t blobs4 = (uint32_t)offsetof(sq_mem_t, blob) + SQ_PAT(SQ_PATTERNS) * sizeof(sq_blob_t);
-        uint32_t tail = (uint32_t)(offsetof(sq_mem_t, arena) - offsetof(sq_mem_t, offset));
+        uint32_t tail = (uint32_t)(offsetof(sq_mem_t, hr16) - offsetof(sq_mem_t, offset));
         sq_replace(SQ_PAT(7), hits, 8);
         sq.pattern[7].beats = 2;
         sq.offset[5] = 9;
@@ -575,6 +576,33 @@ static void test_image_versions(void)
               sq_events(4, 2) == 1u,
           "its drum patterns, song, offsets and header kept, no pattern's sounds: beats %u, offset %d",
           sq.pattern[7].beats, sq.offset[5]);
+
+    /* version 5, as it was saved: everything but the HR-16's header, after the patterns' lengths */
+    sq_clear();
+    sq_commit(4, 2, t, 2, 3, scratch);
+    {
+        uint8_t hits[4] = {0, 0, 0, 100}, snd[SQ_SOUNDS_LEN] = {0};
+        sq_replace(SQ_PAT(3), hits, 4);
+        sq_replace(SQ_PSND(3), snd, SQ_SOUNDS_LEN);
+        sq.pattern[3].beats = 4;
+        sq.mmt8[7] = 0x77;
+        used = sq.used;
+        memcpy(img, &sq, t5);
+        img[4] = 5;
+        memcpy(img + t5, sq.arena, used);
+        memset(&sq, 0x55, sizeof sq);
+        memcpy(&sq, img, t5);
+        memcpy(sq.arena, img + t5, used);
+    }
+    CHECK(sq_image_upgrade(scratch) == 0 && sq.version == SQ_VERSION && sq_valid(), "version 5 loaded: valid %d",
+          sq_valid());
+    for (i = 0, used = 0; i < SQ_HR16_HDR; i++)
+        used |= sq.hr16[i];
+    for (i = 0; i < SQ_HR16_DRUMS; i++)
+        used |= sq.hr16_voice[i];
+    CHECK(sq_len(SQ_PAT(3)) == 4u && sq_len(SQ_PSND(3)) == SQ_SOUNDS_LEN && sq.pattern[3].beats == 4u &&
+              sq.mmt8[7] == 0x77 && sq_events(4, 2) == 1u && used == 0,
+          "its patterns, their sounds and the MMT-8 header kept, no HR-16 header: beats %u", sq.pattern[3].beats);
 }
 
 /* MIDI clock in, as app_render has it: the clocks that came during a block given at its start (midi_in) */

@@ -2,7 +2,8 @@
 // worklet and app.wasm as a browser runs them. As Axs7 talks to an X7000 through the emulator's MIDI part:
 // ROVS, a whole dump (32,752 words, 66,632 bytes, one frame) and its ACKS, RSPRM, RSD back word for word, then the
 // slot played;
-// an MMT-8 memory dump in and back; a drum pattern recorded from MIDI and played out.
+// an MMT-8 memory dump in and back; a drum pattern recorded from MIDI and played out; an HR-16 dump asked for, taken
+// back in and sent again the same, its MIDI test answered.
 //   node test/emu_test.mjs [app/build/emu]
 import { startEmu, check, done } from "../fm1-base/tests/emu_harness.mjs";
 
@@ -157,4 +158,34 @@ emu.run(400);
 const kicks = out().filter((m) => m[0] === 0x99 && m[1] === 36 && m[2] === 100);
 check(kicks.length === 1, `the second time round: the kick out on channel 10 (${kicks.length})`);
 tap(10);
+
+// the HR-16's dump: its request (stopped) answered with the patterns, that dump taken back in and asked for again,
+// the same; its MIDI test answered
+const HR16_REQUEST = [0xf0, 0x00, 0x00, 0x0e, 0x01, 0x07, 0xf7];
+const hr16Dump = () => {
+  let got = [];
+  for (let t = 0; t < 30 && !got.length; t++) {
+    emu.run(100);
+    got = out().filter((m) => m[0] === 0xf0 && m[1] === 0 && m[2] === 0 && m[3] === 0x0e && m[4] === 1 && m[5] === 0);
+  }
+  return got;
+};
+emu.run(300);
+out();
+midi(HR16_REQUEST);
+const hd = hr16Dump();
+check(hd.length === 1 && hd[0].length > 1100 && hd[0][hd[0].length - 1] === 0xf7,
+  `an HR-16's request: its dump, ${hd[0] ? hd[0].length : 0} bytes`);
+if (hd.length) {
+  midi(hd[0]);
+  emu.run(500);
+  out();
+  midi(HR16_REQUEST);
+  const hd2 = hr16Dump();
+  check(hd2.length === 1 && hd2[0].length === hd[0].length && hd2[0].every((x, i) => x === hd[0][i]),
+    "taken back in, and sent again the same");
+}
+midi([0xf0, 0x00, 0x00, 0x0e, 0x01, 0x09, 0x00, 0xf7]);
+emu.run(100);
+check(out().some((m) => m.length === 8 && m[4] === 0x01 && m[5] === 0x09 && m[6] === 0x01), "its MIDI test answered");
 done();

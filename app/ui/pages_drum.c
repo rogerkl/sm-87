@@ -5,8 +5,9 @@
  * quantize rate, recorded too); PLAY plays the drums alone, SEL + PLAY continues.
  * ALGO turns to its functions: STEP EDIT (below), LENGTH, ERASE (a pad's hits, or the pattern), COPY (appended to
  * another), OFFSET (a pad's hits or all moved by clocks, -99..99, round at the ends), PAD SOUND, PAD MIDI (its note,
- * group, voices; the drums' channel; REC: the pad as the kit has it, SEL: all of them), each done with REC. A pad key
- * on a pad's function chooses it. Part of the unity build (app.c, after ui/pages_seq.c).
+ * group, voices; the drums' channel; REC: the pad as the kit has it, SEL: all of them), MIDI DUMP (the patterns out as
+ * an HR-16's SysEx dump, hr16/hrdump.h; one coming in is taken any time), each done with REC. A pad key on a pad's
+ * function chooses it. Part of the unity build (app.c, after ui/pages_seq.c).
  *
  * PAD SOUND: a pad's sound, tuning, level, pan, as the pattern playing (stopped: chosen) has them, the HR-16's VOICE,
  * TUNE and MIX: "01 KICK   GLOBAL" while it has none of its own (an edit is the global set-up's, every such
@@ -20,9 +21,9 @@
  * the hit shown a clock (SEL: a step), K2 its velocity, K3 its pad, K4 the grid; REC erases it. PLAY leaves it and
  * plays from the top, as the HR-16. */
 
-enum { DF_PLAY, DF_STEP, DF_LENGTH, DF_ERASE, DF_COPY, DF_OFFSET, DF_SOUND, DF_MIDI, DF_N };
-static const char *const DF_TXT[DF_N] = {"",     "STEP EDIT", "LENGTH",    "ERASE",
-                                         "COPY", "OFFSET",    "PAD SOUND", "PAD MIDI"};
+enum { DF_PLAY, DF_STEP, DF_LENGTH, DF_ERASE, DF_COPY, DF_OFFSET, DF_SOUND, DF_MIDI, DF_DUMP, DF_N };
+static const char *const DF_TXT[DF_N] = {"",     "STEP EDIT", "LENGTH",    "ERASE",   "COPY",
+                                         "OFFSET", "PAD SOUND", "PAD MIDI", "MIDI DUMP"};
 #define DF_HAS_PAD(fn) ((fn) == DF_SOUND || (fn) == DF_MIDI || (fn) == DF_ERASE || (fn) == DF_OFFSET)
 
 static struct {
@@ -432,6 +433,9 @@ static void dr_rec(uint32_t btn)
         app_say((btn >> B_SEL & 1u) ? "PADS AS THE KIT" : "PAD AS THE KIT", "");
         return;
     }
+    case DF_DUMP:                 /* the patterns out, as an HR-16's dump (it goes on while playing) */
+        hd_send();
+        return;
     default:
         return;
     }
@@ -668,6 +672,11 @@ static void dr_draw(int sel_held)
         str_cat(t, n);
         lcd_row(1, t);
         return;
+    case DF_DUMP:                 /* "MIDI DUMP  HR-16" / "REC SENDS ALL" */
+        ed_lr(t, "MIDI DUMP", "HR-16");
+        lcd_row(0, t);
+        lcd_row(1, "REC SENDS ALL");
+        return;
     default:
         return;
     }
@@ -732,7 +741,13 @@ static void dr_status(void)
     fmt_uint(n, hrp.swing, 0, ' ');
     str_cat(n, "%");
     cv_text(186, 40, &FONT_XS, n, C_HI);
-    cv_text(8, 58, &FONT_XS, dr.fn ? DF_TXT[dr.fn] : "ALGO: FUNCTIONS", dr.fn ? C_HI : C_GRAY);
+    cv_text(8, 58, &FONT_XS, dr.fn == DF_DUMP ? "IN: ANY TIME" : dr.fn ? DF_TXT[dr.fn] : "ALGO: FUNCTIONS",
+            dr.fn ? C_HI : C_GRAY);   /* (MIDI DUMP: the LCD says it; a dump in is taken any time) */
+    if (dr.fn == DF_DUMP) {       /* what an HR-16 takes: ours with the header of one of its dumps */
+        cv_text(100, 58, &FONT_XS, hd_has_header() ? "HEADER: AN HR-16'S" : "NO HR-16 HEADER YET", C_HI);
+        cv_blit(0, LCD_Y + LCD_H + 10);
+        return;
+    }
     t[0] = 0;
     str_cat(t, "CH ");
     fmt_uint(n, set.dr_channel + 1u, 0, ' ');

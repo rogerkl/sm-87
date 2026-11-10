@@ -52,6 +52,8 @@ on an FM-1 yet** (see *On the device*).
     1/64, or off) and swung (50-75%) as it goes in, the HR-16's way. Its STEP EDIT, OFFSET and FILL too.
   - A pattern can keep its own sounds, as the HR-16 stores VOICE, TUNE and MIX with a pattern; one without them
     plays the pads' global set-up.
+  - The HR-16's memory dump over USB, both ways: an HR-16's dump replaces the drum patterns, and ours goes out in the
+    same format, also when an HR-16's request for one comes.
   - With the MMT-8: one clock and tempo. A song step chooses the drum pattern that plays with it (or none). Playing
     a part, the drums loop their own pattern beside it. On their own page they play alone.
 - **The screen** is a 2 × 16 character LCD, drawn dot by dot, with a status strip under it.
@@ -139,6 +141,7 @@ when the drums play alone, or beside a part; it doesn't record in a song.
 | OFFSET | Clocks, -99..99 (384ths; SEL: tens) | A pad, or all (a pad's key chooses it) | | | Moves the hits that much later (+) or earlier; past the end round to the start, and back. Again: as much again |
 | PAD SOUND | The sound: the kit's, then SLOT01-16 | Tuning, ±24 | Level | Pan, <3 .. 3> | Keeps the pads' sounds with the pattern; SEL + REC: lets them go (the global set-up again) |
 | PAD MIDI | Its note | Its group (pads that cut each other) | Voices, 1 or 2 | The drums' channel | The pad as the kit sets it (sound and MIDI); SEL + REC: all of them |
+| MIDI DUMP | | | | | Sends the drum patterns as an HR-16's SysEx dump, over USB (below) |
 
 On a pad's function, a pad's key chooses it (and plays it); so does SELECT.
 
@@ -170,6 +173,41 @@ level and pan. PAD SOUND's top line says whose the pads have:
   pad. K2 changes the hit's velocity, K3 its pad (skipping pads with a hit there), and K4 the grid.
 - **REC erases the hit shown.**
 - **PLAY leaves STEP EDIT** and plays from the top.
+
+**The HR-16's memory dump**, as its service manual has it (`documentation/hr16-sysex.md`):
+- **In:** send an HR-16's dump to the FM-1 over USB at any time (on an HR-16, with SYSEX ENABLE on: TAPE held, the
+  left arrow once, RECORD). The LCD counts the bytes. The dump replaces all 100 drum patterns, as it would on an
+  HR-16; the MMT-8's parts and songs stay. SAVE keeps it.
+- **What comes across:** each pattern's hits, its length, and its VOICE, TUNE and MIX as the pattern's own sounds;
+  the swing and quantize, as the recording's (its 1/6 becomes 1/8).
+- **What doesn't:**
+  - Its songs: SM-87's drums follow the MMT-8's songs. When the dump has any, the LCD says `SONGS NOT TAKEN`.
+  - Its MIDI settings and tempo. The drums keep SM-87's notes and channel, so the MMT-8's tracks still play them.
+    Those bytes are kept, though, and go back out in ours.
+- **Its drums on the pads**, by role:
+
+  | Pads 1-6 | Pads 7-8 | Pads 9-12 | Pads 13-16 |
+  |---|---|---|---|
+  | KICK, SNARE, CLS HAT, OPN HAT, CRASH, RIDE | MID HAT, CLAPS | TOM 1-4 | PERC 1-4 |
+
+- **Its sounds** become the kit's sound of the same kind: kicks the KICK; snares, the rimshot, sidestick and brush
+  the SNARE; the closed and foot hats CLHAT; the half-open and open hats OPHAT; the rides and the crash the CYMBL.
+  The kit has no toms, claps or percussion, so a pad with one of those keeps the sound it has in the global set-up.
+  To hear them, give pads 7-16 sounds (sampler slots, say) on PAD SOUND before the dump comes in.
+- **Dynamics and tuning:** the HR-16's 8 dynamics become velocities 15, 31 .. 127, and go back the same. Its 32
+  tuning steps span an octave and a half, so each becomes the nearest semitone (-9 to +8). Going out, a tuning
+  beyond that range goes as the HR-16's highest or lowest step.
+- **Out:** MIDI DUMP (the drum page's last function), REC. An HR-16's request for a dump (`F0 00 00 0E 01 07 F7`)
+  sends it too, unless the FM-1 is playing, as an HR-16 does. Its MIDI test is answered.
+  - Each pad's sound goes as one of the HR-16's 49 of its kind: on each drum, the one most patterns of the last HR-16
+    dump had there, if it is that kind. A pad playing a sampler slot, or nothing, goes as that drum's sound in the
+    last HR-16 dump.
+  - As with the MMT-8, the header comes from the last HR-16 dump taken in, so **send the FM-1 one of your HR-16's
+    dumps first** (MIDI DUMP's strip says `HEADER: AN HR-16'S` then). Without one, the header is made up: the notes
+    the pads', the channel the drums', the tempo the sequencer's, and zeros where the manual says not to alter. An
+    HR-16 may not take that.
+  - The FM-1 takes its own dump back the same, byte for byte. A real HR-16 taking one is untested, and so is the
+    sound list's numbering (the manual gives none; `documentation/hr16-sysex.md` says where it's from).
 
 **With the sequencer**, the two share one clock, one tempo and one transport. Which pattern plays depends on how
 PLAY was started:
@@ -246,11 +284,12 @@ for clocks. The strip shows the tempo the clocks come at (`MIDI 120`). MIDI cloc
 the FM-1 passes the clock on. Clocks are timed in rendered frames, to a block (2.9 ms); the notes land on them.
 
 **The MMT-8's memory dump**, as `documentation/MMT-8 SYSEX.odt` has it:
-- **In:** send a dump to the FM-1 over USB (from a SysEx librarian; an MMT-8 sends one with TAPE held, PAGE DOWN,
-  RECORD, through a computer's MIDI interface). The LCD counts the bytes; the dump replaces the sequencer's memory
-  (parts, songs, names, channels; the song offsets stay ours) and SAVE keeps it. Its SysEx events aren't kept. The
-  sequencer's 64 KB holds a little less than an MMT-8's: a note sharing a clock takes 7 bytes here, 5 there, so a
-  full memory of chords may not fit, and the LCD says from which part on it didn't.
+- **In:** send a dump to the FM-1 over USB at any time (from a SysEx librarian; an MMT-8 sends one with TAPE held,
+  PAGE DOWN, RECORD, through a computer's MIDI interface). MIDI DUMP's strip says so: `IN: ANY TIME`. The LCD
+  counts the bytes; the dump replaces the sequencer's memory (parts, songs, names, channels; the song offsets and
+  the drum patterns stay ours) and SAVE keeps it. Its SysEx events aren't kept. The sequencer's 64 KB holds a little
+  less than an MMT-8's: a note sharing a clock takes 7 bytes here, 5 there, so a full memory of chords may not fit,
+  and the LCD says from which part on it didn't.
 - **Out:** MIDI DUMP (the last function), REC: the whole memory goes out over USB, as an MMT-8 sends it. The FM-1
   takes it back the same, byte for byte.
 - **To a real MMT-8:** two things the document leaves out come from
@@ -291,7 +330,7 @@ they still name.
 | `app/` | The firmware: `app.c` (glue, routing, render, pages), `fm1.toml`, `app.h` (contract, flash map) |
 | `app/s700/` | The sampler: `s7engine.c` (voices), `s7mem.c` (flash pool, directory), `sds.c` (sample dump, SPRM, OVS) |
 | `app/mmt8/` | The sequencer: `seq.c` (memory, takes, edits), `player.c` (clock, MIDI clock in, playback, recording, songs), `mmtdump.c` (the MMT-8's SysEx dump) |
-| `app/hr16/` | The drum machine: `hrkit.c` (the kit, the pads, a pattern's own sounds, their voices), `hrpat.c` (patterns, their player, recording) |
+| `app/hr16/` | The drum machine: `hrkit.c` (the kit, the pads, a pattern's own sounds, their voices), `hrpat.c` (patterns, their player, recording), `hrdump.c` (the HR-16's SysEx dump) |
 | `app/ui/` | The LCD (`lcd.c`, a 5 × 7 font) and the pages; `seq_edit.c` the MMT-8's functions, `pages_drum.c` the HR-16's page |
 | `app/tests/` | Scripts for the host simulator (`sysex.txt` is generated by `test/gen_sysex_test.py`) |
 | `test/` | C unit tests against the X7000 measurements, Axs7's fixtures and the MMT-8's behaviour; `run.sh` runs all |
@@ -395,6 +434,7 @@ the port names on both sides, and loopMIDI's activity for it.
 - ROVS, a whole 32,752-word dump in and its 547 ACKS, RSPRM, RSD back word for word, then the slot played.
 - An MMT-8 memory dump in, and back out.
 - A drum pattern recorded from MIDI and played out.
+- An HR-16 dump asked for, taken back in and sent again the same; its MIDI test answered.
 
 `test/run.sh` runs it when there is a build.
 
@@ -444,4 +484,5 @@ The first things to measure on a device, before more is built on these assumptio
 
 ## Next
 
+- A dump sent to a real HR-16, and one of its dumps taken in: its sound numbers, the BCD beats.
 - A dump sent to a real MMT-8, and MIDI clock in with `midi_stamp` (fm1.toml) for timing finer than a block.

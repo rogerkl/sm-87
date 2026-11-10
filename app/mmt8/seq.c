@@ -40,6 +40,10 @@ void sq_clear(void)
         sq.mmt8[i] = 0;
     for (i = 0; i < SQ_PATTERNS; i++)
         sq.pattern[i].beats = 0;
+    for (i = 0; i < SQ_HR16_HDR; i++)
+        sq.hr16[i] = 0;
+    for (i = 0; i < SQ_HR16_DRUMS; i++)
+        sq.hr16_voice[i] = 0;
 }
 
 static void clear_parts_songs(void)
@@ -89,18 +93,20 @@ void sq_clear_mmt8(void)
 
 /* the tables as each version had them: to the parts' and songs' blobs (1), then the offsets (2), the MMT-8 header
  * (3); 4 put the drum patterns' blobs after the songs', and their lengths at the end; 5 their sounds' blobs after
- * theirs */
+ * theirs; 6 the HR-16's header at the end */
 #define SQ_BLOBS_V3 (SQ_PARTS * SQ_TRACKS + SQ_SONGS)
 #define SQ_BLOBS_V4 (SQ_BLOBS_V3 + SQ_PATTERNS)
 #define SQ_TABLES_V1 (offsetof(sq_mem_t, blob) + SQ_BLOBS_V3 * sizeof(sq_blob_t))
-#define SQ_TAIL (offsetof(sq_mem_t, arena) - offsetof(sq_mem_t, offset))   /* after the blobs, as 4 has it */
+#define SQ_TAIL_V5 (offsetof(sq_mem_t, hr16) - offsetof(sq_mem_t, offset))   /* after the blobs, as 4 and 5 have it */
 uint32_t sq_image_tables(uint32_t version)
 {
     switch (version) {
     case SQ_VERSION:
         return (uint32_t)offsetof(sq_mem_t, arena);
+    case 5u:
+        return (uint32_t)offsetof(sq_mem_t, hr16);
     case 4u:
-        return (uint32_t)(offsetof(sq_mem_t, blob) + SQ_BLOBS_V4 * sizeof(sq_blob_t) + SQ_TAIL);
+        return (uint32_t)(offsetof(sq_mem_t, blob) + SQ_BLOBS_V4 * sizeof(sq_blob_t) + SQ_TAIL_V5);
     case 3u:
         return (uint32_t)(SQ_TABLES_V1 + SQ_TRACKS + SQ_MMT8_HDR);
     case 2u:
@@ -114,7 +120,7 @@ uint32_t sq_image_tables(uint32_t version)
 
 int sq_image_upgrade(uint8_t *scratch)
 {
-    uint32_t v = sq.version, i, s, blobs = v < 4u ? SQ_BLOBS_V3 : SQ_BLOBS_V4;
+    uint32_t v = sq.version, i, s, blobs = v < 4u ? SQ_BLOBS_V3 : v < 5u ? SQ_BLOBS_V4 : SQ_BLOBS;
     uint32_t end = (uint32_t)(offsetof(sq_mem_t, blob) + blobs * sizeof(sq_blob_t));
     uint8_t *b = (uint8_t *)&sq;
     if (v >= SQ_VERSION || v == 0u)
@@ -129,6 +135,10 @@ int sq_image_upgrade(uint8_t *scratch)
     if (v < 3u)
         for (i = 0; i < SQ_MMT8_HDR; i++)
             sq.mmt8[i] = 0;
+    for (i = 0; i < SQ_HR16_HDR; i++)     /* (every version before this one) */
+        sq.hr16[i] = 0;
+    for (i = 0; i < SQ_HR16_DRUMS; i++)
+        sq.hr16_voice[i] = 0;
     sq.version = SQ_VERSION;
     if (v >= 4u)
         return 0;

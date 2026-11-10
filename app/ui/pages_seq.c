@@ -186,7 +186,8 @@ static void seq_status(void)
     str_cat(n, "%");
     cv_text(162, 44, &FONT_XS, n, C_HI);
     /* the function (ALGO); in EDIT the event of how many; else the drums with it */
-    cv_text(8, 58, &FONT_XS, ed.fn ? F_TXT[ed.fn] : "ALGO: FUNCTIONS", ed.fn ? C_HI : C_GRAY);
+    cv_text(8, 58, &FONT_XS, ed.fn == F_DUMP ? "IN: ANY TIME" : ed.fn ? F_TXT[ed.fn] : "ALGO: FUNCTIONS",
+            ed.fn ? C_HI : C_GRAY);   /* (MIDI DUMP: the LCD says it; a dump in is taken any time) */
     if (!ed.fn) {
         uint32_t d = !sqp.song_mode ? hrp.pattern
                      : sq_song_drums(sqp.song, sqp.state == SQP_STOPPED ? seq_song_step : sqp.step);

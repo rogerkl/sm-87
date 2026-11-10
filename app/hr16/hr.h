@@ -82,6 +82,10 @@ void hr_pad_changed(uint32_t pad);
 int hr_sounds_store(uint32_t p);
 int hr_sounds_drop(uint32_t p);
 int hr_sounds_copy(uint32_t a, uint32_t b);
+/* pattern p's own sounds made of pads' (sound, tuning, level, pan; -1 no room: as it was), the pads not changed;
+ * the sounds p plays (its own, else the global set-up's) as pads, the rest of each the global set-up's */
+int hr_sounds_put(uint32_t p, const hr_pad_t *pads);
+void hr_sounds_get(uint32_t p, hr_pad_t *pads);
 /* for tests: another kit than the one built in */
 void hr_kit_use(const hr_kit_sound_t *s, uint32_t n, const hr_kit_pad_t *pads, uint32_t np);
 
