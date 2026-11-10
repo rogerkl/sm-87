@@ -1,12 +1,18 @@
 #!/usr/bin/env python3
-"""Samples built into the firmware: for a test build, or an FM-1 with no sampler or computer to send samples from.
+"""Samples built into the firmware: sounds there from the start (no sampler or computer to send them from), and more
+sample memory than the pool alone (the README's "Getting the most samples in").
 
-Writes app/rom/rom_samples.h (not in the repository: the sounds are yours, or a library's). While it exists, the
-build has those samples in its slots as the factory's: a slot nothing was sent to plays them, a dump sent to it
-replaces them. Delete it (or run with --none) for a build without.
+They go into a firmware package (.fwsc) as it is, a release's or your own build's, with no compiler: the package is
+opened, the samples written above the firmware in its slot (the sample bank, app/s700/s7bank.h), and its checksums made
+again (documentation/sample-bank.md). The package is changed in place unless -o names another file; --none takes the
+samples out again, and gives the package back as it was built, byte for byte.
 
-  .venv/bin/python tools/mkrom.py FILE[@SLOT] ...        (slots 1-16; without @, the next free one)
-  .venv/bin/python tools/mkrom.py --none
+  .venv/bin/python tools/mkrom.py PACKAGE.fwsc FILE[@SLOT] ...   the samples into the package (slots 1-16; without
+                                                                 @, the next free one)
+  .venv/bin/python tools/mkrom.py PACKAGE.fwsc                   what it holds, and the room
+  .venv/bin/python tools/mkrom.py PACKAGE.fwsc --none            without samples
+  .venv/bin/python tools/mkrom.py --emu FILE[@SLOT] ...           for the host simulator and the browser emulator
+  .venv/bin/python tools/mkrom.py --emu --none
 
 FILE is
   - a WAV file (PCM 8/16/24/32 bit or float, mono or mixed down to mono). Axs7's WAV files carry their settings in an
@@ -16,10 +22,11 @@ FILE is
   - an S700/X7000 QuickDisk image (.qd, as a Gotek or HxC uses them): the sample and all its parameters and programs
     (documentation/akai-s700-x7000/05-quickdisk.md).
 
-Up to 16 samples, of up to 32,752 words each, packed two words to three bytes, in --max-kb (KiB) of the firmware's
-581,564-byte slot: by default what the firmware itself, the drum kit (resources/kit, built in by tools/mkkit.py) and
---reserve-kb for the firmware to grow leave. The firmware is measured in the last device build (app/build/sm87.bin
-less the samples' and the kit's arrays in app/build/sm87.elf); without one it is guessed.
+Up to 16 samples, of up to 32,752 words each, packed two words to three bytes, in what the firmware leaves of its
+581,564-byte slot (the package says how much: run it with the package alone).
+
+--emu writes app/rom/emu_bank.h instead (not in the repository): the host simulator and the browser emulator, which
+have no firmware slot, build it in while it exists.
 """
 import argparse
 import gzip
@@ -33,11 +40,8 @@ from pathlib import Path
 import numpy as np
 
 ROOT = Path(__file__).resolve().parent.parent
-OUT = ROOT / "app" / "rom" / "rom_samples.h"
-APP_SLOT = 0x8DFBC                # fm1-base tools/fm1pkg_make.py
-BUILD = ROOT / "app" / "build"    # a device build's (fm1-base tools/build.py ../app)
-FIRMWARE_GUESS = 168 * 1024       # the firmware without samples or kit when there's no device build to measure
-RESERVE_KB = 8                    # kept for the firmware to grow (--reserve-kb)
+EMU_OUT = ROOT / "app" / "rom" / "emu_bank.h"
+FM1_TOOLS = ROOT / "fm1-base" / "tools"     # fm1pkg_make.py: the package's ciphers, CRC-16 and layout
 MAXWORDS = 32752
 NPARAM = 155
 # the SPRM values (app/s700/s7.h)
@@ -268,128 +272,301 @@ def pack(words):
     return bytes(out + b"\0")
 
 
+def packed_size(words):
+    """S7_PACKED (app/s700/s7.h): what pack() makes of so many words"""
+    return (words + 1) // 2 * 3 + 1
+
+
 def c_bytes(b):
     return ",\n".join(", ".join(f"0x{x:02X}" for x in b[i:i + 24]) for i in range(0, len(b), 24))
 
 
 def c_name(s):
-    return "".join(ch if 32 <= ord(ch) < 127 and ch not in '"\\' else "?" for ch in s)[:24]
+    return "".join(ch if 32 <= ord(ch) < 127 and ch not in '"\\' else "?" for ch in s)[:BANK_NAME - 1]
 
 
-def elf_symbol_bytes(path, prefixes):
-    """the bytes of the symbols in an ELF file (32-bit, little-endian) whose names start with one of prefixes, or
-    None when it isn't one"""
-    d = path.read_bytes()
-    if d[:4] != b"\x7fELF" or d[4] != 1 or d[5] != 1:
+# ------------------------------------------------------------------------------------------- the bank ---
+# app/s700/s7bank.h
+BANK_MAGIC = 0x4B423753           # "S7BK"
+BANK_VERSION = 1
+BANK_NAME = 24
+BANK_ENTRY = 188                  # <BBHI24s, the 155 values, a spare byte
+BANK_FOOT = 32
+DESC_MAGIC = b"SM87 S7 BANK"      # s7_bank_desc_t, in the firmware's image
+
+
+def bank(items):
+    """the bank's bytes, its footer last: items (slot, name, words, params, pressure), sorted by slot"""
+    head, data = bytearray(), bytearray()
+    at = len(items) * BANK_ENTRY
+    for slot, name, words, p, pressure in items:
+        packed = pack(words)
+        head += struct.pack("<BBHI24s", slot, pressure, len(words), at + len(data), c_name(name).encode())
+        head += bytes(p) + b"\0"
+        data += packed + b"\0" * (-len(packed) % 4)
+    body = bytes(head + data)
+    foot = struct.pack("<IHHII12x", BANK_MAGIC, BANK_VERSION, len(items), len(body), zlib.crc32(body))
+    return body + foot + struct.pack("<I", zlib.crc32(foot))
+
+
+def bank_read(top):
+    """the bank ending at the end of top (bytes): [(slot, name, words, params, pressure)] with words a count, None
+    without one; SystemExit for one that doesn't check"""
+    if len(top) < BANK_FOOT:
         return None
-    shoff, = struct.unpack_from("<I", d, 0x20)
-    shentsize, shnum = struct.unpack_from("<HH", d, 0x2E)
-    sects = [struct.unpack_from("<IIIIIIIIII", d, shoff + i * shentsize) for i in range(shnum)]
-    total = 0
-    for name, kind, _, _, off, size, link, _, _, entsize in sects:
-        if kind != 2 or not entsize:  # SHT_SYMTAB, its names in section link
-            continue
-        stroff = sects[link][4]
-        for k in range(off, off + size, entsize):
-            st_name, _, st_size = struct.unpack_from("<III", d, k)
-            end = d.index(b"\0", stroff + st_name)
-            if d[stroff + st_name:end].decode("latin-1").startswith(prefixes):
-                total += st_size
-    return total
+    f = top[-BANK_FOOT:]
+    magic, version, count, size, crc = struct.unpack_from("<IHHII", f)
+    if magic != BANK_MAGIC:
+        return None
+    if zlib.crc32(f[:28]) != struct.unpack_from("<I", f, 28)[0] or version != BANK_VERSION or count > 16 \
+            or size > len(top) - BANK_FOOT:
+        raise SystemExit("the package's samples don't check (a damaged footer)")
+    body = top[-BANK_FOOT - size:-BANK_FOOT]
+    if zlib.crc32(body) != crc:
+        raise SystemExit("the package's samples don't check (their CRC)")
+    out = []
+    for i in range(count):
+        slot, pressure, words, _, name = struct.unpack_from("<BBHI24s", body, i * BANK_ENTRY)
+        p = list(body[i * BANK_ENTRY + 32:i * BANK_ENTRY + 32 + NPARAM])
+        out.append((slot, name.rstrip(b"\0").decode("latin-1"), words, p, pressure))
+    return out
 
 
-def firmware_bytes():
-    """the firmware without samples or kit, and where that figure comes from: the last device build (its image less
-    the samples' and kit's arrays in it), else FIRMWARE_GUESS"""
-    elf, img = BUILD / "sm87.elf", BUILD / "sm87.bin"
-    if not (elf.exists() and img.exists()):
-        return FIRMWARE_GUESS, "a guess: no device build to measure"
-    arrays = elf_symbol_bytes(elf, ("S7_ROM_D", "HR_KIT_D"))
-    if arrays is None:
-        return FIRMWARE_GUESS, f"a guess: {elf.name} isn't an ELF file to read"
-    newest = max((f.stat().st_mtime for f in (ROOT / "app").rglob("*") if f.suffix in (".c", ".h")
-                  and BUILD not in f.parents and f.parent.name != "rom"), default=0)
-    when = "the last device build" + (", older than the code" if newest > elf.stat().st_mtime else "")
-    return img.stat().st_size - arrays, when
+# ---------------------------------------------------------------------------------------- the package ---
+MARKS, MARK_BLK, MARK_KEEP = 20, 0x30, 0x2F   # .fwsc: a marker byte after each of the first 20 blocks: its identity
+APP_AREA = 0x4000                 # flash.bin: the app area from here (SFC-ciphered with the chip key)
+APP_NAME = b"app.bin"
 
 
-def budget(kit):
-    """room for the samples, KiB (the slot less the firmware, a kit of kit bytes and the reserve), and how"""
-    fw, src = firmware_bytes()
-    room = (APP_SLOT - fw - kit) // 1024 - RESERVE_KB
-    return room, (f"the slot's {APP_SLOT / 1024:.1f} KB less the firmware's {fw / 1024:.1f} ({src}), the kit's "
-                  f"{kit / 1024:.1f} and {RESERVE_KB} for the firmware to grow")
+def fm1pkg():
+    if str(FM1_TOOLS) not in sys.path:
+        sys.path.insert(0, str(FM1_TOOLS))
+    import fm1pkg_make
+    return fm1pkg_make
 
 
-def kit_bytes():
-    """the drum kit's sounds built in (tools/mkkit.py), bytes"""
-    sys.path.insert(0, str(Path(__file__).resolve().parent))
-    import mkkit                  # (it imports this: here, once both are loaded)
-    return mkkit.kit_bytes()
+class Package:
+    """a firmware package (fm1-base tools/fm1pkg_make.py) opened: its app.bin plain (self.app), the firmware's image
+    in it (self.image_end) and its slot (len(self.app)); close() makes the package again with the app changed"""
+
+    def __init__(self, raw, name="the package"):
+        P = fm1pkg()
+        self.P, self.name, self.raw = P, name, bytes(raw)
+        if len(raw) < MARKS * MARK_BLK + 0x40:
+            self.fail("too short")
+        self.identity = "".join(chr((raw[i * MARK_BLK + MARK_KEEP] - i - 1) & 0xFF) for i in range(MARKS)
+                                if raw[i * MARK_BLK + MARK_KEEP] != 0x7D)
+        lg = bytearray(b"".join(raw[i * MARK_BLK:i * MARK_BLK + MARK_KEEP] for i in range(MARKS))
+                       + raw[MARKS * MARK_BLK:])
+        hdr = self.dec(lg[0:0x40])
+        n = struct.unpack_from("<H", hdr, 8)[0]
+        if self.crc(hdr[2:0x40]) != struct.unpack_from("<H", hdr, 0)[0] or not n \
+                or self.crc(lg[0x40:0x40 + n * 0x50]) != struct.unpack_from("<H", hdr, 2)[0]:
+            self.fail("its header doesn't check")
+        for i in range(n):           # the UFW parts: flash.bin is type 0
+            e = self.dec(lg[0x40 + i * 0x50:0x90 + i * 0x50])
+            if struct.unpack_from("<H", e, 0)[0] == 0:
+                self.part = i
+                off, size = struct.unpack_from("<II", e, 8)
+                break
+        else:
+            self.fail("no flash.bin in it")
+        flash = bytearray(lg[off:off + size])
+        if self.crc(flash) != struct.unpack_from("<H", e, 4)[0]:
+            self.fail("its flash.bin doesn't check")
+        self.lg, self.off = lg, off
+        self.key = self.chip_key(flash)
+        # the app area: its head (a JLFS entry: the block's size), the entries after it (app.bin's), the app
+        area = bytearray(flash[APP_AREA:APP_AREA + 32])
+        P.sfc(area, 0, 32, 0, self.key)
+        if self.crc(area[2:32]) != struct.unpack_from("<H", area, 0)[0]:
+            self.fail(f"its app area doesn't open with the chip key {self.key:#06x}")
+        blk = struct.unpack_from("<I", area, 8)[0]
+        self.span = (blk + 31) & ~31              # whole cipher blocks: ciphered back the same
+        if APP_AREA + self.span > len(flash):
+            self.fail("its app area is bigger than its flash.bin")
+        region = bytearray(flash[APP_AREA:APP_AREA + self.span])
+        P.sfc(region, 0, self.span, 0, self.key)
+        if self.crc(region[32:blk]) != struct.unpack_from("<H", area, 2)[0]:
+            self.fail("its app area doesn't check")
+        for k in range(32, 0x120, 32):
+            if region[k + 16:k + 16 + len(APP_NAME) + 1] == APP_NAME + b"\0":
+                self.entry = k
+                break
+        else:
+            self.fail("no app.bin in its app area")
+        a_off, a_size = struct.unpack_from("<II", region, self.entry + 4)
+        self.flash, self.region, self.blk, self.a_off = flash, region, blk, a_off
+        self.app = bytearray(region[a_off:a_off + a_size])
+        self.desc()
+
+    def fail(self, why):
+        raise SystemExit(f"{self.name}: not a firmware package this can put samples into: {why}")
+
+    def crc(self, b):
+        return self.P.crc16(bytes(b))
+
+    def dec(self, b):
+        b = bytearray(b)
+        self.P.enc(b, 0, len(b))
+        return b
+
+    def chip_key(self, flash):
+        """from the flash's head: the isd_config.ini entry's blob (fm1pkg_make.flash_image)"""
+        for o in range(32, 0x200, 32):
+            e = self.dec(flash[o:o + 32])
+            if e[16:32].rstrip(b"\0\xff") == b"isd_config.ini":
+                at = struct.unpack_from("<I", e, 4)[0]
+                return self.P.chipkey_decode(bytes(flash[at:at + 32]))
+        self.fail("no chip key in its head")
+
+    def desc(self):
+        """the firmware's s7_bank_desc_t: where its image ends"""
+        at = self.app.find(DESC_MAGIC)
+        if at < 0:
+            self.fail("its firmware doesn't take samples this way (an SM-87 from before the sample bank, or another "
+                      "firmware)")
+        version, me, load, start, end, slot_end = struct.unpack_from("<6I", self.app, at + 12)
+        base = me - at
+        self.image_end = load + (end - start) - base
+        if slot_end - base != len(self.app) or not at < self.image_end <= len(self.app) or self.image_end & 3:
+            self.fail("its firmware's description of itself doesn't fit its slot")
+        if version != BANK_VERSION:
+            raise SystemExit(f"{self.name}: its firmware reads samples of format {version}, this mkrom.py writes "
+                             f"format {BANK_VERSION}: use the mkrom.py of the firmware's version")
+
+    def room(self):
+        return len(self.app) - self.image_end
+
+    def samples(self):
+        return bank_read(bytes(self.app[self.image_end:]))
+
+    def put(self, b):
+        """the bank b into the slot (b"" for none): above the image all 0xFF, b at the slot's top"""
+        top = bytes(self.app[self.image_end:])
+        old = bank_read(top)
+        size = BANK_FOOT + struct.unpack_from("<I", top, len(top) - BANK_FOOT + 8)[0] if old is not None else 0
+        if any(x != 0xFF for x in top[:len(top) - size]):
+            self.fail("there's something above its firmware that isn't samples")
+        if len(b) > self.room():
+            raise SystemExit(f"{len(b) / 1024:.1f} KB of samples: more than the {self.room() / 1024:.1f} KB the "
+                             f"firmware leaves in {self.name}")
+        self.app[self.image_end:] = b"\xFF" * (self.room() - len(b)) + b
+
+    def close(self):
+        """the package's bytes, the app as it is now"""
+        P, region, flash, lg = self.P, bytearray(self.region), bytearray(self.flash), bytearray(self.lg)
+        region[self.a_off:self.a_off + len(self.app)] = self.app
+        e = self.entry
+        struct.pack_into("<H", region, e + 2, self.crc(self.app))
+        struct.pack_into("<H", region, e, self.crc(region[e + 2:e + 32]))
+        struct.pack_into("<H", region, 2, self.crc(region[32:self.blk]))
+        struct.pack_into("<H", region, 0, self.crc(region[2:32]))
+        P.sfc(region, 0, self.span, 0, self.key)
+        flash[APP_AREA:APP_AREA + self.span] = region
+        lg[self.off:self.off + len(flash)] = flash
+        at = 0x40 + self.part * 0x50
+        ent = self.dec(lg[at:at + 0x50])
+        struct.pack_into("<H", ent, 4, self.crc(flash))
+        lg[at:at + 0x50] = self.dec(ent)
+        hdr = self.dec(lg[0:0x40])
+        n = struct.unpack_from("<H", hdr, 8)[0]
+        struct.pack_into("<H", hdr, 2, self.crc(lg[0x40:0x40 + n * 0x50]))
+        struct.pack_into("<H", hdr, 0, self.crc(hdr[2:0x40]))
+        lg[0:0x40] = self.dec(hdr)
+        raw = bytearray(self.raw)
+        for i in range(MARKS):
+            raw[i * MARK_BLK:i * MARK_BLK + MARK_KEEP] = lg[i * MARK_KEEP:(i + 1) * MARK_KEEP]
+        raw[MARKS * MARK_BLK:] = lg[MARKS * MARK_KEEP:]
+        return bytes(raw)
 
 
-def main():
-    global RESERVE_KB
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("files", nargs="*", help="FILE[@SLOT]: WAV or .qd")
-    ap.add_argument("-o", "--out", type=Path, default=OUT)
-    ap.add_argument("--max-kb", type=int, help="room for the samples (default: what the firmware, the kit and the "
-                    "reserve leave)")
-    ap.add_argument("--reserve-kb", type=int, default=RESERVE_KB,
-                    help=f"kept for the firmware to grow (default {RESERVE_KB})")
-    ap.add_argument("--none", action="store_true", help="remove the generated file: a build without samples")
-    a = ap.parse_args()
-    RESERVE_KB = a.reserve_kb
-    room, how = budget(kit_bytes())
-    if a.max_kb is None:
-        a.max_kb = room
-    if a.none:
-        a.out.unlink(missing_ok=True)
-        print(f"removed {a.out}: the next build has no samples built in")
-        return
-    if not a.files:
-        ap.error("no files")
+# ----------------------------------------------------------------------------------------------- main ---
+def load_items(files):
+    """FILE[@SLOT] ... -> [(slot, name, words, params, pressure)] by slot"""
+    fixed = {int(x.rsplit("@", 1)[1]) - 1 for x in files if "@" in x and x.rsplit("@", 1)[1].isdigit()}
     taken, items = set(), []
-    for spec in a.files:
+    for spec in files:
         path, _, slot = spec.rpartition("@") if "@" in spec and spec.rsplit("@", 1)[1].isdigit() else (spec, "", "")
         if slot:
             slot = int(slot) - 1
             if not 0 <= slot < 16 or slot in taken:
                 raise SystemExit(f"{spec}: slot {slot + 1} is not free (1-16)")
         else:
-            slot = next((s for s in range(16) if s not in taken and s not in
-                         {int(x.rsplit('@', 1)[1]) - 1 for x in a.files if '@' in x and x.rsplit('@', 1)[1].isdigit()}),
-                        None)
+            slot = next((s for s in range(16) if s not in taken and s not in fixed), None)
             if slot is None:
                 raise SystemExit("more than 16 samples")
         taken.add(slot)
-        lower = path.lower()
-        words, p, pressure = from_qd(path) if lower.endswith((".qd", ".qd.gz")) else from_wav(path, slot)
+        words, p, pressure = from_qd(path) if path.lower().endswith((".qd", ".qd.gz")) else from_wav(path, slot)
         items.append((slot, Path(path).stem, words, p, pressure))
-    items.sort()
-    total = sum(len(pack(w)) for _, _, w, _, _ in items)
-    if total > a.max_kb * 1024:
-        raise SystemExit(f"{total // 1024} KB of samples: more than the {a.max_kb} KB there's room for"
-                         + (f" ({how})" if a.max_kb == room else " (--max-kb)"))
-    blob = b"".join(bytes([s]) + bytes(p) + pack(w) for s, _, w, p, _ in items)
-    rom_id = zlib.crc32(blob) or 1
-    lines = ["/* Samples built into the firmware: made by tools/mkrom.py, do not edit. From:"]
-    lines += [f" *   slot {s + 1:2}: {c_name(n)} ({len(w)} words, rate code {p[P_RECBW]})" for s, n, w, p, _ in items]
-    lines += [" */", f"#define S7_ROM_N {len(items)}u", f"#define S7_ROM_ID 0x{rom_id:08X}u", ""]
-    for i, (s, n, w, p, pr) in enumerate(items):
-        lines += [f"static const uint8_t S7_ROM_D{i}[{len(pack(w))}] = {{", c_bytes(pack(w)), "};"]
-    lines += ["", "static const s7_rom_t S7_ROM[S7_ROM_N] = {"]
-    for i, (s, n, w, p, pr) in enumerate(items):
-        lines += [f'    {{{s}u, {pr}u, {len(w)}u, S7_ROM_D{i}, "{c_name(n)}",', "     {" + c_bytes(bytes(p)) + "}},"]
-    lines += ["};", ""]
-    a.out.parent.mkdir(parents=True, exist_ok=True)
-    a.out.write_text("\n".join(lines))
+    return sorted(items, key=lambda it: it[0])
+
+
+def show(items):
     for s, n, w, p, _ in items:
+        words = w if isinstance(w, int) else len(w)
         progs = [q + 1 for q in range(32) if p[4 * q] <= p[4 * q + 1]]
-        print(f"slot {s + 1:2}  {n:32.32}  {len(w):5} words  {RATES[p[P_RECBW]]:7.0f} Hz  root {p[P_RECNP]}  "
+        print(f"slot {s + 1:2}  {n:23.23}  {words:5} words  {RATES[p[P_RECBW]]:7.0f} Hz  root {p[P_RECNP]}  "
               f"mode {p[P_RPMODE]}  programs {','.join(map(str, progs)) or '-'}")
-    print(f"{a.out}: {len(items)} samples, {total // 1024} KB of the {a.max_kb} KB there's room for"
-          + (f": {how}" if a.max_kb == room else " (--max-kb)"))
+
+
+def kb(n):
+    return f"{n / 1024:.1f} KB"
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("files", nargs="*", help="PACKAGE.fwsc, then FILE[@SLOT] ...: WAV or .qd")
+    ap.add_argument("-o", "--out", type=Path, help="the package to write (default: PACKAGE itself)")
+    ap.add_argument("--none", action="store_true", help="no samples: the package as built (--emu: no emu_bank.h)")
+    ap.add_argument("--emu", action="store_true", help=f"{EMU_OUT.relative_to(ROOT)} for the host simulator and "
+                    "the browser emulator, not a package")
+    a = ap.parse_args()
+    if a.emu:
+        if a.none:
+            EMU_OUT.unlink(missing_ok=True)
+            print(f"removed {EMU_OUT.relative_to(ROOT)}: the next host or emulator build has no samples built in")
+            return
+        if not a.files:
+            ap.error("no files")
+        items = load_items(a.files)
+        b = bank(items)
+        lines = ["/* Samples built in for the host simulator and the browser emulator (the device's are in its",
+                 " * package): made by tools/mkrom.py --emu, do not edit. From:"]
+        lines += [f" *   slot {s + 1:2}: {c_name(n)} ({len(w)} words, rate code {p[P_RECBW]})"
+                  for s, n, w, p, _ in items]
+        lines += [" */", f"static const uint8_t S7_EMU_BANK[{len(b)}] __attribute__((aligned(4))) = {{", c_bytes(b),
+                  "};", ""]
+        EMU_OUT.parent.mkdir(parents=True, exist_ok=True)
+        EMU_OUT.write_text("\n".join(lines))
+        show(items)
+        print(f"{EMU_OUT.relative_to(ROOT)}: {len(items)} samples, {kb(len(b))}")
+        return
+    if not a.files or not a.files[0].lower().endswith(".fwsc"):
+        ap.error("the first is the package (.fwsc), or --emu")
+    src, files = Path(a.files[0]), a.files[1:]
+    pkg = Package(src.read_bytes(), src.name)
+    slot = len(pkg.app)
+    about = (f"{pkg.identity}: the firmware {pkg.image_end:,} of the slot's {slot:,} bytes, "
+             f"{kb(pkg.room())} for samples")
+    if not files and not a.none:
+        held = pkg.samples()
+        print(f"{src}: {about}")
+        if held:
+            show(held)
+        size = BANK_FOOT + sum(BANK_ENTRY + (packed_size(w) + 3) // 4 * 4 for _, _, w, _, _ in held or [])
+        print(f"{len(held)} samples, {kb(size)}, {kb(pkg.room() - size)} free" if held else "no samples")
+        return
+    if a.none and files:
+        ap.error("--none takes no samples")
+    items = [] if a.none else load_items(files)
+    b = bank(items) if items else b""
+    pkg.put(b)
+    out = a.out or src
+    out.write_bytes(pkg.close())
+    show(items)
+    print(f"{out}: {about}" + (f"; {len(items)} samples in, {kb(len(b))}, {kb(pkg.room() - len(b))} free"
+                                if items else "; no samples"))
 
 
 if __name__ == "__main__":

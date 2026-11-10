@@ -1,5 +1,6 @@
 /* SM-87: the sample memory, see s7mem.h */
 #include "s7mem.h"
+#include "s7bank.h"
 #include "app.h"
 
 #define DIR_MAGIC 0x37445331u     /* "1SD7" */
@@ -7,18 +8,39 @@
 #define NONE 0xFFFFu
 #define ROM 0xF000u               /* sector ROM | i: built-in sample i */
 
+/* the samples built in: the bank at the top of the firmware's slot (s7bank.h, tools/mkrom.py). The host simulator and
+ * the browser emulator have no slot: theirs is app/rom/emu_bank.h while it exists (tools/mkrom.py --emu) */
+static s7_bank_t bank;
+#ifdef PLAT_HOST
 #if defined(__has_include)
-#if __has_include("rom/rom_samples.h")
-#include "rom/rom_samples.h"
+#if __has_include("rom/emu_bank.h")
+#include "rom/emu_bank.h"
+#define EMU_BANK 1
 #endif
 #endif
-#ifndef S7_ROM_N
-#define S7_ROM_N 0u
-#define S7_ROM_ID 0u
-static const s7_rom_t S7_ROM[1];
+static void bank_open(void)
+{
+#ifdef EMU_BANK
+    s7bank_parse(S7_EMU_BANK + sizeof S7_EMU_BANK, (uint32_t)sizeof S7_EMU_BANK, &bank);
+#else
+    s7bank_parse(0, 0, &bank);
+#endif
+}
+#else
+extern const uint8_t _data_load[], _data_start[], _data_end[], _app_xip_end[];   /* (fm1-base device/app.ld) */
+__attribute__((section(".rodata.s7bank_desc"))) const s7_bank_desc_t s7bank_desc = {
+    S7B_DESC_MAGIC, S7B_VERSION, &s7bank_desc, _data_load, _data_start, _data_end, _app_xip_end};
+static void bank_open(void)
+{
+    const s7_bank_desc_t *volatile dp = &s7bank_desc;    /* (read as the tools read it: kept in the image) */
+    const s7_bank_desc_t *d = dp;
+    uintptr_t end = (uintptr_t)d->data_load + ((uintptr_t)d->data_end - (uintptr_t)d->data_start);
+    uintptr_t top = (uintptr_t)d->slot_end;
+    s7bank_parse((const uint8_t *)top, top > end ? (uint32_t)(top - end) : 0u, &bank);
+}
 #endif
 
-uint32_t s7mem_rom_count(void) { return S7_ROM_N; }
+uint32_t s7mem_rom_count(void) { return bank.n; }
 
 typedef struct {
     uint16_t sector;              /* the first sector, from S7M_BASE; NONE: no sample of its own */
@@ -77,8 +99,8 @@ static void slot_point(uint32_t i)
 {
     s7_slot_t *s = &s7_slot[i];
     if (is_rom(dir.slot[i].sector)) {
-        s->data = S7_ROM[dir.slot[i].sector - ROM].data;
-        s->words = S7_ROM[dir.slot[i].sector - ROM].words;
+        s->data = s7bank_data(&bank, dir.slot[i].sector - ROM);
+        s->words = s7bank_entry(&bank, dir.slot[i].sector - ROM)->words;
     } else if (dir.slot[i].sector != NONE && dir.slot[i].words) {
         s->data = sector_ptr(dir.slot[i].sector);
         s->words = dir.slot[i].words;
@@ -98,7 +120,8 @@ static int dir_valid(void)
         if (s == NONE)
             continue;
         if (is_rom(s)) {          /* another build's built-in samples: checked below (s7mem_init) */
-            if (dir.rom_id == S7_ROM_ID && (s - ROM >= S7_ROM_N || dir.slot[i].words != S7_ROM[s - ROM].words))
+            if (dir.rom_id == bank.id &&
+                (s - ROM >= bank.n || dir.slot[i].words != s7bank_entry(&bank, s - ROM)->words))
                 return 0;
             continue;
         }
@@ -135,30 +158,32 @@ static void dir_empty(void)
 static void rom_fill(void)
 {
     uint32_t i, k;
-    for (i = 0; i < S7_ROM_N; i++) {
-        dir_slot_t *d = &dir.slot[S7_ROM[i].slot % S7_SLOTS];
+    for (i = 0; i < bank.n; i++) {
+        const s7_bank_entry_t *e = s7bank_entry(&bank, i);
+        dir_slot_t *d = &dir.slot[e->slot % S7_SLOTS];
         if (d->sector != NONE)
             continue;
         d->sector = (uint16_t)(ROM + i);
-        d->words = S7_ROM[i].words;
-        d->pressure = S7_ROM[i].pressure;
+        d->words = e->words;
+        d->pressure = e->pressure;
         for (k = 0; k < S7_NPARAM; k++)
-            d->p[k] = S7_ROM[i].p[k];
+            d->p[k] = e->p[k];
     }
-    if (S7_ROM_N && is_rom(dir.slot[0].sector) == 0 && dir.slot[0].sector == NONE)
+    if (bank.n && is_rom(dir.slot[0].sector) == 0 && dir.slot[0].sector == NONE)
         for (k = 0; k < S7_PROGRAMS; k++)   /* the test tone keeps out of the way of the built-in samples */
             dir.slot[0].p[S7_P_KEYH(k)] = 0, dir.slot[0].p[S7_P_KEYL(k)] = 24;
-    dir.rom_id = S7_ROM_ID;
+    dir.rom_id = bank.id;
 }
 
 void s7mem_init(void)
 {
     uint32_t i;
     tone_make();
+    bank_open();
     if (plat_store_load(OBJ_SAMPLES, &dir, sizeof dir) != (int)sizeof dir || !dir_valid()) {
         dir_empty();
         rom_fill();
-    } else if (dir.rom_id != S7_ROM_ID) {
+    } else if (dir.rom_id != bank.id) {
         /* another build's built-in samples: those slots empty again, then this build's into the empty ones */
         for (i = 0; i < S7_SLOTS; i++)
             if (is_rom(dir.slot[i].sector)) {
@@ -244,7 +269,10 @@ uint32_t s7mem_words_in(uint32_t sectors)
 
 int s7mem_has_sample(uint32_t slot) { return slot < S7_SLOTS && dir.slot[slot].sector != NONE; }
 int s7mem_is_rom(uint32_t slot) { return slot < S7_SLOTS && is_rom(dir.slot[slot].sector); }
-const char *s7mem_name(uint32_t slot) { return s7mem_is_rom(slot) ? S7_ROM[dir.slot[slot].sector - ROM].name : 0; }
+const char *s7mem_name(uint32_t slot)
+{
+    return s7mem_is_rom(slot) ? s7bank_entry(&bank, dir.slot[slot].sector - ROM)->name : 0;
+}
 
 static void sync_params_to_dir(void)
 {

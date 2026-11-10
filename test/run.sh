@@ -15,12 +15,15 @@ for t in test/*_test.c; do
     "build/test/$n" ../Axs7SdsW/web/test/fixtures
 done
 "$PY" -I test/gen_sysex_test.py
-# the scripts expect the X7000's empty memory: samples built in (app/rom/rom_samples.h, tools/mkrom.py) are set
-# aside meanwhile, and put back however this ends. (The drum kit, resources/kit, is the build's: always in)
-ROM=app/rom/rom_samples.h
+# samples put into a package (tools/mkrom.py): bank_test.py, against fm1pkg_make.py's packages
+"$PY" -I test/bank_test.py
+# the scripts expect the X7000's empty memory: the host build's samples built in (app/rom/emu_bank.h, tools/mkrom.py
+# --emu) are set aside meanwhile, and put back however this ends. (The drum kit, resources/kit, is the build's: always
+# in)
+ROM=app/rom/emu_bank.h
 if [ -f "$ROM" ]; then
-    mv "$ROM" build/test/rom_samples.h.yours
-    trap 'mv build/test/rom_samples.h.yours "$ROM"' EXIT
+    mv "$ROM" build/test/emu_bank.h.yours
+    trap 'mv build/test/emu_bank.h.yours "$ROM"' EXIT
 fi
 build_host() { (cd fm1-base && "$PY" tools/build.py ../app --host >../build/test/host_build.log 2>&1) || { cat build/test/host_build.log; exit 1; }; }
 run_scripts() {
@@ -33,7 +36,7 @@ build_host
 run_scripts app/tests/*.txt
 # samples built in: a disk image and a WAV, from the fixtures
 "$PY" -I test/make_test_wav.py build/test/sine440.wav
-"$PY" -I tools/mkrom.py ../Axs7SdsW/web/test/fixtures/s700.qd.gz@1 build/test/sine440.wav@2 >/dev/null
+"$PY" -I tools/mkrom.py --emu ../Axs7SdsW/web/test/fixtures/s700.qd.gz@1 build/test/sine440.wav@2 >/dev/null
 build_host
 run_scripts app/tests/rom/*.txt
 rm -f "$ROM"

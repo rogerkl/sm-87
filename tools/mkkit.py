@@ -8,10 +8,9 @@ set-up, for app/hr16/hrkit.c. Run by hand, it tells what the kit holds and what 
   .venv/bin/python tools/mkkit.py KIT [--dir DIR] [--out FILE]
 
 The sounds are the sampler's format: mono, 12 bits, packed two words to three bytes, at one of its 41 rates (a WAV at
-another is resampled to the nearest). They share the firmware's slot with the samples tools/mkrom.py builds in.
+another is resampled to the nearest). They share the firmware's slot with the samples tools/mkrom.py puts in a package.
 """
 import argparse
-import re
 import sys
 import zlib
 from pathlib import Path
@@ -82,13 +81,6 @@ def load(path):
     return mkrom.to_words(x), code, float(np.max(np.abs(x))) if len(x) else 0.0
 
 
-def kit_bytes(kit=KIT, wav_dir=None):
-    """the bytes the kit's sounds take in the firmware (tools/mkrom.py's budget)"""
-    sounds, _ = parse(kit)
-    d = Path(wav_dir) if wav_dir else Path(kit).parent
-    return sum(len(mkrom.pack(load(d / s["file"])[0])) for s in sounds)
-
-
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("kit", nargs="?", default=str(KIT))
@@ -145,12 +137,7 @@ def main():
         print(f"pad {i + 1:2}  {p['name']:6}  {sounds[p['sound']]['name']:6}  tune {p['tune']:+d}  note {p['note']}"
               + (f"  group {p['group']}" if p["group"] else "") + (f"  poly {p['poly']}" if p["poly"] > 1 else ""))
     print(f"{len(sounds)} sounds, {total / 1024:.1f} KB of the firmware's slot" + (f": {a.out}" if a.out else ""))
-    rom = mkrom.OUT
-    if rom.exists():                  # the samples built in beside it: do they still fit?
-        rom_kb = sum(int(n) for n in re.findall(r"S7_ROM_D\d+\[(\d+)\]", rom.read_text())) / 1024
-        room, how = mkrom.budget(total)
-        print(f"the samples built in ({rom.name}): {rom_kb:.0f} KB of the {room} KB left: {how}"
-              + ("" if rom_kb <= room else ". Too many: make it again with fewer (tools/mkrom.py)"))
+    print("(samples put into a package take what the firmware leaves: tools/mkrom.py PACKAGE.fwsc says how much)")
 
 
 if __name__ == "__main__":

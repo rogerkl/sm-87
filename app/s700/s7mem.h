@@ -14,15 +14,8 @@
 #define S7M_SECTORS ((S7M_END - S7M_BASE) / S7M_SECTOR)
 #define S7M_SECTORS_FOR(words) ((S7_PACKED(words) + S7M_SECTOR - 1u) / S7M_SECTOR)
 
-/* samples built into the firmware (tools/mkrom.py writes app/rom/rom_samples.h; a build without it has none): the
- * slots' factory contents, played in place from the firmware's flash. A dump sent to such a slot replaces it */
-typedef struct {
-    uint8_t slot, pressure;
-    uint16_t words;
-    const uint8_t *data;          /* packed */
-    const char *name;
-    uint8_t p[S7_NPARAM];         /* its SPRM values */
-} s7_rom_t;
+/* samples built into the firmware (the bank at the top of its slot, s7bank.h: tools/mkrom.py puts it into a package):
+ * the slots' factory contents, played in place from the firmware's flash. A dump sent to such a slot replaces it */
 uint32_t s7mem_rom_count(void);
 int s7mem_is_rom(uint32_t slot);  /* the slot plays a built-in sample */
 const char *s7mem_name(uint32_t slot);   /* a built-in sample's name, else 0 */

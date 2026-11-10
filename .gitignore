@@ -5,7 +5,8 @@
 /app/web/words/
 # Python tools' environment (pillow, numpy, mido)
 /.venv/
-# samples built in for a test build (tools/mkrom.py): yours or a library's, not ours to publish
+# samples built in for the host simulator and the emulator (tools/mkrom.py --emu): yours or a library's, not ours to
+# publish
 /app/rom/
 
 # example sounds for testing
