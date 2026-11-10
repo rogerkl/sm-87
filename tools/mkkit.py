@@ -148,9 +148,9 @@ def main():
     rom = mkrom.OUT
     if rom.exists():                  # the samples built in beside it: do they still fit?
         rom_kb = sum(int(n) for n in re.findall(r"S7_ROM_D\d+\[(\d+)\]", rom.read_text())) / 1024
-        room = (mkrom.APP_SLOT - mkrom.FIRMWARE - total) / 1024
-        print(f"the samples built in ({rom.name}): {rom_kb:.0f} KB of the {room:.0f} KB left"
-              + ("" if rom_kb <= room else ": too many, make it again with fewer (tools/mkrom.py)"))
+        room, how = mkrom.budget(total)
+        print(f"the samples built in ({rom.name}): {rom_kb:.0f} KB of the {room} KB left: {how}"
+              + ("" if rom_kb <= room else ". Too many: make it again with fewer (tools/mkrom.py)"))
 
 
 if __name__ == "__main__":

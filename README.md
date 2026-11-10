@@ -389,9 +389,12 @@ folder is in the next build. Run by hand, `mkkit.py` reports what the kit holds 
 
     .venv/bin/python tools/mkkit.py
 
-The kit's sounds (37 KB now) share the firmware's slot with the samples `tools/mkrom.py` builds in. `mkrom.py`'s
-default budget is what's left beside the firmware (about 150 KB) and the kit. `mkkit.py` says whether the samples
-already built in still fit.
+The kit's sounds (37 KB now) share the firmware's 568 KB slot with the samples `tools/mkrom.py` builds in.
+`mkrom.py`'s default budget is what's left beside the firmware, the kit, and 8 KB kept for the firmware to grow
+(`--reserve-kb`).
+It measures the firmware in the last device build: `app/build/sm87.bin` less the samples' and the kit's arrays in
+`app/build/sm87.elf` (160 KB now). Without a device build it guesses 168 KB, and it says when the build is older than
+the code. Both tools print the figures. `mkkit.py` says whether the samples already built in still fit.
 
 The kit is designed to grow:
 - A pad keeps its sound by number, so add new sounds at the end of the list.

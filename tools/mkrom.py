@@ -17,8 +17,9 @@ FILE is
     (documentation/akai-s700-x7000/05-quickdisk.md).
 
 Up to 16 samples, of up to 32,752 words each, packed two words to three bytes, in --max-kb (KiB) of the firmware's
-581,564-byte slot: by default what the firmware itself (about 150 KiB) and the drum kit (resources/kit, built in by
-tools/mkkit.py) leave.
+581,564-byte slot: by default what the firmware itself, the drum kit (resources/kit, built in by tools/mkkit.py) and
+--reserve-kb for the firmware to grow leave. The firmware is measured in the last device build (app/build/sm87.bin
+less the samples' and the kit's arrays in app/build/sm87.elf); without one it is guessed.
 """
 import argparse
 import gzip
@@ -34,7 +35,9 @@ import numpy as np
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "app" / "rom" / "rom_samples.h"
 APP_SLOT = 0x8DFBC                # fm1-base tools/fm1pkg_make.py
-FIRMWARE = 150 * 1024             # the firmware without samples or kit, with room to grow
+BUILD = ROOT / "app" / "build"    # a device build's (fm1-base tools/build.py ../app)
+FIRMWARE_GUESS = 168 * 1024       # the firmware without samples or kit when there's no device build to measure
+RESERVE_KB = 8                    # kept for the firmware to grow (--reserve-kb)
 MAXWORDS = 32752
 NPARAM = 155
 # the SPRM values (app/s700/s7.h)
@@ -273,6 +276,51 @@ def c_name(s):
     return "".join(ch if 32 <= ord(ch) < 127 and ch not in '"\\' else "?" for ch in s)[:24]
 
 
+def elf_symbol_bytes(path, prefixes):
+    """the bytes of the symbols in an ELF file (32-bit, little-endian) whose names start with one of prefixes, or
+    None when it isn't one"""
+    d = path.read_bytes()
+    if d[:4] != b"\x7fELF" or d[4] != 1 or d[5] != 1:
+        return None
+    shoff, = struct.unpack_from("<I", d, 0x20)
+    shentsize, shnum = struct.unpack_from("<HH", d, 0x2E)
+    sects = [struct.unpack_from("<IIIIIIIIII", d, shoff + i * shentsize) for i in range(shnum)]
+    total = 0
+    for name, kind, _, _, off, size, link, _, _, entsize in sects:
+        if kind != 2 or not entsize:  # SHT_SYMTAB, its names in section link
+            continue
+        stroff = sects[link][4]
+        for k in range(off, off + size, entsize):
+            st_name, _, st_size = struct.unpack_from("<III", d, k)
+            end = d.index(b"\0", stroff + st_name)
+            if d[stroff + st_name:end].decode("latin-1").startswith(prefixes):
+                total += st_size
+    return total
+
+
+def firmware_bytes():
+    """the firmware without samples or kit, and where that figure comes from: the last device build (its image less
+    the samples' and kit's arrays in it), else FIRMWARE_GUESS"""
+    elf, img = BUILD / "sm87.elf", BUILD / "sm87.bin"
+    if not (elf.exists() and img.exists()):
+        return FIRMWARE_GUESS, "a guess: no device build to measure"
+    arrays = elf_symbol_bytes(elf, ("S7_ROM_D", "HR_KIT_D"))
+    if arrays is None:
+        return FIRMWARE_GUESS, f"a guess: {elf.name} isn't an ELF file to read"
+    newest = max((f.stat().st_mtime for f in (ROOT / "app").rglob("*") if f.suffix in (".c", ".h")
+                  and BUILD not in f.parents and f.parent.name != "rom"), default=0)
+    when = "the last device build" + (", older than the code" if newest > elf.stat().st_mtime else "")
+    return img.stat().st_size - arrays, when
+
+
+def budget(kit):
+    """room for the samples, KiB (the slot less the firmware, a kit of kit bytes and the reserve), and how"""
+    fw, src = firmware_bytes()
+    room = (APP_SLOT - fw - kit) // 1024 - RESERVE_KB
+    return room, (f"the slot's {APP_SLOT / 1024:.1f} KB less the firmware's {fw / 1024:.1f} ({src}), the kit's "
+                  f"{kit / 1024:.1f} and {RESERVE_KB} for the firmware to grow")
+
+
 def kit_bytes():
     """the drum kit's sounds built in (tools/mkkit.py), bytes"""
     sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -281,14 +329,20 @@ def kit_bytes():
 
 
 def main():
-    room = (APP_SLOT - FIRMWARE - kit_bytes()) // 1024
+    global RESERVE_KB
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("files", nargs="*", help="FILE[@SLOT]: WAV or .qd")
     ap.add_argument("-o", "--out", type=Path, default=OUT)
-    ap.add_argument("--max-kb", type=int, default=room,
-                    help=f"room for the samples (now {room}: the slot less the firmware and the drum kit)")
+    ap.add_argument("--max-kb", type=int, help="room for the samples (default: what the firmware, the kit and the "
+                    "reserve leave)")
+    ap.add_argument("--reserve-kb", type=int, default=RESERVE_KB,
+                    help=f"kept for the firmware to grow (default {RESERVE_KB})")
     ap.add_argument("--none", action="store_true", help="remove the generated file: a build without samples")
     a = ap.parse_args()
+    RESERVE_KB = a.reserve_kb
+    room, how = budget(kit_bytes())
+    if a.max_kb is None:
+        a.max_kb = room
     if a.none:
         a.out.unlink(missing_ok=True)
         print(f"removed {a.out}: the next build has no samples built in")
@@ -315,8 +369,8 @@ def main():
     items.sort()
     total = sum(len(pack(w)) for _, _, w, _, _ in items)
     if total > a.max_kb * 1024:
-        raise SystemExit(f"{total // 1024} KB of samples: more than --max-kb {a.max_kb}"
-                         + (f" (the drum kit takes {kit_bytes() // 1024} KB)" if kit_bytes() else ""))
+        raise SystemExit(f"{total // 1024} KB of samples: more than the {a.max_kb} KB there's room for"
+                         + (f" ({how})" if a.max_kb == room else " (--max-kb)"))
     blob = b"".join(bytes([s]) + bytes(p) + pack(w) for s, _, w, p, _ in items)
     rom_id = zlib.crc32(blob) or 1
     lines = ["/* Samples built into the firmware: made by tools/mkrom.py, do not edit. From:"]
@@ -334,7 +388,8 @@ def main():
         progs = [q + 1 for q in range(32) if p[4 * q] <= p[4 * q + 1]]
         print(f"slot {s + 1:2}  {n:32.32}  {len(w):5} words  {RATES[p[P_RECBW]]:7.0f} Hz  root {p[P_RECNP]}  "
               f"mode {p[P_RPMODE]}  programs {','.join(map(str, progs)) or '-'}")
-    print(f"{a.out}: {len(items)} samples, {total // 1024} KB")
+    print(f"{a.out}: {len(items)} samples, {total // 1024} KB of the {a.max_kb} KB there's room for"
+          + (f": {how}" if a.max_kb == room else " (--max-kb)"))
 
 
 if __name__ == "__main__":
