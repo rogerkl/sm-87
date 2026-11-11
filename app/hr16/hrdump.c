@@ -116,6 +116,15 @@ static const uint8_t Q_GRID[10] = {0, 1, 1, 2, 3, 4, 5, 6, 7, 8};
 
 /* ---------------------------------------------------------------------------------------------- import --- */
 /* a pattern's or song's place in the image from its pointer at ptr (0: none there), with room for hdr bytes */
+uint32_t hd_want(const uint8_t *img, uint32_t n)
+{
+    uint32_t a;
+    if (n < 0x2CFu)
+        return 0;
+    a = le16(img + 0x2CDu);
+    return a >= HD_BASE + HD_HDR && a <= HD_END ? a - HD_BASE : 0u;
+}
+
 static uint32_t hd_at(const uint8_t *img, uint32_t len, uint32_t ptr, uint32_t hdr)
 {
     uint32_t a = be16(img + ptr);
@@ -150,13 +159,16 @@ static uint32_t hit_in(uint8_t *h, uint32_t n, uint32_t tick, uint32_t pad, uint
     return n + SQ_HIT_LEN;
 }
 
-/* pattern p from the image at 'at': its hits, length and sounds. 0, 1 empty (no beats), -1 not readable, -2 no room */
+/* pattern p from the image at 'at': its hits, length and sounds. 0, 1 empty (no beats), -1 not readable, -2 no room,
+ * -3 past the len bytes that came */
 static int hd_pattern_in(const uint8_t *img, uint32_t len, uint32_t at, uint32_t p, uint8_t *scratch)
 {
     uint32_t size = le16(img + at), end = at + size, k, t = 0, beats, ticks, n = 0, d;
     hr_pad_t pads[HR_PADS];
-    if (size < HD_PAT_HDR + 1u || end > len)
+    if (size < HD_PAT_HDR + 1u)
         return -1;
+    if (end > len)
+        return -3;
     for (k = at + HD_PAT_HDR; k < end && img[k] != 0xFFu; k++)   /* its clocks: the waits */
         if (img[k] & 0x80u)
             t += img[k] & 0x7Fu;
@@ -200,12 +212,17 @@ static int hd_pattern_in(const uint8_t *img, uint32_t len, uint32_t at, uint32_t
 int hd_import(const uint8_t *img, uint32_t len, uint8_t *scratch, hd_report_t *r)
 {
     static uint8_t count[HD_DRUMS][HD_SOUNDS];
-    uint32_t p, s, d, i;
+    uint32_t p, s, d, i, short_;
     r->patterns = r->lost = r->songs = 0;
     r->first_lost = -1;
     r->quant = r->swing = -1;
+    r->cut = r->bad = r->full = 0;
+    r->got = len;
+    r->want = 0;
     if (len < HD_HDR)
         return -1;
+    r->want = hd_want(img, len);
+    short_ = r->want && len < r->want;
     for (p = 0; p < SQ_PATTERNS; p++) {   /* (all of them replaced, as on the HR-16) */
         sq.pattern[p].beats = 0;
         (void)sq_replace(SQ_PAT(p), 0, 0);
@@ -233,9 +250,14 @@ int hd_import(const uint8_t *img, uint32_t len, uint8_t *scratch, hd_report_t *r
     for (p = 0; p < SQ_PATTERNS; p++) {
         uint32_t at = hd_at(img, len, 0x200u + 2u * p, HD_PAT_HDR);
         int e;
-        if (!at)
-            continue;
-        e = hd_pattern_in(img, len, at, p, scratch);
+        if (!at) {
+            uint32_t a = be16(img + 0x200u + 2u * p);
+            if (!(a & 0xFF00u) || a < HD_BASE + HD_HDR)
+                continue;         /* none there */
+            e = -3;               /* past the bytes that came */
+        } else {
+            e = hd_pattern_in(img, len, at, p, scratch);
+        }
         if (e == 0) {
             r->patterns++;
         } else if (e < 0) {       /* what of it went in, out again */
@@ -245,8 +267,20 @@ int hd_import(const uint8_t *img, uint32_t len, uint8_t *scratch, hd_report_t *r
             r->lost++;
             if (r->first_lost < 0)
                 r->first_lost = (int16_t)p;
+            if (e == -2)
+                r->full = 1;
+            else if (e == -3)
+                r->cut = 1;
+            else
+                r->bad = 1;
         }
     }
+    /* as the MMT-8's: fewer bytes than its header says, what was not readable lost with the rest; as many, what lies
+     * past them a damaged dump's */
+    if (short_ && r->bad)
+        r->cut = 1, r->bad = 0;
+    else if (r->want && !short_ && r->cut)
+        r->bad = 1, r->cut = 0;
     for (s = 0; s < 100u; s++) {  /* its songs: counted (one with a step) */
         uint32_t at = hd_at(img, len, 0x302u + 2u * s, 3u);
         if (at && img[at + 2u] != 0xFFu)

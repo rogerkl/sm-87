@@ -5,9 +5,12 @@
 // ROVS, a whole dump (32,752 words, 66,632 bytes, one frame) and its ACKS, RSPRM, RSD back word for word, then the
 // slot played;
 // an MMT-8 memory dump in and back; a drum pattern recorded from MIDI and played out; an HR-16 dump asked for, taken
-// back in and sent again the same, its MIDI test answered.
+// back in and sent again the same, its MIDI test answered; a .syx file of several dumps sent as the page's
+// "Send .syx" sends it (app/web/emu/app.js).
 //   node test/emu_test.mjs [app/build/emu]
 import { startEmu, check, done } from "../fm1-base/tests/emu_harness.mjs";
+import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 
 const dir = process.argv[2] || new URL("../app/build/emu", import.meta.url).pathname;
 const emu = await startEmu(dir);
@@ -191,4 +194,32 @@ if (hd.length) {
 midi([0xf0, 0x00, 0x00, 0x0e, 0x01, 0x09, 0x00, 0xf7]);
 emu.run(100);
 check(out().some((m) => m.length === 8 && m[4] === 0x01 && m[5] === 0x09 && m[6] === 0x01), "its MIDI test answered");
+
+// "Send .syx" (app/web/emu/app.js): a file of four whole dumps into slots 9-12, with bytes between them and a message
+// cut short, split as the page's button splits it and sent as it paces them: every one taken in, none refused
+const own = await import(pathToFileURL(resolve(dir, "app_own.js")).href);
+const quick = (slot) => {
+  const n = 6000, d = [0xf0, 0x7e, 0x01, slot, 0x00, 12, ...tb(25281), ...tb(n), ...tb(0), ...tb(n - 1), 0];
+  for (let b = 0; b * 60 < n; b++) {
+    const blk = [b & 0x7f];
+    for (let i = 0; i < 60; i++) blk.push(0x40, 0);
+    blk.push(blk.slice(1).reduce((a, x) => a ^ x, 0));
+    d.push(...blk);
+  }
+  return [...d, 0xf7];
+};
+const file = Uint8Array.from([0x00, ...dump.slice(0, 3), 8, ...dump.slice(4), 0x12, 0x34, 0xf0, 0x01, 0x02,
+  ...quick(9), ...dump.slice(0, 3), 10, ...dump.slice(4), ...quick(11)]);
+const frames = own.syxFrames(file);
+check(frames.length === 4 && frames[0].length === 66632 && frames[1].length === 12220 && frames[0][3] === 8 &&
+  frames[3][3] === 11, `the file split: ${frames.map((f) => f.length).join(", ")} bytes`);
+emu.run(300);
+out();
+for (const f of frames) {
+  midi(f);
+  emu.run(own.pauseMs(f.length));
+}
+emu.run(300);
+const acks4 = out().filter((m) => m.length === 4 && m[0] === 0xf0 && m[1] === 0x7e && m[2] === 0x7f && m[3] === 0xf7);
+check(acks4.length === 2 * 547 + 2 * 101, `paced: every dump taken in (${acks4.length} ACKS)`);
 done();

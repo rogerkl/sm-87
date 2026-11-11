@@ -212,6 +212,21 @@ static void test_round_trip(void)
           pads[1].pan, pads[1].level, pads[5].tune);
     n2 = hd_export(img2, HD_MAX, &SET);
     CHECK(n2 == n && !memcmp(img, img2, (size_t)n), "sent again: the same, %d bytes (%d)", n2, n);
+    {   /* cut short inside pattern 42 (the last): the two before taken, it told as lost on the way */
+        uint32_t at42 = (uint32_t)(img[0x200 + 84] << 8 | img[0x201 + 84]) - HD_BASE;
+        CHECK(hd_want(img, 0x2CE) == 0u && hd_want(img, (uint32_t)n) == (uint32_t)n,
+              "its length from its header: %u (%d)", hd_want(img, (uint32_t)n), n);
+        CHECK(hd_import(img, at42 + 10u, scratch, &r) == 0 && r.cut && !r.bad && !r.full && r.patterns == 2u &&
+                  r.lost == 1u && r.first_lost == 42 && r.want == (uint32_t)n && r.got == at42 + 10u,
+              "cut short: cut %u (bad %u full %u), %u patterns, first lost %d", r.cut, r.bad, r.full, r.patterns,
+              r.first_lost);
+        for (n2 = (int32_t)at42 + (int32_t)HD_PAT_HDR; n2 < n && img2[n2] != 0xFFu; n2++)
+            ;
+        img2[n2] = 0x00u;         /* whole, but pattern 42's end gone (a hit where its FFH was) */
+        CHECK(hd_import(img2, (uint32_t)n, scratch, &r) == 0 && r.bad && !r.cut && !r.full && r.lost == 1u &&
+                  r.first_lost == 42 && r.patterns == 2u,
+              "damaged: bad %u (cut %u full %u), %u lost, first %d", r.bad, r.cut, r.full, r.lost, r.first_lost);
+    }
 }
 
 /* a dump made by hand, as the manual has it */

@@ -31,11 +31,19 @@
 /* what an import kept and did not */
 typedef struct {
     uint16_t parts, songs;        /* taken in */
-    uint16_t lost_parts;          /* not: no room in the sequencer's 64 KB (its notes take 7 bytes, the MMT-8's 5 on a
-                                   * clock shared), or not readable */
-    int16_t first_lost;           /* the first of them, or -1 */
+    uint16_t lost_parts, lost_songs;   /* not */
+    int16_t first_lost;           /* the first part of them, or -1 */
+    /* why, any of: cut, the dump cut short (bytes lost on the way: some of it past the bytes that came, or, when fewer
+     * came than its header says it has, not readable); bad, not readable in a whole dump; full, no room in the
+     * sequencer's 64 KB (its notes take 7 bytes, the MMT-8's 5 on a clock shared) */
+    uint8_t cut, bad, full;
+    uint32_t got, want;           /* the bytes that came, and those its header says it has (0: not said) */
     uint32_t skipped;             /* events not kept: SysEx (the sequencer keeps none) */
 } md_report_t;
+
+/* a dump's length as its header says it (where the free memory starts, CFH), once n bytes of it have come; 0: not
+ * yet, or not said. For the progress shown as it comes in, and to tell a dump cut short */
+uint32_t md_want(const uint8_t *img, uint32_t n);
 
 /* an unpacked dump (len bytes from the header) into the sequencer's memory, replacing all of it but the song offsets.
  * scratch: SQ_SCRATCH bytes. 0, or -1: not a dump */

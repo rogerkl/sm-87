@@ -49,6 +49,7 @@ void sds_rx_byte(uint8_t b);      /* every byte of a SysEx, F0 and F7 too (realt
 int sds_hold(void);
 void sds_release(void);
 uint32_t sds_rx_progress(void);   /* words of the dump coming in now (0: none) */
+const sds_dump_t *sds_rx_dump(void);   /* the dump coming in now: its slot, words so far and total (0: none) */
 /* the length a received dump plays: to its loop end (the sampler takes it as the end), within what came */
 uint32_t sds_length(const sds_dump_t *d);
 /* a slot's parameters after a dump, as the sampler leaves them: START 0, END at the loop end, the loop and its mode,

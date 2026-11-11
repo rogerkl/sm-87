@@ -594,6 +594,9 @@ void app_sysex_byte(uint8_t b)
     md_rx_byte(&hdrx, b, md_take);
 }
 
+/* the slot a dump was last said RECEIVED for, and when: its parameters just after (as Axs7 sends them) said with it */
+static uint32_t rx_said_slot = 0xFFu, rx_said_ms;
+
 /* the dumps received, into the flash, in the order they came (before any SPRM after them is taken) */
 static void dumps_flush(void)
 {
@@ -617,6 +620,8 @@ static void dumps_flush(void)
             plat_unlock(f);
             sx_autosave = 1;
             say_slot("RECEIVED", "SLOT ", d->slot);
+            rx_said_slot = d->slot;
+            rx_said_ms = plat_ms();
         }
         d->state = SDS_FREE;
         sx_last_ms = plat_ms();
@@ -626,7 +631,7 @@ static void dumps_flush(void)
 /* a dump going out (RSD), a few blocks a frame: the UI keeps going, and the computer reads as it comes */
 #define TX_BLOCKS_A_FRAME 16u
 static struct {
-    uint8_t on;
+    uint8_t on, slot;
     sds_tx_t t;
     uint32_t next, blocks;
 } tx;
@@ -638,6 +643,7 @@ static void dump_send(uint32_t slot)
         return;
     tx.blocks = sds_tx_header(&tx.t, &s7_slot[slot], slot, h);
     tx.next = 0;
+    tx.slot = (uint8_t)slot;
     tx.on = plat_sysex_put(h, SDS_HEADER) == 0;
     if (!tx.on)
         (void)plat_sysex_end();
@@ -654,6 +660,7 @@ static void dump_send_service(void)
         if (plat_sysex_put(blk, SDS_BLOCK) != 0) {   /* nobody reading: the frame is cut, given up */
             (void)plat_sysex_end();
             tx.on = 0;
+            app_say("SEND CUT SHORT", "");
             return;
         }
     }
@@ -661,6 +668,7 @@ static void dump_send_service(void)
         (void)plat_sysex_put(&f7, 1);
         (void)plat_sysex_end();
         tx.on = 0;
+        say_slot("SENT", "SLOT ", tx.slot);
     }
     sx_last_ms = plat_ms();
 }
@@ -691,6 +699,7 @@ int app_sysex(const uint8_t *p, uint32_t n)
         s7_ovs_t v = {(uint8_t)ch, 3, (uint8_t)ch, OVS_OMNI[set.s7_mode], set.bend_range, 0, 5, 127};
         ovs_build(o, ch, &v);
         (void)plat_sysex_send(o, OVS_LEN);
+        app_say("MIDI SETTINGS", "SENT");
         break;
     }
     case 0x04:                               /* RSPRM: a slot's parameters */
@@ -698,6 +707,7 @@ int app_sysex(const uint8_t *p, uint32_t n)
             static uint8_t o[SPRM_LEN];
             sprm_build(o, ch, p[4], s7_slot[p[4]].p);
             (void)plat_sysex_send(o, SPRM_LEN);
+            say_slot("PARAMETERS SENT", "SLOT ", p[4]);
         }
         break;
     case 0x05:
@@ -721,6 +731,7 @@ int app_sysex(const uint8_t *p, uint32_t n)
             }
             plat_unlock(f);
             set_dirty = 1;
+            app_say("MIDI SETTINGS", "RECEIVED");
         }
         break;
     }
@@ -732,6 +743,16 @@ int app_sysex(const uint8_t *p, uint32_t n)
             plat_unlock(f);
             s7mem_touch();
             sx_autosave = 1;
+            if ((uint32_t)slot == rx_said_slot && plat_ms() - rx_said_ms < 1300u) {   /* its dump's, just said */
+                char t[LCD_COLS + 1] = "SLOT ", k[4];
+                fmt_uint(k, (uint32_t)slot + 1u, 2, '0');
+                str_cat(t, k);
+                str_cat(t, " + PARAMS");
+                app_say("RECEIVED", t);
+            } else {
+                say_slot("PARAMETERS IN", "SLOT ", (uint32_t)slot);
+            }
+            rx_said_slot = 0xFFu;
         }
         break;
     }
@@ -1076,7 +1097,7 @@ static void hd_service(void)
     dr.beats = (uint16_t)hr_beats(hrp.pattern);
     set_dirty = 1;
     sq_dirty = 1;
-    if (r.lost) {                 /* the sequencer's memory full: from this pattern on not taken */
+    if (r.lost && !r.cut && !r.bad) {   /* the sequencer's memory full: from this pattern on not taken */
         fmt_uint(n, (uint32_t)r.first_lost, 2, '0');
         str_cat(t, "FROM PATT ");
         str_cat(t, n);
@@ -1086,7 +1107,8 @@ static void hd_service(void)
     fmt_uint(n, r.patterns, 0, ' ');
     str_cat(t, n);
     str_cat(t, " PATTERNS");
-    app_say(r.songs ? "SONGS NOT TAKEN" : "HR-16 DUMP IN", t);
+    /* bytes lost on the way, or a pattern not readable: what came is taken, and said */
+    app_say(r.cut ? "DUMP CUT SHORT" : r.bad ? "DUMP DAMAGED" : r.songs ? "SONGS NOT TAKEN" : "HR-16 DUMP IN", t);
 }
 
 /* a dump in: the sequencer stopped, its memory replaced */
@@ -1113,19 +1135,19 @@ static void md_service(void)
             seq_song_step = 0;
             ed_load();
             sq_dirty = 1;
-            if (r.lost_parts) {   /* the sequencer full: from this part on not taken */
+            if (r.full && !r.cut && !r.bad && r.first_lost >= 0) {   /* the sequencer full: from this part on not taken */
                 fmt_uint(n, (uint32_t)r.first_lost, 2, '0');
                 str_cat(t, "FROM PART ");
                 str_cat(t, n);
                 app_say("MEMORY FULL", t);
-            } else {
+            } else {              /* what was taken; above it, why not all (bytes lost on the way first: send again) */
                 fmt_uint(n, r.parts, 0, ' ');
                 str_cat(t, n);
                 str_cat(t, " PTS ");
                 fmt_uint(n, r.songs, 0, ' ');
                 str_cat(t, n);
                 str_cat(t, " SONGS");
-                app_say("MMT-8 DUMP IN", t);
+                app_say(r.cut ? "DUMP CUT SHORT" : r.bad ? "DUMP DAMAGED" : r.full ? "MEMORY FULL" : "MMT-8 DUMP IN", t);
             }
         }
         sds_release();
@@ -1613,9 +1635,25 @@ void app_ui_init(void)
     ui.redraw = 1;
 }
 
+/* a transfer's progress on a row: "BYTES 41256  86%", the share once the whole is known */
+static void progress_row(char *t, const char *unit, uint32_t n, uint32_t whole)
+{
+    char k[8];
+    t[0] = 0;
+    str_cat(t, unit);
+    fmt_uint(k, n, 5, ' ');
+    str_cat(t, k);
+    if (whole) {
+        fmt_uint(k, n >= whole ? 100u : n * 100u / whole, 4, ' ');
+        str_cat(t, k);
+        str_cat(t, "%");
+    }
+}
+
 void app_frame(void)
 {
     static uint32_t last_status;
+    const sds_dump_t *sd;
     uint32_t now = plat_ms();
     int32_t cursor = -1;
     hrp.step = (uint8_t)(ui.page == PG_DRUM && dr.fn == DF_STEP);   /* (the pads go to its place) */
@@ -1624,17 +1662,34 @@ void app_frame(void)
     md_service();
     take_service();
     hr_service();
+    sd = sds_rx_dump();           /* (once: the USB interrupt may finish it meanwhile) */
     if (mdrx.st == MD_RX_DATA || hdrx.st == MD_RX_DATA || mdtx.on) {   /* an MMT-8 or HR-16 dump in or out */
-        char t[LCD_COLS + 1] = "BYTES ", n[8];
-        fmt_uint(n, mdtx.on ? mdtx.k * 7u / 8u : mdrx.st == MD_RX_DATA ? mdrx.n : hdrx.n, 5, ' ');
-        str_cat(t, n);
-        lcd_row(0, mdtx.on ? mdtx.busy : mdrx.st == MD_RX_DATA ? "MMT-8 DUMP IN" : "HR-16 DUMP IN");
+        char t[LCD_COLS + 1];
+        if (mdtx.on) {
+            lcd_row(0, mdtx.busy);
+            progress_row(t, "BYTES ", mdtx.k * 7u / 8u, mdtx.n);
+        } else if (mdrx.st == MD_RX_DATA) {   /* (its whole known once its header has come) */
+            uint32_t got = mdrx.n;
+            lcd_row(0, "MMT-8 DUMP IN");
+            progress_row(t, "BYTES ", got, md_want(mdrx.buf, got));
+        } else {
+            uint32_t got = hdrx.n;
+            lcd_row(0, "HR-16 DUMP IN");
+            progress_row(t, "BYTES ", got, hd_want(hdrx.buf, got));
+        }
         lcd_row(1, t);
-    } else if (sds_rx_progress()) {          /* a dump coming in: its progress, as the sampler shows it */
-        char t[LCD_COLS + 1] = "WORDS ", n[8];
-        fmt_uint(n, sds_rx_progress(), 5, ' ');
-        str_cat(t, n);
-        lcd_row(0, "RECEIVING DUMP");
+    } else if (sd || tx.on) {   /* a sample dump in or out: its slot, its words so far */
+        const sds_dump_t *d = sd;
+        char t[LCD_COLS + 1] = "", k[4];
+        str_cat(t, d ? "DUMP IN  SLOT " : "DUMP OUT SLOT ");
+        fmt_uint(k, (d ? d->slot : tx.slot) + 1u, 2, '0');
+        str_cat(t, k);
+        lcd_row(0, t);
+        if (d)
+            progress_row(t, "WORDS ", d->words, d->total);
+        else
+            progress_row(t, "WORDS ", tx.next * SDS_WORDS_PER_BLOCK < tx.t.n ? tx.next * SDS_WORDS_PER_BLOCK : tx.t.n,
+                         tx.t.n);
         lcd_row(1, t);
     } else if (now < ui.msg_until) {
         lcd_row(0, ui.msg[0]);

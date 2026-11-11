@@ -158,6 +158,8 @@ void sds_rx_byte(uint8_t b)
 
 uint32_t sds_rx_progress(void) { return rx.st == RX_BLOCKS && rx.d ? rx.d->words : 0u; }
 
+const sds_dump_t *sds_rx_dump(void) { return rx.st == RX_BLOCKS ? rx.d : 0; }
+
 uint32_t sds_length(const sds_dump_t *d)
 {
     uint32_t len = d->words;

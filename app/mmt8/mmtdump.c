@@ -85,14 +85,29 @@ void md_rx_byte(md_rx_t *rx, uint8_t b, uint8_t *(*take_buf)(uint32_t *max))
 }
 
 /* ---------------------------------------------------------------------------------------------- import --- */
-/* a part's or song's place in the image from its pointer at ptr (0: none there), with room for its header */
-static uint32_t md_at(const uint8_t *img, uint32_t len, uint32_t ptr, uint32_t hdr)
+uint32_t md_want(const uint8_t *img, uint32_t n)
+{
+    uint32_t a;
+    if (n < 0xD1u)
+        return 0;
+    a = le16(img + 0xCFu);
+    return a >= MD_BASE + MD_HDR && a <= MD_END ? a - MD_BASE : 0u;
+}
+
+/* a part's or song's place in the image from its pointer at ptr, with room for its header. 0: none there, or (*past
+ * set) one past the len bytes that came */
+static uint32_t md_at(const uint8_t *img, uint32_t len, uint32_t ptr, uint32_t hdr, uint8_t *past)
 {
     uint32_t a = be16(img + ptr);
+    *past = 0;
     if (!(a & 0xFF00u) || a < MD_BASE + MD_HDR)
         return 0;
     a -= MD_BASE;
-    return a + hdr <= len ? a : 0u;
+    if (a + hdr > len) {
+        *past = 1;
+        return 0;
+    }
+    return a;
 }
 
 static void put_event(uint8_t *o, uint32_t tick, uint32_t st, uint32_t d1, uint32_t d2)
@@ -181,12 +196,15 @@ static void md_name(char *d, const uint8_t *s)
 }
 
 /* part p from the image at 'at': its tracks (8 .. 1, one after another from its header; their offsets say the same),
- * its length (its tracks' ends: the BCD beats the cross-check), channels and name. 0, -1 not readable, -2 no room */
+ * its length (its tracks' ends: the BCD beats the cross-check), channels and name. 0, -1 not readable, -2 no room,
+ * -3 past the len bytes that came */
 static int md_part_in(const uint8_t *img, uint32_t len, uint32_t at, uint32_t p, uint8_t *scratch, uint32_t *skipped)
 {
     uint32_t size = le16(img + at), end = at + size, pos, j, clocks = 0, beats, c, next, skip = 0;
-    if (size < MD_PART_HDR || end > len)
+    if (size < MD_PART_HDR)
         return -1;
+    if (end > len)
+        return -3;
     /* first their ends: the part's length (the longest, to the beat) */
     for (j = 0, pos = at + MD_PART_HDR; j < SQ_TRACKS; j++, pos = next) {
         if (md_track_in(img, pos, end, 0, 0, &c, &next, &skip) < 0)
@@ -219,21 +237,27 @@ static int md_part_in(const uint8_t *img, uint32_t len, uint32_t at, uint32_t p,
 
 int md_import(const uint8_t *img, uint32_t len, uint8_t *scratch, md_report_t *r)
 {
-    uint32_t p, s, i;
-    r->parts = r->songs = r->lost_parts = 0;
+    uint32_t p, s, i, short_ = 0;
+    uint8_t past;
+    r->parts = r->songs = r->lost_parts = r->lost_songs = 0;
     r->first_lost = -1;
+    r->cut = r->bad = r->full = 0;
+    r->got = len;
+    r->want = 0;
     r->skipped = 0;
     if (len < MD_HDR)
         return -1;
+    r->want = md_want(img, len);
+    short_ = r->want && len < r->want;
     sq_clear_mmt8();              /* (the song offsets and the drum patterns are ours: kept) */
     for (i = 0; i < MD_HDR; i++)
         sq.mmt8[i] = img[i];
     for (p = 0; p < SQ_PARTS; p++) {
-        uint32_t at = md_at(img, len, 2u * p, MD_PART_HDR);
+        uint32_t at = md_at(img, len, 2u * p, MD_PART_HDR, &past);
         int e;
-        if (!at)
+        if (!at && !past)
             continue;
-        e = md_part_in(img, len, at, p, scratch, &r->skipped);
+        e = past ? -3 : md_part_in(img, len, at, p, scratch, &r->skipped);
         if (e == 0 && sq.part[p].beats) {
             r->parts++;
             continue;
@@ -243,15 +267,32 @@ int md_import(const uint8_t *img, uint32_t len, uint8_t *scratch, md_report_t *r
             r->lost_parts++;
             if (r->first_lost < 0)
                 r->first_lost = (int16_t)p;
+            if (e == -2)
+                r->full = 1;
+            else if (e == -3)
+                r->cut = 1;
+            else
+                r->bad = 1;
         }
     }
     for (s = 0; s < SQ_SONGS; s++) {
-        uint32_t at = md_at(img, len, 0x102u + 2u * s, MD_SONG_HDR), end, n = 0, k;
+        uint32_t at = md_at(img, len, 0x102u + 2u * s, MD_SONG_HDR, &past), end, n = 0, k;
+        if (past) {
+            r->lost_songs++;
+            r->cut = 1;
+            continue;
+        }
         if (!at)
             continue;
         end = at + le16(img + at);
-        if (end > len)
+        if (end > len) {          /* (in a whole dump, its steps to the end taken) */
+            if (short_) {
+                r->lost_songs++;
+                r->cut = 1;
+                continue;
+            }
             end = len;
+        }
         for (k = at + MD_SONG_HDR; k + 1u < end && img[k] < SQ_PARTS && n < SQ_STEPS; k += 2u, n++) {
             scratch[SQ_STEP * n] = img[k];
             scratch[SQ_STEP * n + 1u] = img[k + 1u];
@@ -259,9 +300,21 @@ int md_import(const uint8_t *img, uint32_t len, uint8_t *scratch, md_report_t *r
         }
         sq.song[s].tempo = img[at + 2u] >= 30u && img[at + 2u] <= 250u ? img[at + 2u] : 120u;
         md_name(sq.song[s].name, img + at + 3u);
-        if (n && sq_replace(SQ_SONG(s), scratch, SQ_STEP * n) == 0)
+        if (!n)
+            continue;
+        if (sq_replace(SQ_SONG(s), scratch, SQ_STEP * n) == 0) {
             r->songs++;
+        } else {
+            r->lost_songs++;
+            r->full = 1;
+        }
     }
+    /* fewer bytes than its header says: what was not readable lost with the rest (bytes dropped on the way shift all
+     * after them); as many as it says: what lies past them a damaged dump's */
+    if (short_ && r->bad)
+        r->cut = 1, r->bad = 0;
+    else if (r->want && !short_ && r->cut)
+        r->bad = 1, r->cut = 0;
     return 0;
 }
 

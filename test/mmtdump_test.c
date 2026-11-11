@@ -218,9 +218,79 @@ static void test_too_big(void)
     n = at;
     sq_clear();
     CHECK(n <= MD_MAX, "the dump fits an MMT-8: %u bytes", n);
-    CHECK(md_import(img, n, scratch, &r) == 0 && r.parts == 4u && r.lost_parts == 1u && r.first_lost == 4,
-          "four taken in, the fifth not (no room): %u, %u lost, first %d", r.parts, r.lost_parts, r.first_lost);
+    CHECK(md_import(img, n, scratch, &r) == 0 && r.parts == 4u && r.lost_parts == 1u && r.first_lost == 4 &&
+              r.full && !r.cut && !r.bad,
+          "four taken in, the fifth not (no room: full %u cut %u bad %u): %u, %u lost, first %d", r.full, r.cut, r.bad,
+          r.parts, r.lost_parts, r.first_lost);
     CHECK(sq_part_empty(4) && sq_valid() && sq_events(3, 0) == 2000u, "the memory holds together");
+}
+
+/* two parts and a song, its header saying its length: whole, then cut short (bytes lost at the end, or one dropped in
+ * the middle: all after it shifted), then damaged (as long as it says, a part's end-of-track gone) */
+static uint32_t two_parts(void)
+{
+    uint32_t p, k, song;
+    memset(img, 0, MD_HDR);
+    at = MD_HDR;
+    for (p = 0; p < 2u; p++) {
+        uint32_t part = at;
+        img[2 * p] = (uint8_t)((part + MD_BASE) >> 8), img[2 * p + 1] = (uint8_t)(part + MD_BASE);
+        at += MD_PART_HDR;
+        img[part + 0x12] = 0x02;  /* 1 beat */
+        for (k = 0; k < 7u; k++) {
+            img[part + 2 + 2 * k] = (uint8_t)(at - part), img[part + 3 + 2 * k] = (uint8_t)((at - part) >> 8);
+            eot(96);
+        }
+        img[part + 16] = (uint8_t)(at - part), img[part + 17] = (uint8_t)((at - part) >> 8);
+        for (k = 0; k < 20u; k++)
+            b1(0x80 | (40u + k)), le(k * 4u), b1(100), b1(0), b1(0), b1(2);
+        eot(96);
+        img[part] = (uint8_t)(at - part), img[part + 1] = (uint8_t)((at - part) >> 8);
+    }
+    song = at;
+    img[0x102] = (uint8_t)((song + MD_BASE) >> 8), img[0x103] = (uint8_t)(song + MD_BASE);
+    le(0x11 + 4 + 1);
+    b1(120);
+    memcpy(img + at, "BOTH          ", 14);
+    at += 14;
+    b1(0), b1(1), b1(1), b1(1), b1(0xFF);
+    img[0xCF] = (uint8_t)(at + MD_BASE), img[0xD0] = (uint8_t)((at + MD_BASE) >> 8);
+    return at;
+}
+
+static void test_cut_short(void)
+{
+    md_report_t r;
+    uint32_t n = two_parts(), part1 = (uint32_t)(img[2] << 8 | img[3]) - MD_BASE;
+    CHECK(md_want(img, 0xD0) == 0u && md_want(img, n) == n, "its length from its header: %u (%u)", md_want(img, n), n);
+    sq_clear();
+    CHECK(md_import(img, n, scratch, &r) == 0 && r.parts == 2u && r.songs == 1u && !r.cut && !r.bad && !r.full &&
+              r.got == n && r.want == n,
+          "whole: %u parts, %u songs, %u of %u bytes", r.parts, r.songs, r.got, r.want);
+    sq_clear();
+    (void)md_import(img, part1 + 40u, scratch, &r);   /* the end lost: part 01 and the song */
+    CHECK(r.cut && !r.bad && !r.full && r.parts == 1u && r.songs == 0u && r.lost_parts == 1u && r.lost_songs == 1u &&
+              r.first_lost == 1 && r.want == n && sq_valid() && sq_part_empty(1),
+          "the end lost: cut (%u bad %u full %u), %u parts, %u songs, first lost %d", r.cut, r.bad, r.full, r.parts,
+          r.songs, r.first_lost);
+    memcpy(img2, img, n);         /* a byte dropped inside part 01: it no longer reads, the song past the end */
+    memmove(img2 + part1 + 60u, img2 + part1 + 61u, n - part1 - 61u);
+    sq_clear();
+    (void)md_import(img2, n - 1u, scratch, &r);
+    CHECK(r.cut && !r.bad && r.parts == 1u && r.songs == 0u && r.first_lost == 1,
+          "a byte dropped: cut (%u bad %u), %u parts, %u songs, first lost %d", r.cut, r.bad, r.parts, r.songs,
+          r.first_lost);
+    memcpy(img2, img, n);         /* whole, but part 01's last end-of-track gone: damaged */
+    img2[part1 + (img[part1] | (uint32_t)img[part1 + 1] << 8) - 7u] = 0x00;
+    sq_clear();
+    (void)md_import(img2, n, scratch, &r);
+    CHECK(r.bad && !r.cut && !r.full && r.parts == 1u && r.songs == 1u && r.first_lost == 1,
+          "damaged: bad (%u cut %u), %u parts, %u songs, first lost %d", r.bad, r.cut, r.parts, r.songs, r.first_lost);
+    memcpy(img2, img, n);         /* a header saying nothing (zeros): the end lost still told, by part 01 past it */
+    img2[0xCF] = img2[0xD0] = 0;
+    sq_clear();
+    (void)md_import(img2, part1 + 40u, scratch, &r);
+    CHECK(r.cut && r.want == 0u && r.parts == 1u, "no length said, the end lost: cut (%u), %u parts", r.cut, r.parts);
 }
 
 int main(void)
@@ -229,6 +299,7 @@ int main(void)
     test_import();
     test_export();
     test_too_big();
+    test_cut_short();
     printf("mmtdump: %d checks, %d failed\n", checks, fails);
     return fails != 0;
 }

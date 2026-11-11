@@ -50,8 +50,11 @@ extern const uint8_t HD_PAD[HD_DRUMS];
 
 typedef struct {
     uint16_t patterns;            /* taken in */
-    uint16_t lost;                /* not: no room in the sequencer's memory, or not readable */
+    uint16_t lost;                /* not */
     int16_t first_lost;           /* the first of them, or -1 */
+    uint8_t cut, bad, full;       /* why, as the MMT-8's (mmtdump.h md_report_t): the dump cut short, one not readable
+                                   * in a whole dump, no room in the sequencer's memory */
+    uint32_t got, want;           /* the bytes that came, and those its header says it has (0: not said) */
     uint16_t songs;               /* its songs with steps: not taken */
     int8_t quant;                 /* its quantize as HR_GRID's index (1/6: 1/8), -1 not one */
     int8_t swing;                 /* %, 50..74; -1 not one */
@@ -60,6 +63,9 @@ typedef struct {
 /* an unpacked dump (len bytes from the header) into the drum patterns, replacing all of them (the MMT-8's parts and
  * songs kept). scratch: SQ_SCRATCH bytes. 0, or -1: not a dump */
 int hd_import(const uint8_t *img, uint32_t len, uint8_t *scratch, hd_report_t *r);
+/* a dump's length as its header says it (where the free memory starts, 2CDH), once n bytes of it have come; 0: not
+ * yet, or not said */
+uint32_t hd_want(const uint8_t *img, uint32_t n);
 
 typedef struct {
     uint8_t quant, swing;         /* the recording's: HR_GRID's index, % */

@@ -215,6 +215,12 @@ using a real X7000 on another channel it may not find SM-87. Its MIDI log then s
 channel c`, and the sample arrives without them. Either set the sampler's channel on SM-87 (GLO), or press REQUEST
 PARAMETERS in Axs7's system view once: it asks on every channel and remembers the answer.
 
+Its **Send .syx** button (SM-87's own part of the page, `app/web/emu/app.js`) sends a SysEx file straight in, as
+from the USB port, with no ports or cables: an MMT-8's or HR-16's memory dump, or a sampler's dumps, as many as the
+file holds. They go one at a time, with a pause after each long enough for SM-87 to take a sample dump into its
+flash. A long dump through a virtual cable can lose bytes on the way (SM-87 then says `DUMP CUT SHORT`); this way
+none are.
+
 When MIDI goes wrong in the emulator, it says so in red under its bar:
 - a port that won't open (another program has it, say);
 - a message the browser won't send;
@@ -229,6 +235,8 @@ the port names on both sides, and loopMIDI's activity for it.
 - An MMT-8 memory dump in, and back out.
 - A drum pattern recorded from MIDI and played out.
 - An HR-16 dump asked for, taken back in and sent again the same; its MIDI test answered.
+- A `.syx` file of four sample dumps, with stray bytes and a message cut short between them, split and paced as Send
+  .syx does it: every dump taken in.
 
 `test/run.sh` runs it when there is a build.
 

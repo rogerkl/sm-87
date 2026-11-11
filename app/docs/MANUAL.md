@@ -36,7 +36,9 @@ An install writes the firmware only: the FM-1 keeps its sequences, its settings 
 installer's last section puts M-VAVE's own firmware back.
 
 To try it without an FM-1, open the [emulator](https://rogerkl.github.io/sm-87/emu/). It runs the same code in your
-browser, with sound, and talks MIDI with SysEx both ways, so Axs7 can send it samples too.
+browser, with sound, and talks MIDI with SysEx both ways, so Axs7 can send it samples too. Its **Send .syx** button,
+in the bar under the panel, sends a SysEx file straight in, with no MIDI cable: an MMT-8's or HR-16's memory dump, or a
+sampler's dumps, as many as the file holds.
 
 ---
 
@@ -213,8 +215,10 @@ level and pan. PAD SOUND's top line says whose the pads have:
 
 **The HR-16's memory dump**, as its service manual has it (`documentation/hr16-sysex.md`):
 - **In:** send an HR-16's dump to the FM-1 over USB at any time (on an HR-16, with SYSEX ENABLE on: TAPE held, the
-  left arrow once, RECORD). The LCD counts the bytes. The dump replaces all 100 drum patterns, as it would on an
-  HR-16; the MMT-8's parts and songs stay. SAVE keeps it.
+  left arrow once, RECORD). The LCD counts the bytes, with the share of the whole once the dump's header has come
+  (`HR-16 DUMP IN`, `BYTES  2048  12%`). The dump replaces all 100 drum patterns, as it would on an HR-16; the
+  MMT-8's parts and songs stay. SAVE keeps it. Then the LCD says how many patterns came, and above them
+  `HR-16 DUMP IN`, or why not all did, as for the MMT-8's dump below.
 - **What comes across:** each pattern's hits, its length, and its VOICE, TUNE and MIX as the pattern's own sounds;
   the swing and quantize, as the recording's (its 1/6 becomes 1/8).
 - **What doesn't:**
@@ -323,10 +327,19 @@ the FM-1 passes the clock on. Clocks are timed in rendered frames, to a block (2
 **The MMT-8's memory dump**, as its SysEx document has it (`documentation/manuals.md` lists the manuals):
 - **In:** send a dump to the FM-1 over USB at any time (from a SysEx librarian; an MMT-8 sends one with TAPE held,
   PAGE DOWN, RECORD, through a computer's MIDI interface). MIDI DUMP's strip says so: `IN: ANY TIME`. The LCD
-  counts the bytes; the dump replaces the sequencer's memory (parts, songs, names, channels; the song offsets and
-  the drum patterns stay ours) and SAVE keeps it. Its SysEx events aren't kept. The sequencer's 64 KB holds a little
-  less than an MMT-8's: a note sharing a clock takes 7 bytes here, 5 there, so a full memory of chords may not fit,
-  and the LCD says from which part on it didn't.
+  counts the bytes, with the share of the whole once the dump's header has come (`MMT-8 DUMP IN`,
+  `BYTES 41256  86%`). The dump replaces the sequencer's memory (parts, songs, names, channels; the song offsets and
+  the drum patterns stay ours) and SAVE keeps it. Its SysEx events aren't kept.
+- **What came:** the LCD says how many parts and songs it took (`93 PTS 41 SONGS`), and above them:
+  - `MMT-8 DUMP IN`: all of it.
+  - `DUMP CUT SHORT`: bytes were lost on the way, fewer came than the dump's header says it has. What came before
+    the loss is taken. Send it again. A long dump sent as one message through a virtual MIDI cable can lose bytes; a
+    librarian that sends it in pieces with a pause between them, as an MMT-8 sends it at MIDI's speed, is safer. In
+    the emulator, its Send .syx button sends a file with no cable on the way.
+  - `DUMP DAMAGED`: all of it came, but a part or song in it can't be read.
+  - `MEMORY FULL`: the sequencer's 64 KB holds a little less than an MMT-8's. A note sharing a clock takes 7 bytes
+    here and 5 there, so a full memory of chords may not fit. The LCD says from which part on it didn't
+    (`FROM PART 96`), or how many parts and songs it took when only songs didn't fit.
 - **Out:** MIDI DUMP (the last function), REC: the whole memory goes out over USB, as an MMT-8 sends it. The FM-1
   takes it back the same, byte for byte.
 - **To a real MMT-8:** two things the document leaves out come from
@@ -371,6 +384,11 @@ Choose the FM-1's port in Axs7's MIDI view and set SLOTS to 16 (Axs7's wiki,
 
 ![The sampler's EDIT page: START and END of slot 1, the test tone](img/sampler.png "The sampler")
 
+While a sample comes in or goes out, the LCD shows its slot and the words so far (`DUMP IN  SLOT 07`,
+`WORDS 12000  37%`), then `RECEIVED` or `SENT`. Its parameters (`PARAMETERS IN`, `PARAMETERS SENT`) and the MIDI
+settings Axs7 reads or changes (`MIDI SETTINGS`) show for a moment as they come and go. In the browser emulator a
+dump arrives all at once, as the browser passes a SysEx on only when it is whole, so only what came of it shows.
+
 Samples sent go into the sample pool, about 292 KB, and the strip shows how much is FREE. Samples and a drum kit can
 also be built into the firmware, about 370 KB more: from Axs7 (its wiki's
 [SM-87](https://github.com/rogerkl/Axs7/wiki/SM-87) page), or with `tools/mkrom.py` (the
@@ -384,6 +402,9 @@ If an install goes wrong:
 - Felucca's boot-loop guard: hold OCT- + OCT+ for 5 s.
 - m-bootloader.
 - MvaveFM1Unbricker.
+
+If a dump sent to SM-87 ends with `DUMP CUT SHORT`, bytes were lost on the way to it: send it again, in pieces if
+the sender can (the MMT-8's memory dump, under Controls, says more).
 
 SM-87 is new and untried on the FM-1 itself. Report what happens at
 [github.com/rogerkl/sm-87/issues](https://github.com/rogerkl/sm-87/issues).
