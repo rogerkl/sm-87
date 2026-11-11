@@ -162,8 +162,9 @@ first keygroup becomes its pad and a sound:
 - **The pad's tuning:** C3 (60) less the keygroup's root key, plus its transpose (with CONSTANT PITCH, the transpose
   alone), in semitones: -24..24. The pad plays the sample as the tool plays it on C3, so a new keygroup (root C3)
   is the sample at its own pitch, and the root or the transpose tunes it. A pad has no cents (fine tuning).
-- **The pad's level:** the sample's LOUDNESS, 0-99. A pad's level and the sampler's LOUDNESS take the same curve
-  (`s7_level_db`), so the drum is as loud as the sampler would play it.
+- **The pad's level:** the drum's own LEVEL (Axs7 keeps one with each drum's program), else its sample's LOUDNESS,
+  0-99. A pad's level and the sampler's LOUDNESS take the same curve (`s7_level_db`), so the drum is as loud as the
+  sampler would play the sample at that LOUDNESS, and two drums playing one sound can each have a level.
 - **The pad's pan:** -3..3 (the X7000 has none).
 - **The rest:** the drum's pad, name, note, group and voices from `HR16_DRUMS`. A drum without a keygroup has no
   sound.
