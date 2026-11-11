@@ -3,6 +3,7 @@
  * others of its group); a voice for a hit: a free one, else the oldest fading, else the oldest. */
 #include "hr.h"
 #include "fastmath.h"
+#include "../s700/s7bank.h"
 
 #if defined(__has_include)
 #if __has_include("hr_kit.h")
@@ -32,6 +33,50 @@ void hr_kit_use(const hr_kit_sound_t *s, uint32_t n, const hr_kit_pad_t *pads, u
     kit_n = n;
     kit_pad = pads;
     kit_pads = np;
+}
+
+/* a bank's kit (s700/s7bank.h), its sounds and pads as the built-in kit's: read in place, the names too */
+static hr_kit_sound_t bank_sound[S7B_KIT_SOUNDS];
+static hr_kit_pad_t bank_pad[S7B_KIT_PADS];
+static uint16_t kit_tag = HR_KIT_BUILT_IN;
+
+void hr_kit_bank(const s7_bank_t *b)
+{
+    uint32_t i;
+    if (!b || !b->base || !(b->kit_sounds || b->kit_pads))
+        return;                   /* (the one built in stays) */
+    for (i = 0; i < b->kit_sounds; i++) {
+        const s7_bank_sound_t *s = s7bank_sound(b, i);
+        bank_sound[i].data = b->base + s->at;
+        bank_sound[i].words = s->words;
+        bank_sound[i].rate = s->rate;
+        bank_sound[i].vel = s->vel;
+        bank_sound[i].name = s->name;
+    }
+    for (i = 0; i < b->kit_pads; i++) {
+        const s7_bank_pad_t *q = s7bank_pad(b, i);
+        hr_pad_t *p = &bank_pad[i].pad;
+        bank_pad[i].name = q->name[0] ? q->name : 0;
+        p->sound = q->sound;
+        p->tune = q->tune;
+        p->level = q->level;
+        p->pan = q->pan;
+        p->note = q->note;
+        p->group = q->group;
+        p->poly = q->poly;
+        p->rsv = 0;
+    }
+    hr_kit_use(bank_sound, b->kit_sounds, bank_pad, b->kit_pads);
+    kit_tag = (uint16_t)(b->kit_id ^ b->kit_id >> 16);
+    if (kit_tag == 0u || kit_tag == HR_KIT_BUILT_IN)
+        kit_tag = 1u;
+}
+
+uint32_t hr_kit_tag(void) { return kit_tag; }
+
+int hr_kit_same(uint32_t saved)
+{
+    return saved == kit_tag || (saved == 0u && kit_tag == HR_KIT_BUILT_IN);
 }
 
 uint32_t hr_kit_sounds(void) { return kit_n; }

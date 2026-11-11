@@ -40,6 +40,16 @@ static void bank_open(void)
 }
 #endif
 
+const s7_bank_t *s7mem_bank(void)
+{
+    static uint8_t opened;
+    if (!opened) {
+        bank_open();
+        opened = 1;
+    }
+    return &bank;
+}
+
 uint32_t s7mem_rom_count(void) { return bank.n; }
 
 typedef struct {
@@ -179,7 +189,7 @@ void s7mem_init(void)
 {
     uint32_t i;
     tone_make();
-    bank_open();
+    s7mem_bank();
     if (plat_store_load(OBJ_SAMPLES, &dir, sizeof dir) != (int)sizeof dir || !dir_valid()) {
         dir_empty();
         rom_fill();

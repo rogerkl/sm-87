@@ -1,0 +1,43 @@
+# The kit the samples built in bring (test/run.sh: tools/mkrom.py --emu ... --kit, two sounds of the 440 Hz sine):
+# it replaces the firmware's own, its sounds and its pads' set-up. Pad 1 KICK (BEEP, note 36), pad 2 HIGH (BEEP
+# tuned up 7, level 50, pan -2, note 40, the hats' group, two voices); the pads after them none, each on the first
+# General MIDI note left. A pad's sound changed and saved is kept: the same kit.
+wait 600
+expect kit 2
+expect padsnd1 0
+expect padnote1 36
+expect padsnd2 0
+expect padnote2 40
+expect padtune2 7
+expect padlevel2 50
+expect padpan2 -2
+expect padsnd3 -1
+expect padnote3 38
+# pad 2 from its note (40, 28 in hex) on the drum channel: a voice, then the sound
+midi 99 28 64
+wait 30
+expect drvoices 1
+wav bankkit_pad2.wav
+wait 300
+wavstop
+wait 500
+expect drvoices 0
+# PAD SOUND: pad 1 to the kit's second sound (BOP), the global set-up's; saved, and kept across a power cycle
+tap ARP
+wait 30
+turn ALGO 6
+wait 30
+expect drfn 6
+turn K1 1
+wait 30
+expect padsnd1 1
+expect stdsnd1 1
+shot bankkit_sound.png
+tap SAVE
+wait 300
+reboot
+wait 600
+expect kit 2
+expect stdsnd1 1
+expect padsnd1 1
+expect padnote2 40

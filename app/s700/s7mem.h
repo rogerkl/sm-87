@@ -16,6 +16,8 @@
 
 /* samples built into the firmware (the bank at the top of its slot, s7bank.h: tools/mkrom.py puts it into a package):
  * the slots' factory contents, played in place from the firmware's flash. A dump sent to such a slot replaces it */
+struct s7_bank_s;
+const struct s7_bank_s *s7mem_bank(void);   /* the bank of samples built in (s7bank.h), found at the first call */
 uint32_t s7mem_rom_count(void);
 int s7mem_is_rom(uint32_t slot);  /* the slot plays a built-in sample */
 const char *s7mem_name(uint32_t slot);   /* a built-in sample's name, else 0 */

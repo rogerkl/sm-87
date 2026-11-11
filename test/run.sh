@@ -15,8 +15,11 @@ for t in test/*_test.c; do
     "build/test/$n" ../Axs7SdsW/web/test/fixtures
 done
 "$PY" -I test/gen_sysex_test.py
-# samples put into a package (tools/mkrom.py): bank_test.py, against fm1pkg_make.py's packages
-"$PY" -I test/bank_test.py
+# samples put into a package: tools/mkrom.py against fm1pkg_make.py's packages, then web/sm87bank.js against mkrom.py's
+"$PY" -I test/bank_test.py build/test/bank
+if command -v node >/dev/null; then
+    node test/bank_js_test.mjs build/test/bank
+fi
 # the scripts expect the X7000's empty memory: the host build's samples built in (app/rom/emu_bank.h, tools/mkrom.py
 # --emu) are set aside meanwhile, and put back however this ends. (The drum kit, resources/kit, is the build's: always
 # in)
@@ -34,9 +37,11 @@ run_scripts() {
 }
 build_host
 run_scripts app/tests/*.txt
-# samples built in: a disk image and a WAV, from the fixtures
+# samples built in: a disk image and a WAV, from the fixtures, and a kit of the WAV (app/tests/rom/bankkit.txt)
 "$PY" -I test/make_test_wav.py build/test/sine440.wav
-"$PY" -I tools/mkrom.py --emu ../Axs7SdsW/web/test/fixtures/s700.qd.gz@1 build/test/sine440.wav@2 >/dev/null
+printf 'sound BEEP sine440.wav vel=20\nsound BOP sine440.wav\npad KICK BEEP note=36\npad HIGH BEEP tune=7 level=50 pan=-2 note=40 group=1 poly=2\n' >build/test/kit.txt
+"$PY" -I tools/mkrom.py --emu ../Axs7SdsW/web/test/fixtures/s700.qd.gz@1 build/test/sine440.wav@2 \
+    --kit build/test/kit.txt >/dev/null
 build_host
 run_scripts app/tests/rom/*.txt
 rm -f "$ROM"

@@ -31,7 +31,7 @@ typedef struct {
     uint8_t clock_in;             /* the sequencer's clock: 0 its own, 1 MIDI's */
     uint8_t clock_out_off;        /* MIDI clock out off (on unless) */
     uint8_t s7_mode;              /* the sampler's MIDI mode: S7_OMNI_OFF, S7_OMNI_ON, S7_MULTI (s700/s7.h) */
-    uint8_t rsv[2];
+    uint16_t dr_kit_tag;          /* the kit the pads were saved with (hr_kit_tag; 0: before it was kept) */
     /* the drums' (a settings object saved before them is shorter: these take their defaults) */
     uint8_t dr_channel;           /* their MIDI channel, 0..15 (10: 9) */
     uint8_t dr_quant, dr_swing;   /* recording's quantize (hr16/hr.h HR_GRID's index) and swing, % */
@@ -74,6 +74,7 @@ static void mix_defaults(void)
 static void settings_defaults(void)
 {
     set.magic = SET_MAGIC;
+    set.dr_kit_tag = (uint16_t)hr_kit_tag();
     set.s7_channel = 0;
     set.bend_range = 2;
     set.octave = 0;
@@ -101,11 +102,18 @@ static void settings_load(void)
         mix_defaults();
         return;
     }
-    for (i = 0; i < HR_PADS; i++)
-        hr_std[i] = set.pads[i];
-    hr_pads_rekit(set.dr_kit_n);
-    for (i = 0; i < HR_PADS; i++)
-        hr_pad[i] = hr_std[i];
+    if (hr_kit_same(set.dr_kit_tag)) {
+        for (i = 0; i < HR_PADS; i++)
+            hr_std[i] = set.pads[i];
+        hr_pads_rekit(set.dr_kit_n);
+        for (i = 0; i < HR_PADS; i++)
+            hr_pad[i] = hr_std[i];
+    } else {
+        for (i = 0; i < HR_PADS; i++) {   /* another kit: its pads' set-up */
+            hr_pad_default(i);
+            hr_std[i] = hr_pad[i];
+        }
+    }
     for (i = 0; i < S7_SLOTS; i++)
         bad |= set.mix_level[i] > 99u || set.mix_pan[i] > MIX_PAN_MAX || set.mix_pan[i] < -MIX_PAN_MAX;
     if (n < (int)sizeof set || bad || set.drum_level > 99u)
@@ -134,6 +142,7 @@ static int settings_save(void)
     for (i = 0; i < HR_PADS; i++)
         set.pads[i] = hr_std[i];
     set.dr_kit_n = (uint8_t)hr_kit_sounds();
+    set.dr_kit_tag = (uint16_t)hr_kit_tag();
     return plat_store_save(OBJ_SETTINGS, &set, sizeof set);
 }
 
@@ -540,6 +549,7 @@ static void take_service(void)
 
 void app_init(void)
 {
+    hr_kit_bank(s7mem_bank());    /* (a kit built in with the samples: before the pads load) */
     settings_load();
     hrp.quant = set.dr_quant;
     hrp.swing = set.dr_swing;

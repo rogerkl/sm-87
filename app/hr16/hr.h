@@ -3,8 +3,9 @@
  *   - 16 pads, each playing one sound at its own tuning, level and pan, on its own MIDI note; the hats choke each
  *     other (a group), the crash rings over itself (two voices);
  *   - the sounds: a kit built into the firmware (resources/kit: its WAV files and kit.txt, made a header by
- *     tools/mkkit.py as the firmware is built), or any of the sampler's 16 slots. They are the sampler's format (12-bit words, packed, at one of its rates) and play on its
- *     voices (s700/s7.h s7_drum_start), without its filter;
+ *     tools/mkkit.py as the firmware is built), or the kit the samples built in bring (tools/mkrom.py --kit, Axs7:
+ *     it replaces the firmware's), or any of the sampler's 16 slots. They are the sampler's format (12-bit words,
+ *     packed, at one of its rates) and play on its voices (s700/s7.h s7_drum_start), without its filter;
  *   - 100 patterns of up to 682 beats, in the sequencer's memory (mmt8/seq.h): recorded as they loop, each hit
  *     quantized (1/4 .. 1/64, or off) and swung (50 .. 75%) as it goes in, the HR-16's way;
  *   - no songs of its own: a step of an MMT-8 song chooses the pattern that plays with it.
@@ -88,6 +89,16 @@ int hr_sounds_put(uint32_t p, const hr_pad_t *pads);
 void hr_sounds_get(uint32_t p, hr_pad_t *pads);
 /* for tests: another kit than the one built in */
 void hr_kit_use(const hr_kit_sound_t *s, uint32_t n, const hr_kit_pad_t *pads, uint32_t np);
+/* the kit the samples built in bring (s700/s7bank.h), if they have one: it replaces the firmware's own, its sounds and
+ * its pads' set-up. At boot, before the settings load */
+struct s7_bank_s;
+void hr_kit_bank(const struct s7_bank_s *b);
+/* the kit in use, as the settings keep it with the pads (16 bits): HR_KIT_BUILT_IN for the firmware's own, else a
+ * bank's kit's (its CRC folded); hr_kit_same(saved): the pads were saved with this kit (0: saved before the settings
+ * kept it, with the firmware's own), else they are the kit's set-up again */
+#define HR_KIT_BUILT_IN 0xFFFFu
+uint32_t hr_kit_tag(void);
+int hr_kit_same(uint32_t saved);
 
 /* the audio interrupt */
 void hr_hit(uint32_t pad, uint32_t vel);    /* a pad sounds */

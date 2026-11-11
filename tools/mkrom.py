@@ -9,9 +9,12 @@ samples out again, and gives the package back as it was built, byte for byte.
 
   .venv/bin/python tools/mkrom.py PACKAGE.fwsc FILE[@SLOT] ...   the samples into the package (slots 1-16; without
                                                                  @, the next free one)
+  .venv/bin/python tools/mkrom.py PACKAGE.fwsc [FILE ...] --kit KIT.txt
+                                                                 a drum kit too, replacing the firmware's
   .venv/bin/python tools/mkrom.py PACKAGE.fwsc                   what it holds, and the room
-  .venv/bin/python tools/mkrom.py PACKAGE.fwsc --none            without samples
-  .venv/bin/python tools/mkrom.py --emu FILE[@SLOT] ...           for the host simulator and the browser emulator
+  .venv/bin/python tools/mkrom.py PACKAGE.fwsc --none            without samples (and the firmware's own kit)
+  .venv/bin/python tools/mkrom.py --emu FILE[@SLOT] ... [--kit KIT.txt]
+                                                                 for the host simulator and the browser emulator
   .venv/bin/python tools/mkrom.py --emu --none
 
 FILE is
@@ -22,8 +25,12 @@ FILE is
   - an S700/X7000 QuickDisk image (.qd, as a Gotek or HxC uses them): the sample and all its parameters and programs
     (documentation/akai-s700-x7000/05-quickdisk.md).
 
-Up to 16 samples, of up to 32,752 words each, packed two words to three bytes, in what the firmware leaves of its
-581,564-byte slot (the package says how much: run it with the package alone).
+KIT.txt is a drum kit's list in resources/kit/kit.txt's form (tools/mkkit.py), its WAV files beside it: up to 64
+sounds and 16 pads. It replaces the kit the firmware was built with, sounds and pads; without --kit the firmware's own
+plays. Each run makes the whole: samples and kit as it is told.
+
+Up to 16 samples, of up to 32,752 words each, packed two words to three bytes, and the kit's sounds the same, in what
+the firmware leaves of its 581,564-byte slot (the package says how much: run it with the package alone).
 
 --emu writes app/rom/emu_bank.h instead (not in the repository): the host simulator and the browser emulator, which
 have no firmware slot, build it in while it exists.
@@ -288,48 +295,131 @@ def c_name(s):
 # ------------------------------------------------------------------------------------------- the bank ---
 # app/s700/s7bank.h
 BANK_MAGIC = 0x4B423753           # "S7BK"
-BANK_VERSION = 1
+BANK_VERSION = 2
 BANK_NAME = 24
 BANK_ENTRY = 188                  # <BBHI24s, the 155 values, a spare byte
+BANK_SOUND = 16                   # a kit's sound: <HBBI8s
+BANK_PAD = 16                     # a kit's pad: <8sBbBbBBBB
 BANK_FOOT = 32
+KIT_SOUNDS, KIT_PADS, KIT_NAME = 64, 16, 6
+RATE_LO, RATE_HI = 36, 76
 DESC_MAGIC = b"SM87 S7 BANK"      # s7_bank_desc_t, in the firmware's image
+PAD_KEYS = ("sound", "tune", "level", "pan", "note", "group", "poly")
+PAD_RANGE = {"tune": (-24, 24), "level": (0, 99), "pan": (-3, 3), "note": (0, 127), "group": (0, 9), "poly": (1, 2)}
 
 
-def bank(items):
-    """the bank's bytes, its footer last: items (slot, name, words, params, pressure), sorted by slot"""
+def check_kit(kit):
+    """a kit as bank() takes it: {"sounds": [{name, words, rate, vel}], "pads": [{name, sound, tune, level, pan,
+    note, group, poly}]}; SystemExit for one the firmware wouldn't take"""
+    sounds, pads = kit["sounds"], kit["pads"]
+    if len(sounds) > KIT_SOUNDS or len(pads) > KIT_PADS:
+        raise SystemExit(f"a kit of {len(sounds)} sounds and {len(pads)} pads: at most {KIT_SOUNDS} and {KIT_PADS}")
+    for what in sounds + pads:
+        if len(what["name"]) > KIT_NAME or not what["name"].isascii():
+            raise SystemExit(f"the kit's {what['name']}: a name of up to {KIT_NAME} characters")
+    for s in sounds:
+        if not 1 <= len(s["words"]) <= MAXWORDS or not RATE_LO <= s["rate"] <= RATE_HI or not 0 <= s["vel"] <= 99:
+            raise SystemExit(f"the kit's sound {s['name']}: its words, rate code or vel")
+    for q in pads:
+        if not (q["sound"] == 0xFF or 0 <= q["sound"] < len(sounds) + 16):
+            raise SystemExit(f"the kit's pad {q['name']}: sound {q['sound']}")
+        for k, (lo, hi) in PAD_RANGE.items():
+            if not lo <= q[k] <= hi:
+                raise SystemExit(f"the kit's pad {q['name']}: {k} {q[k]}: {lo}..{hi}")
+
+
+def bank(items, kit=None):
+    """the bank's bytes, its footer last: items (slot, name, words, params, pressure), sorted by slot; a kit (check_kit)
+    or None"""
+    sounds, pads = (kit["sounds"], kit["pads"]) if kit else ([], [])
+    if kit:
+        check_kit(kit)
     head, data = bytearray(), bytearray()
-    at = len(items) * BANK_ENTRY
-    for slot, name, words, p, pressure in items:
+    at = len(items) * BANK_ENTRY + len(sounds) * BANK_SOUND + len(pads) * BANK_PAD
+
+    def put(words):
         packed = pack(words)
-        head += struct.pack("<BBHI24s", slot, pressure, len(words), at + len(data), c_name(name).encode())
+        where = at + len(data)
+        data.extend(packed + b"\0" * (-len(packed) % 4))
+        return where
+
+    for slot, name, words, p, pressure in items:
+        head += struct.pack("<BBHI24s", slot, pressure, len(words), put(words), c_name(name).encode())
         head += bytes(p) + b"\0"
-        data += packed + b"\0" * (-len(packed) % 4)
+    for snd in sounds:
+        head += struct.pack("<HBBI8s", len(snd["words"]), snd["rate"], snd["vel"], put(snd["words"]),
+                            snd["name"].encode())
+    for q in pads:
+        head += struct.pack("<8sBbBbBBBB", q["name"].encode(), *(q[k] for k in PAD_KEYS), 0)
     body = bytes(head + data)
-    foot = struct.pack("<IHHII12x", BANK_MAGIC, BANK_VERSION, len(items), len(body), zlib.crc32(body))
+    foot = struct.pack("<IHHIIHH8x", BANK_MAGIC, BANK_VERSION, len(items), len(body), zlib.crc32(body), len(sounds),
+                       len(pads))
     return body + foot + struct.pack("<I", zlib.crc32(foot))
 
 
 def bank_read(top):
-    """the bank ending at the end of top (bytes): [(slot, name, words, params, pressure)] with words a count, None
-    without one; SystemExit for one that doesn't check"""
+    """the bank ending at the end of top (bytes), checked as the firmware checks it (s7bank.c): {"samples": [(slot,
+    name, words, params, pressure)], "kit": {"sounds": [...], "pads": [...]} or None, "size": its bytes} with words a
+    count; None without one; SystemExit for one that doesn't check"""
     if len(top) < BANK_FOOT:
         return None
     f = top[-BANK_FOOT:]
-    magic, version, count, size, crc = struct.unpack_from("<IHHII", f)
+    magic, version, count, size, crc, nsnd, npad = struct.unpack_from("<IHHIIHH", f)
     if magic != BANK_MAGIC:
         return None
+    head = count * BANK_ENTRY + nsnd * BANK_SOUND + npad * BANK_PAD
     if zlib.crc32(f[:28]) != struct.unpack_from("<I", f, 28)[0] or version != BANK_VERSION or count > 16 \
-            or size > len(top) - BANK_FOOT:
+            or nsnd > KIT_SOUNDS or npad > KIT_PADS or size & 3 or size > len(top) - BANK_FOOT or head > size:
         raise SystemExit("the package's samples don't check (a damaged footer)")
     body = top[-BANK_FOOT - size:-BANK_FOOT]
     if zlib.crc32(body) != crc:
         raise SystemExit("the package's samples don't check (their CRC)")
+
+    def bad(what):
+        raise SystemExit(f"the package's samples don't check ({what})")
+
+    def words_in(at, words):
+        return 1 <= words <= MAXWORDS and at >= head and not at & 3 and at <= size and packed_size(words) <= size - at
+
     out = []
     for i in range(count):
-        slot, pressure, words, _, name = struct.unpack_from("<BBHI24s", body, i * BANK_ENTRY)
+        slot, pressure, words, at, name = struct.unpack_from("<BBHI24s", body, i * BANK_ENTRY)
+        if slot >= 16 or not words_in(at, words) or name[-1]:
+            bad(f"sample {i + 1}")
         p = list(body[i * BANK_ENTRY + 32:i * BANK_ENTRY + 32 + NPARAM])
         out.append((slot, name.rstrip(b"\0").decode("latin-1"), words, p, pressure))
-    return out
+    sounds, pads, o = [], [], count * BANK_ENTRY
+    for i in range(nsnd):
+        words, rate, vel, at, name = struct.unpack_from("<HBBI8s", body, o + i * BANK_SOUND)
+        if not words_in(at, words) or not RATE_LO <= rate <= RATE_HI or vel > 99 or any(name[KIT_NAME:]):
+            bad(f"the kit's sound {i + 1}")
+        sounds.append({"name": name.rstrip(b"\0").decode("latin-1"), "words": words, "rate": rate, "vel": vel})
+    o += nsnd * BANK_SOUND
+    for i in range(npad):
+        name, *v = struct.unpack_from("<8sBbBbBBBB", body, o + i * BANK_PAD)
+        q = dict(zip(PAD_KEYS, v))
+        if any(name[KIT_NAME:]) or not (q["sound"] == 0xFF or q["sound"] < nsnd + 16) or \
+                any(not lo <= q[k] <= hi for k, (lo, hi) in PAD_RANGE.items()):
+            bad(f"the kit's pad {i + 1}")
+        pads.append({"name": name.rstrip(b"\0").decode("latin-1"), **q})
+    return {"samples": out, "kit": {"sounds": sounds, "pads": pads} if nsnd or npad else None,
+            "size": size + BANK_FOOT}
+
+
+def load_kit(path):
+    """a kit list (resources/kit/kit.txt's form: tools/mkkit.py) and its WAV files -> a kit for bank()"""
+    if str(Path(__file__).resolve().parent) not in sys.path:
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import mkkit                  # (it imports this: here, once both are loaded)
+    sounds, pads = mkkit.parse(path)
+    out = []
+    for snd in sounds:
+        f = Path(path).parent / snd["file"]
+        if not f.exists():
+            raise SystemExit(f"{snd['at']}: {f}: no such file")
+        words, code, _ = mkkit.load(f)
+        out.append({"name": snd["name"], "words": words, "rate": code, "vel": snd["vel"]})
+    return {"sounds": out, "pads": [{"name": q["name"], **{k: q[k] for k in PAD_KEYS}} for q in pads]}
 
 
 # ---------------------------------------------------------------------------------------- the package ---
@@ -438,14 +528,15 @@ class Package:
     def room(self):
         return len(self.app) - self.image_end
 
-    def samples(self):
+    def contents(self):
+        """what it holds (bank_read), None for none"""
         return bank_read(bytes(self.app[self.image_end:]))
 
     def put(self, b):
         """the bank b into the slot (b"" for none): above the image all 0xFF, b at the slot's top"""
         top = bytes(self.app[self.image_end:])
         old = bank_read(top)
-        size = BANK_FOOT + struct.unpack_from("<I", top, len(top) - BANK_FOOT + 8)[0] if old is not None else 0
+        size = old["size"] if old else 0
         if any(x != 0xFF for x in top[:len(top) - size]):
             self.fail("there's something above its firmware that isn't samples")
         if len(b) > self.room():
@@ -502,45 +593,70 @@ def load_items(files):
     return sorted(items, key=lambda it: it[0])
 
 
-def show(items):
+def show(items, kit=None):
     for s, n, w, p, _ in items:
         words = w if isinstance(w, int) else len(w)
         progs = [q + 1 for q in range(32) if p[4 * q] <= p[4 * q + 1]]
         print(f"slot {s + 1:2}  {n:23.23}  {words:5} words  {RATES[p[P_RECBW]]:7.0f} Hz  root {p[P_RECNP]}  "
               f"mode {p[P_RPMODE]}  programs {','.join(map(str, progs)) or '-'}")
+    if not kit:
+        return
+    names = [snd["name"] for snd in kit["sounds"]]
+    for i, snd in enumerate(kit["sounds"]):
+        words = snd["words"] if isinstance(snd["words"], int) else len(snd["words"])
+        print(f"kit sound {i + 1:2}  {snd['name']:6}  {words:5} words  {RATES[snd['rate']]:7.0f} Hz  vel {snd['vel']}")
+    for i, q in enumerate(kit["pads"]):
+        snd = q["sound"]
+        what = names[snd] if snd < len(names) else f"SLOT{snd - len(names) + 1:02}" if snd != 0xFF else "-----"
+        print(f"kit pad {i + 1:2}  {q['name'] or '-':6}  {what:6}  tune {q['tune']:+d}  level {q['level']}  "
+              f"pan {q['pan']:+d}  note {q['note']}" + (f"  group {q['group']}" if q["group"] else "")
+              + (f"  poly {q['poly']}" if q["poly"] > 1 else ""))
 
 
 def kb(n):
     return f"{n / 1024:.1f} KB"
 
 
+def held(items, kit):
+    what = [f"{len(items)} samples"] if items or not kit else []
+    if kit:
+        what.append(f"a kit of {len(kit['sounds'])} sounds and {len(kit['pads'])} pads")
+    return " and ".join(what)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("files", nargs="*", help="PACKAGE.fwsc, then FILE[@SLOT] ...: WAV or .qd")
     ap.add_argument("-o", "--out", type=Path, help="the package to write (default: PACKAGE itself)")
+    ap.add_argument("--kit", type=Path, help="a drum kit to replace the firmware's: a list as resources/kit/kit.txt, "
+                    "its WAV files beside it")
     ap.add_argument("--none", action="store_true", help="no samples: the package as built (--emu: no emu_bank.h)")
     ap.add_argument("--emu", action="store_true", help=f"{EMU_OUT.relative_to(ROOT)} for the host simulator and "
                     "the browser emulator, not a package")
     a = ap.parse_args()
+    if a.none and (a.kit or (a.files[1:] if not a.emu else a.files)):
+        ap.error("--none takes no samples or kit")
     if a.emu:
         if a.none:
             EMU_OUT.unlink(missing_ok=True)
             print(f"removed {EMU_OUT.relative_to(ROOT)}: the next host or emulator build has no samples built in")
             return
-        if not a.files:
+        if not a.files and not a.kit:
             ap.error("no files")
         items = load_items(a.files)
-        b = bank(items)
+        kit = load_kit(a.kit) if a.kit else None
+        b = bank(items, kit)
         lines = ["/* Samples built in for the host simulator and the browser emulator (the device's are in its",
                  " * package): made by tools/mkrom.py --emu, do not edit. From:"]
         lines += [f" *   slot {s + 1:2}: {c_name(n)} ({len(w)} words, rate code {p[P_RECBW]})"
                   for s, n, w, p, _ in items]
+        lines += [f" *   kit: {a.kit}"] if a.kit else []
         lines += [" */", f"static const uint8_t S7_EMU_BANK[{len(b)}] __attribute__((aligned(4))) = {{", c_bytes(b),
                   "};", ""]
         EMU_OUT.parent.mkdir(parents=True, exist_ok=True)
         EMU_OUT.write_text("\n".join(lines))
-        show(items)
-        print(f"{EMU_OUT.relative_to(ROOT)}: {len(items)} samples, {kb(len(b))}")
+        show(items, kit)
+        print(f"{EMU_OUT.relative_to(ROOT)}: {held(items, kit)}, {kb(len(b))}")
         return
     if not a.files or not a.files[0].lower().endswith(".fwsc"):
         ap.error("the first is the package (.fwsc), or --emu")
@@ -549,24 +665,25 @@ def main():
     slot = len(pkg.app)
     about = (f"{pkg.identity}: the firmware {pkg.image_end:,} of the slot's {slot:,} bytes, "
              f"{kb(pkg.room())} for samples")
-    if not files and not a.none:
-        held = pkg.samples()
+    if not files and not a.kit and not a.none:
+        c = pkg.contents()
         print(f"{src}: {about}")
-        if held:
-            show(held)
-        size = BANK_FOOT + sum(BANK_ENTRY + (packed_size(w) + 3) // 4 * 4 for _, _, w, _, _ in held or [])
-        print(f"{len(held)} samples, {kb(size)}, {kb(pkg.room() - size)} free" if held else "no samples")
+        if c:
+            show(c["samples"], c["kit"])
+            print(f"{held(c['samples'], c['kit'])}, {kb(c['size'])}, {kb(pkg.room() - c['size'])} free"
+                  + ("" if c["kit"] else "; the firmware's own kit"))
+        else:
+            print("no samples; the firmware's own kit")
         return
-    if a.none and files:
-        ap.error("--none takes no samples")
     items = [] if a.none else load_items(files)
-    b = bank(items) if items else b""
+    kit = load_kit(a.kit) if a.kit else None
+    b = bank(items, kit) if items or kit else b""
     pkg.put(b)
     out = a.out or src
     out.write_bytes(pkg.close())
-    show(items)
-    print(f"{out}: {about}" + (f"; {len(items)} samples in, {kb(len(b))}, {kb(pkg.room() - len(b))} free"
-                                if items else "; no samples"))
+    show(items, kit)
+    print(f"{out}: {about}" + (f"; {held(items, kit)} in, {kb(len(b))}, {kb(pkg.room() - len(b))} free"
+                                if b else "; no samples") + ("" if kit else "; the firmware's own kit"))
 
 
 if __name__ == "__main__":

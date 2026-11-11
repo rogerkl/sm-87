@@ -6,6 +6,7 @@
 #include <string.h>
 #include "hr.h"
 #include "player.h"
+#include "s7bank.h"
 
 static int fails, checks;
 #define CHECK(cond, ...)                                                                                              \
@@ -553,6 +554,62 @@ static void test_sounds(void)
     CHECK(sq_valid(), "the memory holds together");
 }
 
+/* ---------------------------------------------------------------------------------------- a bank's kit --- */
+static uint32_t bank_mem[2048];
+
+static void test_bank_kit(void)
+{
+    uint8_t *m = (uint8_t *)bank_mem;
+    s7_bank_sound_t *ks = (s7_bank_sound_t *)(void *)m;
+    s7_bank_pad_t *kp = (s7_bank_pad_t *)(void *)(m + 2u * sizeof *ks);
+    uint32_t at = (uint32_t)(2u * sizeof *ks + 2u * sizeof *kp), size, i;
+    s7_bank_foot_t *f;
+    s7_bank_t b;
+    char nm[HR_NAME + 1];
+    CHECK(hr_kit_tag() == HR_KIT_BUILT_IN && hr_kit_same(0) && hr_kit_same(HR_KIT_BUILT_IN) && !hr_kit_same(77),
+          "the kit built in: saved with it (or before the tag), the same");
+    hr_kit_bank(0);
+    CHECK(hr_kit_tag() == HR_KIT_BUILT_IN, "no bank: the kit built in stays");
+    memset(bank_mem, 0, sizeof bank_mem);
+    ks[0].words = 100, ks[0].rate = 60, ks[0].vel = 30, ks[0].at = at;
+    strcpy(ks[0].name, "BOOM");
+    at += (S7_PACKED(100u) + 3u) & ~3u;
+    ks[1].words = 60, ks[1].rate = 76, ks[1].vel = 99, ks[1].at = at;
+    strcpy(ks[1].name, "TSS");
+    at += (S7_PACKED(60u) + 3u) & ~3u;
+    strcpy(kp[0].name, "BIG");
+    kp[0].sound = 0, kp[0].tune = -5, kp[0].level = 70, kp[0].pan = 2, kp[0].note = 35, kp[0].poly = 1;
+    kp[1].sound = 1 + 2, kp[1].level = 99, kp[1].note = 44, kp[1].group = 1, kp[1].poly = 2;   /* slot 2 */
+    size = at;
+    f = (s7_bank_foot_t *)(void *)(m + size);
+    f->magic = S7B_MAGIC, f->version = S7B_VERSION, f->count = 0, f->size = size;
+    f->kit_sounds = 2, f->kit_pads = 2;
+    f->crc = s7bank_crc32(m, size);
+    f->fcrc = s7bank_crc32(f, 28u);
+    CHECK(s7bank_parse(m + size + S7B_FOOT, size + S7B_FOOT, &b) == 0 && b.kit_sounds == 2u, "a bank with a kit");
+    hr_kit_bank(&b);
+    CHECK(hr_kit_sounds() == 2u && hr_sounds() == 2u + S7_SLOTS, "its two sounds, then the slots");
+    hr_sound_name(1, nm);
+    CHECK(!strcmp(nm, "TSS"), "a sound's name: %s", nm);
+    hr_sound_name(2 + 2, nm);
+    CHECK(!strcmp(nm, "SLOT03"), "after them the slots: %s", nm);
+    CHECK(!strcmp(hr_pad_name(0), "BIG") && !strcmp(hr_pad_name(1), "PAD 02") && !strcmp(hr_pad_name(2), "PAD 03"),
+          "pad names: the kit's, else PAD nn");
+    for (i = 0; i < HR_PADS; i++)
+        hr_pad_default(i);
+    CHECK(hr_pad[0].sound == 0u && hr_pad[0].tune == -5 && hr_pad[0].level == 70u && hr_pad[0].pan == 2 &&
+              hr_pad[0].note == 35u && hr_pad[1].sound == 3u && hr_pad[1].group == 1u && hr_pad[1].poly == 2u &&
+              hr_pad[2].sound == HR_NO_SOUND,
+          "the pads as the bank's kit sets them up, the rest none");
+    CHECK(hr_pad[2].note == 36u, "a pad beyond the kit's: the first General MIDI note left (%u)", hr_pad[2].note);
+    CHECK(hr_kit_tag() != HR_KIT_BUILT_IN && hr_kit_tag() != 0u &&
+              hr_kit_tag() == ((b.kit_id ^ b.kit_id >> 16) & 0xFFFFu),
+          "its tag: its CRC folded");
+    CHECK(hr_kit_same(hr_kit_tag()) && !hr_kit_same(0) && !hr_kit_same(HR_KIT_BUILT_IN),
+          "pads saved with the kit built in (or before the tag): not this kit's");
+    hr_kit_use(KIT, 3, KIT_PAD, 4);   /* (the others' kit again) */
+}
+
 int main(void)
 {
     test_patterns();
@@ -562,6 +619,7 @@ int main(void)
     test_offset_fill();
     test_voices();
     test_sounds();
+    test_bank_kit();
     printf("hr16: %d checks, %d failed\n", checks, fails);
     return fails != 0;
 }
