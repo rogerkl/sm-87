@@ -400,7 +400,8 @@ number.
 Axs7 does it in the browser: INIT SM-87 BANKS (its BANK page) makes a SAMPLES bank and a DRUMS bank of the HR-16's
 16 drums, which PROGRAM then edits as drums (one keygroup each, tuned in semitones, a pan). It puts both into a
 package you open, with a meter of the room they take, and saves it or installs it on the FM-1 over USB (fm1-base's
-installer, as its web page runs it). It uses `web/sm87bank.js`, which does the same as `mkrom.py`
+installer, as its web page runs it). TAKE ITS SAMPLES brings a package's samples and kit back into the two banks, to
+put them into a new release's package. It uses `web/sm87bank.js`, which does the same as `mkrom.py`
 for a page that makes the samples itself: `makeBank` makes the bytes of the samples and a kit, `Sm87Package` opens a
 package, says what it holds and its room, takes them (`put`) and gives the package back (`bytes`). For a kit of the
 HR-16's 16 drums, `HR16_DRUMS` says which pad each goes on (where an HR-16 dump puts it) with its name and note, and
