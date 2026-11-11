@@ -7,7 +7,7 @@ MIDI, plays samples sent over USB, and keeps its sequences, samples and settings
 **SM-87 hasn't run on an FM-1 yet.** It works in the host simulator and in the browser emulator, which run the same
 code. Try it in the [emulator](https://rogerkl.github.io/sm-87/emu/) first, and install it at your own risk.
 
-![SM-87 playing a part: PART 00 BT 003 on the LCD, tracks 1 and 2 lit](img/screen.png "The sequencer")
+![SM-87 playing a part: PART 00 BT 003 on the LCD, tracks 1 and 2 lit, part 00 playing large under the strip](img/screen.png "The sequencer")
 
 ---
 
@@ -68,7 +68,8 @@ sampler's dumps, as many as the file holds.
   - Real-time recording replaces a track like tape. The first take on an empty part sets its length. Recording
     starts after a bar's count-in.
   - Track mutes, saved per song step.
-  - A part chosen while playing starts at the end of the current one.
+  - A part chosen while playing starts at the end of the current one. The LCD shows it queued (`PART 00>01 B004`),
+    and under the strip the part playing and the next show large, with the beats to go until the change.
   - Per-track MIDI channel, or UNCHANGED.
   - MIDI echo to the record track's channel.
   - MIDI clock and song position out, and MIDI clock in: the sequencer can follow another's clock and transport.
@@ -105,7 +106,7 @@ sampler's dumps, as many as the file holds.
 | REC | Arm recording on the part's lowest empty track (or the one chosen with REC + its key); again: disarm; while a take runs: punch out |
 | SEL + first 8 white keys | Track mutes (on the SEQ page; in a song: the step's mutes); the 9th: the drums on or muted |
 | REC + first 8 white keys | The record track |
-| PRESET | The part or song (SEQ page), else the sampler's program |
+| PRESET | The part or song (SEQ page; while a part plays, the next, queued for its end), else the sampler's program |
 | K1 / K2 (SEQ) | Tempo / the record track's channel (UNCHANGED, 1-16) |
 | K4 (SEQ) | The drum pattern that plays with the parts; in a song (stopped): the step's drum pattern, or none (the step's row shows it: `P05 12345678 D07`, `D--` none) |
 | ALGO (SEQ) | The MMT-8's functions, below; SEQ goes back to the part or song |
@@ -118,6 +119,17 @@ sampler's dumps, as many as the file holds.
 | HOME | The sampler's overview |
 | GLO | MIDI: K1 the sampler's channel, K2 its mode (OMNI OFF, ON, MULTI), K3 the pitch bend's range, K4 the drums' channel. GLO again: the MIX (below) |
 | SAVE | Lit when something isn't saved: settings, the sample parameters, the sequencer (stopped) |
+
+**Under the strip on the SEQ page**, the part playing and the one after it, large, with their names (the drum page
+has the same for its patterns):
+
+![The SEQ page with part 01 queued while part 00 plays: PART 00>01 B004 on the LCD, and under the strip NEXT 01 lit, in 2 beats](img/seq.png "The next part queued")
+
+- **PLAYING** (stopped: **PART**) and **NEXT**. Turning PRESET while a part plays queues the next part; NEXT shows it
+  at once, lit, with the beats to go (`IN 3 BEATS`), and the bar along the foot fills up to the change. Turning
+  back to the part playing clears it. With none queued, NEXT is the same part, dim: it `PLAYS AGAIN`.
+- **In a song:** the step and its part, then the next step and its part (`THE SONG ENDS` after the last, unless the
+  song loops).
 
 ### MIDI modes (GLO)
 
@@ -151,10 +163,13 @@ already sounding too, and are kept in the settings (SAVE).
 
 ### The drum machine (ARP)
 
-![The drum page playing a pattern: PATT 00 BT 001, 8 BEATS 5 HITS, the pads KIC SNA CLH OPH CRA RID](img/drums.png "The drum machine")
+![The drum page playing a pattern: PATT 00 BT 001, 8 BEATS 5 HITS, the pads KIC SNA CLH OPH CRA RID, and pattern 00 playing large under the strip](img/drums.png "The drum machine")
 
 The LCD shows the pattern and its beat (`PATT 05  BT 003`, `PATT 05>07` with 07 queued), then its length and hits,
-or while recording the quantize and swing. The strip shows the 16 pads, lit as they sound.
+or while recording the quantize and swing. The strip shows the 16 pads, lit as they sound. Under it, as on the SEQ
+page, the pattern playing and the next show large, with their lengths and hits: a pattern queued with PRESET lit,
+with the beats to go (`IN 3 BEATS`); in a song, the step's pattern and the next step's (`NO DRUMS` for a step
+without). The drums muted beside a part show `MUTED`.
 
 | | |
 |---|---|

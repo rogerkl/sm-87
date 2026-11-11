@@ -85,7 +85,14 @@ static void seq_draw(int sel_held)
         str_cat(t, "PART ");
         fmt_uint(n, sqp.part, 2, '0');
         str_cat(t, n);
-        str_cat(t, "  BT ");
+        if (sqp.next_part != 0xFFu) {        /* "PART 05>07 B003": the next queued, as the drums' PATT shows it */
+            str_cat(t, ">");
+            fmt_uint(n, sqp.next_part, 2, '0');
+            str_cat(t, n);
+            str_cat(t, " B");
+        } else {
+            str_cat(t, "  BT ");
+        }
         fmt_uint(n, sqp_beat(), 3, '0');
     }
     str_cat(t, n);
@@ -220,6 +227,157 @@ static void seq_status(void)
         cv_text(130, 58, &FONT_XS, t, C_HI);
     }
     cv_blit(0, LCD_Y + LCD_H + 10);
+}
+
+/* ---- the panel under the strip (this page and the drums'): what plays, and what comes after it, large ----
+ * PRESET queues the next part (or drum pattern) while one plays, and the LCD shows the one playing until the change:
+ * here both show (in a song, this step's and the next step's), with how far it has to go. Turning PRESET, NEXT
+ * changes at once */
+#define PANEL_Y (LCD_Y + LCD_H + 10 + STATUS_H + 2)   /* under the strip, to the screen's foot */
+#define PANEL_H (240 - PANEL_Y)
+#define PANEL_NONE 100u           /* a column's number: none (--) */
+static uint8_t panel_shown;
+
+static void panel_begin(void)
+{
+    cv_begin(240, PANEL_H, C_BLACK);
+    panel_shown = 1;
+}
+
+static void panel_end(void) { cv_blit(0, PANEL_Y); }
+
+/* another page: the panel's place black again (once) */
+static void panel_off(void)
+{
+    if (!panel_shown)
+        return;
+    panel_shown = 0;
+    cv_begin(240, PANEL_H, C_BLACK);
+    cv_blit(0, PANEL_Y);
+}
+
+/* a column: its label, a number large (PANEL_NONE: --; lit: dark on a lit box, as a track button on), and a line
+ * under it */
+static void panel_col(int32_t x, const char *label, uint32_t num, uint16_t c, int lit, const char *under)
+{
+    char n[4];
+    cv_text(x, 0, &FONT_XS, label, C_GRAY);
+    if (num < PANEL_NONE) {
+        fmt_uint(n, num, 2, '0');
+        if (lit)
+            cv_rect(x - 4, 15, text_w(&FONT_L, n) + 8, 28, c);   /* (round the digits: rows 18-38) */
+        cv_text(x, 14, &FONT_L, n, lit ? C_BLACK : c);
+    } else {
+        cv_text(x, 14, &FONT_L, "--", C_LINE);
+    }
+    if (under)
+        cv_text(x, 48, &FONT_XS, under, lit ? c : C_GRAY);
+}
+
+/* how far to the change (tick of ticks): the beats to go beside NEXT's number (counting), and a bar along the foot */
+static void panel_progress(uint32_t tick, uint32_t ticks, int counting, int queued)
+{
+    char t[12], n[8];
+    if (!ticks)
+        return;
+    if (counting && tick < ticks) {
+        uint32_t left = (ticks - tick + SQ_PPQN - 1u) / SQ_PPQN;
+        t[0] = 0;
+        str_cat(t, "IN ");
+        fmt_uint(n, left, 0, ' ');
+        str_cat(t, n);
+        cv_text(172, 18, &FONT_XS, t, queued ? C_HI : C_GRAY);
+        cv_text(172, 32, &FONT_XS, left == 1u ? "BEAT" : "BEATS", queued ? C_HI : C_GRAY);
+    }
+    cv_rect(8, PANEL_H - 6, 224, 4, C_LINE);
+    cv_rect(8, PANEL_H - 6, (int32_t)((tick < ticks ? tick : ticks) * 224u / ticks), 4, queued ? C_HI : C_DIM);
+}
+
+/* "STEP 012" */
+static void step_label(char *t, const char *what, uint32_t step)
+{
+    char n[4];
+    t[0] = 0;
+    str_cat(t, what);
+    str_cat(t, "STEP ");
+    fmt_uint(n, step + 1u, 3, '0');
+    str_cat(t, n);
+}
+
+/* a song's next step after step i (it loops: the first), or -1: the song ends */
+static int32_t song_next_step(uint32_t i)
+{
+    uint32_t steps = sq_song_steps(sqp.song);
+    return i + 1u < steps ? (int32_t)(i + 1u) : sqp.loop && steps ? 0 : -1;
+}
+
+/* a part's name, its spaces at the end gone (EMPTY PART for one with nothing) */
+static const char *part_name(char *t, uint32_t p)
+{
+    uint32_t i;
+    if (sq_part_empty(p))
+        return "EMPTY PART";
+    for (i = 0; i < SQ_NAME; i++)
+        t[i] = sq.part[p].name[i];
+    t[SQ_NAME] = 0;
+    for (i = SQ_NAME; i > 0 && t[i - 1] == ' '; i--)
+        t[i - 1] = 0;
+    return t;
+}
+
+static void seq_panel(void)
+{
+    char a[24], b[24], na[SQ_NAME + 1], nb[SQ_NAME + 1];
+    uint32_t now = PANEL_NONE, next = PANEL_NONE, tick = sqp.tick, playing = sqp.state != SQP_STOPPED;
+    uint16_t next_c = C_DIM;
+    int queued = 0;
+    const char *next_under = 0;
+    panel_begin();
+    if (ed.fn) {                  /* a function's page: its own, nothing here */
+        panel_end();
+        return;
+    }
+    a[0] = b[0] = 0;
+    str_cat(b, "NEXT");
+    if (sqp.song_mode) {
+        uint32_t i = playing ? sqp.step : seq_song_step;
+        uint8_t part, mask;
+        if (i < sq_song_steps(sqp.song)) {
+            int32_t j = song_next_step(i);
+            sq_song_step(sqp.song, i, &part, &mask);
+            now = part;
+            step_label(a, "", i);
+            if (j >= 0) {
+                sq_song_step(sqp.song, (uint32_t)j, &part, &mask);
+                next = part;
+                next_c = C_HI;
+                step_label(b, "NEXT ", (uint32_t)j);
+            } else {
+                next_under = "THE SONG ENDS";
+            }
+        } else {
+            str_cat(a, "END OF SONG");
+        }
+        if (!playing)
+            tick = 0;
+    } else {
+        now = sqp.part;
+        str_cat(a, playing ? "PLAYING" : "PART");
+        if (sqp.next_part != 0xFFu) {     /* queued: at this part's end */
+            next = sqp.next_part;
+            next_c = C_HI;
+            queued = 1;
+        } else if (playing) {             /* none: it goes round again */
+            next = sqp.part;
+            next_under = "PLAYS AGAIN";
+        } else {
+            next_under = "WHILE PLAYING";
+        }
+    }
+    panel_col(8, a, now, C_HI, 0, now < SQ_PARTS ? part_name(na, now) : 0);
+    panel_col(128, b, next, next_c, queued, next_under ? next_under : next < SQ_PARTS ? part_name(nb, next) : 0);
+    panel_progress(tick, now < SQ_PARTS ? sq_part_ticks(now) : 0u, playing && next < SQ_PARTS, queued);
+    panel_end();
 }
 
 /* the track keys' lights while SEL or REC is held: lit on, dim muted, dark empty */

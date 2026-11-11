@@ -1652,7 +1652,7 @@ static void progress_row(char *t, const char *unit, uint32_t n, uint32_t whole)
 
 void app_frame(void)
 {
-    static uint32_t last_status;
+    static uint32_t last_status, last_panel;
     const sds_dump_t *sd;
     uint32_t now = plat_ms();
     int32_t cursor = -1;
@@ -1713,13 +1713,21 @@ void app_frame(void)
     lcd_cursor(cursor, ed.cur);
     lcd_draw(ui.redraw);
     if (ui.redraw || now - last_status >= (ui.page == PG_DRUM ? 50u : 250u)) {   /* (the pads light as they sound) */
+        int panel = ui.redraw || now - last_panel >= 250u;   /* (under the strip: four times a second) */
         last_status = now;
-        if (ui.page == PG_SEQ)
+        if (panel)
+            last_panel = now;
+        if (ui.page == PG_SEQ) {
             seq_status();
-        else if (ui.page == PG_DRUM)
+            seq_panel();          /* (under it: the part playing and the next) */
+        } else if (ui.page == PG_DRUM) {
             dr_status();
-        else
+            if (panel)
+                dr_panel();       /* (the pattern playing and the next) */
+        } else {
             draw_status();
+            panel_off();
+        }
     }
     ui.redraw = 0;
     ann_tick(now);
@@ -1896,6 +1904,8 @@ int app_expect(const char *what, int *got)
         *got = (int)sq_song_steps(sqp.song);
     else if (!strcmp(what, "songmode"))
         *got = sqp.song_mode;
+    else if (!strcmp(what, "nextpart"))     /* the part queued for the end of the one playing, -1 none */
+        *got = sqp.next_part == 0xFFu ? -1 : (int)sqp.next_part;
     else if (!strcmp(what, "fn"))           /* the MMT-8 function shown (ALGO): 0 none, 1 LENGTH .. 9 EDIT */
         *got = ed.fn;
     else if (!strcmp(what, "sel"))          /* the tracks it takes, a bit each */

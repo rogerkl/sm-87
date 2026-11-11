@@ -173,7 +173,7 @@ void sqp_select_part(uint32_t p)
         sqp.tick = 0;
         sqp_resync();
     } else {
-        sqp.next_part = (uint8_t)p;
+        sqp.next_part = p == sqp.part ? 0xFFu : (uint8_t)p;   /* (the one playing: none queued, it goes round) */
     }
 }
 

@@ -6,7 +6,7 @@ SM-87 turns the M-VAVE FM-1 into a 1987 studio: an Alesis MMT-8 style sequencer 
 Akai S700/X7000 style sampler and an Alesis HR-16 style drum machine. Record from the keys or from MIDI, send samples
 over USB from [Axs7](https://rogerkl.github.io/Axs7/), and trade memory dumps with a real MMT-8 or HR-16.
 
-![SM-87 playing a part: PART 00 BT 003 on the LCD, tracks 1 and 2 lit](manual/img/screen.png "SM-87 on the FM-1's screen")
+![SM-87 playing a part: PART 00 BT 003 on the LCD, tracks 1 and 2 lit, part 00 playing large under the strip](manual/img/screen.png "SM-87 on the FM-1's screen")
 
 This is version {{VERSION}}. **SM-87 hasn't run on an FM-1 yet**: it works in the emulator, which runs the same code,
 so try it there first. You install it at your own risk, and the installer can put M-VAVE's own firmware back.

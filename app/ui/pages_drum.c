@@ -762,6 +762,78 @@ static void dr_status(void)
     cv_blit(0, LCD_Y + LCD_H + 10);
 }
 
+/* a pattern under its number: "8 BEATS 24 HITS", "8 BEATS EMPTY" */
+static const char *patt_under(char *t, uint32_t p)
+{
+    char n[8];
+    uint32_t b = hr_beats(p), h = hr_hits(p);
+    t[0] = 0;
+    fmt_uint(n, b, 0, ' ');
+    str_cat(t, n);
+    str_cat(t, b == 1u ? " BEAT " : " BEATS ");
+    if (!h) {
+        str_cat(t, "EMPTY");
+    } else {
+        fmt_uint(n, h, 0, ' ');
+        str_cat(t, n);
+        str_cat(t, h == 1u ? " HIT" : " HITS");
+    }
+    return t;
+}
+
+/* the panel under the strip (pages_seq.c's): the pattern playing and the next, large. Its own loop: PRESET queues the
+ * next for the end of the one playing; in a song, each step's pattern, the next step's after it */
+static void dr_panel(void)
+{
+    char a[24], b[24], ua[24], ub[24];
+    uint32_t now, next = PANEL_NONE, tick, ticks;
+    int running = sqp.aux || sqp.state != SQP_STOPPED, queued = 0;
+    uint16_t next_c = C_DIM;
+    const char *next_under = 0;
+    panel_begin();
+    if (dr.fn) {                  /* a function's page: its own, nothing here */
+        panel_end();
+        return;
+    }
+    a[0] = b[0] = 0;
+    str_cat(b, "NEXT");
+    if (dr_song_playing()) {      /* the song's: this step's pattern, then the next step's */
+        int32_t j = song_next_step(sqp.step);
+        now = sq_song_drums(sqp.song, sqp.step);
+        step_label(a, "", sqp.step);
+        if (j >= 0) {
+            next = sq_song_drums(sqp.song, (uint32_t)j);
+            next_c = C_HI;
+            step_label(b, "NEXT ", (uint32_t)j);
+            next_under = next < SQ_PATTERNS ? patt_under(ub, next) : "NO DRUMS";
+        } else {
+            next_under = "THE SONG ENDS";
+        }
+        tick = sqp.tick;          /* (the step goes on at its part's end) */
+        ticks = sq_part_ticks(sqp.part);
+    } else {
+        now = hrp.pattern;
+        str_cat(a, !running ? "PATTERN" : sqp.state == SQP_PLAYING && hrp.mute ? "MUTED" : "PLAYING");
+        if (hrp.next != 0xFFu) {  /* queued: at this pattern's end */
+            next = hrp.next;
+            next_c = C_HI;
+            queued = 1;
+            next_under = patt_under(ub, next);
+        } else if (running) {     /* none: it goes round again */
+            next = hrp.pattern;
+            next_under = "PLAYS AGAIN";
+        } else {
+            next_under = "WHILE PLAYING";
+        }
+        tick = running ? hrp.at : 0u;
+        ticks = hr_beats(now) * SQ_PPQN;
+    }
+    panel_col(8, a, now, C_HI, 0, now < SQ_PATTERNS ? patt_under(ua, now) : "NO DRUMS");
+    panel_col(128, b, next, next_c, queued, next_under);
+    panel_progress(tick, ticks, running && next < PANEL_NONE, queued);
+    panel_end();
+}
+
 /* the pad keys' lights: lit as they sound (and the pad a function has), dim with a sound */
 static void dr_key_lights(uint32_t *lit, uint32_t *dim)
 {

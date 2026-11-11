@@ -55,7 +55,14 @@ expect tracks 3
 tap PLAY
 wait 1300
 shot screen.png
+# the next part queued while it plays (the panel under the strip), then turned back: none queued
+turn PRESET 1
+wait 100
+expect nextpart 1
 shot seq.png
+turn PRESET -1
+wait 30
+expect nextpart -1
 tap PLAY
 wait 100
 # the drum machine: kick and snare recorded as the pattern loops, playing
