@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (C) 2026 Roger Klaveness
 """tools/mkrom.py's samples put into a firmware package, against fm1-base's tools/fm1pkg_make.py: a package with
 samples put in must be the very package fm1pkg_make.py makes of the firmware with those samples at its slot's top, and
 --none must give the package back as it was. With a made-up firmware (an image holding app/s700/s7bank.h's

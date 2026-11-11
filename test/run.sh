@@ -1,10 +1,19 @@
 #!/bin/sh
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (C) 2026 Roger Klaveness
 # SM-87's host tests: the C unit tests, then the app's scripts in fm1-base's host simulator.
 #   test/run.sh            (from the repository's root; Python with Pillow and numpy: .venv, or PYTHON=...)
+# Axs7's test fixtures (its web/test/fixtures: a real X7000's dumps and disk images) come from an Axs7 checkout beside
+# this one, ../Axs7SdsW, or AXS7=...
 set -e
 cd "$(dirname "$0")/.."
 PY="${PYTHON:-$(pwd)/.venv/bin/python}"
 CC="${CC:-cc}"
+FIXTURES="${AXS7:-../Axs7SdsW}/web/test/fixtures"
+if [ ! -d "$FIXTURES" ]; then
+    echo "no $FIXTURES: Axs7's test fixtures (clone github.com/rogerkl/Axs7 there, or set AXS7)"
+    exit 1
+fi
 mkdir -p build/test
 CFLAGS="-O2 -ffp-contract=off -std=c99 -Wall -Wextra -Wno-unused-function -Iapp/s700 -Iapp/mmt8 -Iapp/hr16 -Ifm1-base/include"
 for t in test/*_test.c; do
@@ -12,7 +21,7 @@ for t in test/*_test.c; do
     extra=""
     [ -f "test/$n.deps" ] && extra=$(cat "test/$n.deps")
     $CC $CFLAGS -o "build/test/$n" "$t" app/s700/s7engine.c $extra -lm
-    "build/test/$n" ../Axs7SdsW/web/test/fixtures
+    "build/test/$n" "$FIXTURES"
 done
 "$PY" -I test/gen_sysex_test.py
 # samples put into a package: tools/mkrom.py against fm1pkg_make.py's packages, then web/sm87bank.js against mkrom.py's
@@ -40,7 +49,7 @@ run_scripts app/tests/*.txt
 # samples built in: a disk image and a WAV, from the fixtures, and a kit of the WAV (app/tests/rom/bankkit.txt)
 "$PY" -I test/make_test_wav.py build/test/sine440.wav
 printf 'sound BEEP sine440.wav vel=20\nsound BOP sine440.wav\npad KICK BEEP note=36\npad HIGH BEEP tune=7 level=50 pan=-2 note=40 group=1 poly=2\n' >build/test/kit.txt
-"$PY" -I tools/mkrom.py --emu ../Axs7SdsW/web/test/fixtures/s700.qd.gz@1 build/test/sine440.wav@2 \
+"$PY" -I tools/mkrom.py --emu "$FIXTURES/s700.qd.gz@1" build/test/sine440.wav@2 \
     --kit build/test/kit.txt >/dev/null
 build_host
 run_scripts app/tests/rom/*.txt

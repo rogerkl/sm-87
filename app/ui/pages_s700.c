@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: MPL-2.0
+ * Copyright (C) 2026 Roger Klaveness */
 /* SM-87: the sampler's pages, as the S700's menus: a slot's points, its tuning, its key range in the program, its
  * OUT (filter, release, level and their velocity amounts) and its LFO. Two or four values a page, a column each on the
  * LCD, K1..K4 turning them; SELECT picks the slot, PRESET the program. CLEAR (EDIT's last) has none: REC empties the

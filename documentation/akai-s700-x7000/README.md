@@ -17,7 +17,6 @@ and both save the same QuickDisk format.
 | [03-samples-and-programs.md](03-samples-and-programs.md) | A sample in memory: points, scan modes, rates, pitch, programs and key ranges, the defaults, storage sizes |
 | [04-playback.md](04-playback.md) | How it sounds, measured: filter, level, release, velocity, vibrato, aftertouch, voices, with formulas to implement |
 | [05-quickdisk.md](05-quickdisk.md) | The .qd disk image (Gotek/HxC) of an S700/X7000 disk: one sample and its parameters |
-| [akai-s700-sysex-spec-1986.pdf](akai-s700-sysex-spec-1986.pdf) | Akai's spec, as posted to Synth-diy in 1998 |
 
 Reference code, in the Axs7 repo: `web/src/protocol/akai.ts` (sample dump), `sprm.ts` (parameter messages),
 `s700disk.ts` and `qd.ts` (disk images), `web/src/model/params.ts` (the 0-99 tables), `engine/src/voice.rs`,
@@ -27,10 +26,10 @@ Reference code, in the Axs7 repo: `web/src/protocol/akai.ts` (sample dump), `spr
 
 Each statement comes from one of these, and the files say which where it matters:
 
-- **Akai's spec**: "MIDI system exclusive data format for S700" (Akai, 1986), the only official description. It
-  survives as a mailing list post (Synth-diy, 1998): [akai-s700-sysex-spec-1986.pdf](akai-s700-sysex-spec-1986.pdf)
-  here. Some of its numbers are decimal without saying so (the S700 identifier "65" is 41h), and it has a few slips,
-  noted where they matter. The S700's owner's manual is `../akai-s700-manual.pdf`.
+- **Akai's spec**: "MIDI system exclusive data format for S700" (Akai, 1986), the only official description. It survives
+  as a mailing list post (Synth-diy, 1998). It isn't in this repository, being Akai's ([../manuals.md](../manuals.md)).
+  Some of its numbers are decimal without saying so (the S700 identifier "65" is 41h), and it has a few slips, noted
+  where they matter. The S700's owner's manual is listed there too.
 - **Verified on an X7000**: tried against the user's X7000 (with the 16 slot memory board) from Axs7, 2026-11-01 to
   2026-11-08: receiving and sending samples, bit for bit round trips, reading and setting parameters.
 - **Measured**: recorded from the X7000's output with test samples, 2026-11-08 (Axs7 `tools/x7000-lab`,

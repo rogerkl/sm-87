@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: MPL-2.0
+ * Copyright (C) 2026 Roger Klaveness */
 /* SM-87: a 2 x 16 character LCD, as on the MMT-8 and the S700, drawn dot by dot on the FM-1's screen: 5 x 8 dots a
  * character, each dot 2 x 2 pixels at a 3 pixel pitch, the unlit dots faintly visible as on a real panel. Part of the
  * unity build (included by app.c): gfx.c's canvas is in scope. */

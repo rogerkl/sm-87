@@ -1,5 +1,8 @@
-/* SM-87: the MMT-8's memory as its SysEx dump has it (documentation/MMT-8 SYSEX.odt): F0 00 00 0E 00, the memory
- * from its address 400H packed seven bytes in eight (a stream of 7-bit bytes, the most significant bit first), F7.
+/* SPDX-License-Identifier: MPL-2.0
+ * Copyright (C) 2026 Roger Klaveness */
+/* SM-87: the MMT-8's memory as its SysEx dump has it (its SysEx document: documentation/manuals.md): F0 00 00 0E 00,
+ * the memory from its address 400H packed seven bytes in eight (a stream of 7-bit bytes, the most significant bit
+ * first), F7.
  *
  * The memory: 200H bytes of header (the parts' and songs' addresses, big-endian, +400H; the start and length of the
  * free memory at CFH and D3H, little-endian; bytes the document says not to alter), then the parts 00-99 and the songs

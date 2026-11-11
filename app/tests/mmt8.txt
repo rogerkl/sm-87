@@ -1,4 +1,4 @@
-# The MMT-8's memory dump: made by test/gen_sysex_test.py from documentation/MMT-8 SYSEX.odt, do not edit.
+# The MMT-8's memory dump: made by test/gen_sysex_test.py from the MMT-8's SysEx document, do not edit.
 # A dump from an MMT-8 replaces the sequencer's memory; MIDI DUMP (ALGO) sends it back the same, its header
 # as the MMT-8's was.
 wait 600

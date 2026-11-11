@@ -1,7 +1,10 @@
-/* SM-87: the MMT-8's memory. 100 parts of 8 tracks and 100 songs, as documentation/MMT-8_Manual.pdf describes them:
- * a part is up to 682 beats at 96 clocks a beat, its 8 tracks played together, each with a MIDI channel (or
- * UNCHANGED: the channels it was recorded on); a song is a list of up to 255 steps, each a part, which of its
- * tracks play, and the drum pattern that plays with it (or none). The HR-16's 100 drum patterns (hr16/) live here too.
+/* SPDX-License-Identifier: MPL-2.0
+ * Copyright (C) 2026 Roger Klaveness */
+/* SM-87: the MMT-8's memory. 100 parts of 8 tracks and 100 songs, as the MMT-8's manual describes them
+ * (documentation/manuals.md): a part is up to 682 beats at 96 clocks a beat, its 8 tracks played together, each with a
+ * MIDI channel (or UNCHANGED: the channels it was recorded on); a song is a list of up to 255 steps, each a part, which
+ * of its tracks play, and the drum pattern that plays with it (or none). The HR-16's 100 drum patterns (hr16/) live
+ * here too.
  *
  * Every track, every song's steps and every drum pattern is a blob in one arena of 64 KB, as the MMT-8 kept its
  * memory in one: about 9,000 notes. A track's events are in time order:

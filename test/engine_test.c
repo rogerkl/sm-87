@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: MPL-2.0
+ * Copyright (C) 2026 Roger Klaveness */
 /* SM-87: the sampler engine against the X7000's measurements (documentation/akai-s700-x7000/04-playback.md) and
  * Axs7's engine tests (engine/src/voice.rs). Built and run by test/run.sh, on the host. */
 #include <math.h>

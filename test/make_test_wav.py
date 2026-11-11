@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (C) 2026 Roger Klaveness
 """A WAV for tools/mkrom.py's test: a 440 Hz sine at 44.1 kHz (not one of the sampler's rates: it is resampled), 0.5 s,
 its smpl chunk's loop over the last 2000 samples and root A3 (69).  test/make_test_wav.py OUT.wav"""
 import math

@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: MPL-2.0
+ * Copyright (C) 2026 Roger Klaveness */
 /* SM-87: the MMT-8 playing and recording: its clock (96 a beat, from the audio's frames, so a tick lands on the
  * frame), the tracks' events out, the notes' offs on time, the count-in, the take, the songs' steps, MIDI clock out.
  * Runs in the audio interrupt (app_render); the main loop calls the transport inside plat_lock. */

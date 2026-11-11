@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: MPL-2.0
+ * Copyright (C) 2026 Roger Klaveness */
 /* SM-87: the S700 sample dump and parameter messages, against a dump from a real X7000 and dumps the Java tool built
  * (Axs7's web/test/fixtures, ../Axs7SdsW), and the SPRM example in documentation/akai-s700-x7000/
  * 02-sample-parameters.md. Built and run by test/run.sh */

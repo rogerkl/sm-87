@@ -9,8 +9,14 @@ words = "words.tsv"
 ble = false                    # no radio: the RAM goes to sequences and samples
 emu = ["midi", "port", "data"] # the browser emulator (--web): Web MIDI with SysEx both ways, a port for other pages
                                # of the site (Axs7), the flash's data area kept in the browser
-# the site and firmware.json (filled in before a release)
-tagline = "a 1987 studio: MMT-8 style sequencer, S700 style sampler"
-repo = ""
-licence = ""
-credits = "Built on fm1-base (MPL-2.0) and felucca-bsp."
+# the site and firmware.json (fm1-base docs/FIRMWARE-JSON.md: a release build needs them all)
+author = "Roger Klaveness"
+licence = "MPL-2.0"
+tagline = "A 1987 studio: an MMT-8 style sequencer, an S700/X7000 style sampler and an HR-16 style drum machine"
+description = "SM-87 turns the M-VAVE FM-1 into a 1987 studio. An Alesis MMT-8 style sequencer records and plays 100 parts and songs. An Akai S700/X7000 style sampler plays with its filter, release and vibrato as measured on an X7000. An Alesis HR-16 style drum machine has 16 pads and 100 patterns. Samples come over USB from Axs7 as to an X7000, and Axs7 can also build samples and a drum kit into the firmware. The MMT-8's and the HR-16's memory dumps go both ways."
+tags = ["sequencer", "sampler", "drum-machine", "midi"]
+install = "https://rogerkl.github.io/sm-87/install/"
+site = "https://rogerkl.github.io/sm-87/"
+repo = "https://github.com/rogerkl/sm-87"
+screenshot = "app/docs/img/screen.png"
+credits = "Built on fm1-base and felucca-bsp, from Felucca by Leo Kuroshita (Hügelton Instruments); the sampler follows Axs7's engine."

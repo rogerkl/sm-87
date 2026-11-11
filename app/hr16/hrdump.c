@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: MPL-2.0
+ * Copyright (C) 2026 Roger Klaveness */
 /* SM-87: the HR-16's memory dump, see hrdump.h */
 #include "hrdump.h"
 

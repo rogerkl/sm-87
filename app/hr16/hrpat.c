@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: MPL-2.0
+ * Copyright (C) 2026 Roger Klaveness */
 /* SM-87: the HR-16's patterns and their player, see hr.h. A pattern is a blob of the sequencer's memory (seq.h
  * SQ_PAT), its hits in time order and by pad: tick (2 bytes, little-endian), pad, velocity. */
 #include "hr.h"

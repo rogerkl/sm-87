@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: MPL-2.0
+ * Copyright (C) 2026 Roger Klaveness */
 /* SM-87: the HR-16's memory dump (app/hr16/hrdump.c) against its service manual's format (documentation/
  * hr16-sysex.md): its sounds by kind both ways, the tuning's steps, ours made and laid out as the manual has it, taken
  * in again the same (and sent again byte for byte), a dump made here by hand taken in (the manual's empty pattern, a

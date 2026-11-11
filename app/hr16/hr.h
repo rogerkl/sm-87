@@ -1,5 +1,7 @@
-/* SM-87: the HR-16. An Alesis HR-16 style drum machine (documentation/ALESIS-HR16-HR16B-MMT8-User-Manual.pdf), cut
- * down to what the FM-1 holds:
+/* SPDX-License-Identifier: MPL-2.0
+ * Copyright (C) 2026 Roger Klaveness */
+/* SM-87: the HR-16. An Alesis HR-16 style drum machine (its user manual: documentation/manuals.md), cut down to what
+ * the FM-1 holds:
  *   - 16 pads, each playing one sound at its own tuning, level and pan, on its own MIDI note; the hats choke each
  *     other (a group), the crash rings over itself (two voices);
  *   - the sounds: a kit built into the firmware (resources/kit: its WAV files and kit.txt, made a header by

@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: MPL-2.0
+ * Copyright (C) 2026 Roger Klaveness */
 /* SM-87: the HR-16's kit, pads, a pattern's own sounds and the voices, see hr.h. The pads' voices: one a pad (a hit
  * cuts its last), two for a pad of poly 2 (the HR-16's crash), the hats one between them (a group: a hit cuts the
  * others of its group); a voice for a hit: a free one, else the oldest fading, else the oldest. */

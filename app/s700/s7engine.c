@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: MPL-2.0
+ * Copyright (C) 2026 Roger Klaveness */
 /* SM-87: the S700/X7000 voices. See s7.h, and documentation/akai-s700-x7000/04-playback.md for every formula.
  * Single-precision float (the FM-1's FPU is float-only; fm1-base's fastmath.h for the maths), positions as 32.32
  * fixed point in two 32-bit words, so nothing needs a double or a 64-bit multiply. */

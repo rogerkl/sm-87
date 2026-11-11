@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (C) 2026 Roger Klaveness
 """Samples built into the firmware: sounds there from the start (no sampler or computer to send them from), and more
 sample memory than the pool alone (the README's "Getting the most samples in").
 

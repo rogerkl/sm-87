@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: MPL-2.0
+ * Copyright (C) 2026 Roger Klaveness */
 /* SM-87: the sample bank, the samples built into the firmware: at the top of the firmware's slot, above the image,
  * where the package's padding was. tools/mkrom.py puts it into a firmware package (.fwsc) as it is, a release's or a
  * build's, with no compiler (web/sm87bank.js in a browser): the package opened, the bank written, its checksums made

@@ -1,0 +1,187 @@
+# SPDX-License-Identifier: MPL-2.0
+# SM-87's release: built from source on GitHub by the shared FM-1 builder, its packages signed with build provenance
+# (the FM-1 Firmware Hub shows them as built from source), then the site published to GitHub Pages: the installer,
+# the emulator and the manual. From fm1-base's template (template/.github/workflows/release.yml), for SM-87's layout:
+# fm1-base/ beside app/, ./build.sh, test/run.sh.
+#
+# A pushed tag vX.Y (or vX.Y.Z) builds, tests, attests and publishes the release; a tag with a suffix (v0.2-beta) is
+# a prerelease. A published release is never rebuilt. Set up once, in the repository's settings: Pages, Source =
+# GitHub Actions; and Environments, github-pages, a Tag rule for the release tags (v*), as only the default branch
+# may deploy there at first.
+name: Build and attest firmware
+
+on:
+  push:
+    tags: ['v[0-9]*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sm87-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Prepare a draft without replacing a public release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TITLE: SM-87
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REF" != refs/tags/* ]]; then exit 0; fi
+          version=${GITHUB_REF_NAME#v}
+          # (the versions fm1-base/tools/build.py --release takes)
+          [[ "$version" =~ ^[0-9]{1,2}\.[0-9]{1,2}(\.[0-9]{1,2})?(-[A-Za-z0-9]+)?$ ]]
+          flags=(--prerelease=false)
+          if [[ "$version" == *-* ]]; then flags=(--prerelease --latest=false); fi
+          if draft=$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq .isDraft); then
+            [[ "$draft" == true ]] || { echo 'Refusing to rebuild a public release'; exit 1; }
+          else
+            gh release create "$GITHUB_REF_NAME" --verify-tag --draft \
+              --title "$TITLE $version" --generate-notes "${flags[@]}"
+          fi
+
+  firmware:
+    needs: prepare
+    # The Firmware Hub recognises attestations from this reviewed builder tag.
+    uses: zvenson/fm1-build/.github/workflows/build.yml@v1
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    with:
+      sdk: true
+      tests-block: true
+      build: |
+        set -euo pipefail
+        pkg=sm87
+        # the builder checks out without submodules: fm1-base and its felucca-bsp (fm1-base/bsp/), at the commits
+        # this one links
+        git submodule update --init --recursive
+        # the drum kit's sounds are made into the build by tools/mkkit.py, which needs numpy
+        python3 -m pip install -q numpy
+        test "$(git -C "$AC79_SDK" rev-parse HEAD)" = d179b4484759423312073f5fbb232501aa491047
+        # Emscripten for the .rfm1 (host apps: RemoteFM1), a fixed version from emsdk at a fixed commit
+        git clone -q https://github.com/emscripten-core/emsdk.git "$RUNNER_TEMP/emsdk"
+        git -C "$RUNNER_TEMP/emsdk" checkout -q a2b92777574c2feda07994cd4f1079a3dfc151f8   # emsdk 6.0.10
+        "$RUNNER_TEMP/emsdk/emsdk" install 6.0.10
+        "$RUNNER_TEMP/emsdk/emsdk" activate 6.0.10
+        set +u; source "$RUNNER_TEMP/emsdk/emsdk_env.sh"; set -u
+        emcc --version
+        mkdir -p build/release-assets
+        if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+          version=${GITHUB_REF_NAME#v}
+          ./build.sh --release "$version"
+          cp "app/build/$pkg-$version.fwsc" build/release-assets/
+          cp "app/build/$pkg.bin" "build/release-assets/$pkg-$version-app.bin"
+          # (the tests put samples into app/build/$pkg.fwsc: there, the release package itself)
+          cp "app/build/$pkg-$version.fwsc" "app/build/$pkg.fwsc"
+          ./build.sh --rfm1 --release "$version"
+          cp "app/build/$pkg-$version.rfm1" build/release-assets/
+        else
+          ./build.sh
+          cp "app/build/$pkg.fwsc" build/release-assets/
+          cp "app/build/$pkg.bin" "build/release-assets/$pkg-app.bin"
+          ./build.sh --rfm1
+          cp app/build/rfm1/"$pkg"-dev+*.rfm1 "build/release-assets/$pkg.rfm1"
+        fi
+        # the firmware described for hubs (fm1-base/docs/FIRMWARE-JSON.md)
+        cp app/build/firmware.json build/release-assets/
+      test: |
+        set -euo pipefail
+        pkg=sm87
+        [ -f "app/build/$pkg.fwsc" ]
+        python3 -m pip install -q numpy Pillow mido
+        # Axs7's test fixtures (a real X7000's dumps and disk images), at a fixed commit
+        git clone -q --filter=blob:none --no-checkout https://github.com/rogerkl/Axs7.git "$RUNNER_TEMP/Axs7"
+        git -C "$RUNNER_TEMP/Axs7" sparse-checkout set web/test/fixtures
+        git -C "$RUNNER_TEMP/Axs7" checkout -q ac3add399c8e64cd68f96e535d7dada1e788ece0
+        PYTHON=python3 AXS7="$RUNNER_TEMP/Axs7" sh test/run.sh
+      packages: build/release-assets/*
+
+  verify:
+    needs: firmware
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      attestations: read
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: packages
+          path: build/attested
+      - name: Verify checksums and signed source provenance
+        working-directory: build/attested
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          sha256sum --check SHA256SUMS
+          for package in build/release-assets/*.fwsc build/release-assets/*-app.bin build/release-assets/*.rfm1 \
+              build/release-assets/firmware.json; do
+            gh attestation verify "$package" --repo "$GITHUB_REPOSITORY" \
+              --signer-workflow zvenson/fm1-build/.github/workflows/build.yml \
+              --source-ref "$GITHUB_REF" --source-digest "$GITHUB_SHA"
+          done
+      - name: Publish the verified draft
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh release edit "$GITHUB_REF_NAME" --draft=false
+
+  site:
+    needs: verify
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Python packages
+        run: python3 -m pip install -q numpy Pillow mido
+      # the attested package, so the site's installer writes the very one the release has
+      - uses: actions/download-artifact@v4
+        with:
+          name: packages
+          path: build/attested
+      - name: The emulator, with fm1-base's SysEx changes (patches/), until they are in fm1-base
+        run: |
+          set -euo pipefail
+          git -C fm1-base apply ../patches/fm1-base-emu-sysex.patch
+          git clone -q https://github.com/emscripten-core/emsdk.git "$RUNNER_TEMP/emsdk"
+          git -C "$RUNNER_TEMP/emsdk" checkout -q a2b92777574c2feda07994cd4f1079a3dfc151f8   # emsdk 6.0.10
+          "$RUNNER_TEMP/emsdk/emsdk" install 6.0.10
+          "$RUNNER_TEMP/emsdk/emsdk" activate 6.0.10
+          set +u; source "$RUNNER_TEMP/emsdk/emsdk_env.sh"; set -u
+          PYTHON=python3 ./build.sh --web
+      - name: The site
+        run: |
+          set -euo pipefail
+          version=${GITHUB_REF_NAME#v}
+          python3 fm1-base/tools/make_site.py app "build/attested/build/release-assets/sm87-$version.fwsc" "$version" \
+            build/site
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: build/site
+      - id: deploy
+        uses: actions/deploy-pages@v4

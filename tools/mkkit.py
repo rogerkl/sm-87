@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (C) 2026 Roger Klaveness
 """The HR-16's drum kit built into the firmware, from resources/kit/kit.txt and the WAV files beside it.
 
 The build makes it (app/fm1.toml: gen = mkkit.py --out {gen}/hr_kit.h): a header of the kit's sounds and its pads'

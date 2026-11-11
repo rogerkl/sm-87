@@ -2,11 +2,19 @@
   "schema": 1,
   "id": "sm87",
   "name": "SM-87",
-  "tagline": "a 1987 studio: MMT-8 style sequencer, S700 style sampler",
+  "author": "Roger Klaveness",
+  "license": "MPL-2.0",
+  "tagline": "A 1987 studio: an MMT-8 style sequencer, an S700/X7000 style sampler and an HR-16 style drum machine",
+  "description": "SM-87 turns the M-VAVE FM-1 into a 1987 studio. An Alesis MMT-8 style sequencer records and plays 100 parts and songs. An Akai S700/X7000 style sampler plays with its filter, release and vibrato as measured on an X7000. An Alesis HR-16 style drum machine has 16 pads and 100 patterns. Samples come over USB from Axs7 as to an X7000, and Axs7 can also build samples and a drum kit into the firmware. The MMT-8's and the HR-16's memory dumps go both ways.",
+  "tags": ["sequencer", "sampler", "drum-machine", "midi"],
+  "install": "https://rogerkl.github.io/sm-87/install/",
+  "site": "https://rogerkl.github.io/sm-87/",
+  "source": "https://github.com/rogerkl/sm-87",
+  "screenshot": "app/docs/img/screen.png",
   "hardware": {
     "models": ["FM-1"],
     "flash": ["856014", "B36014"],
     "features": ["usb-audio-in", "usb-audio-out", "velocity", "pressure", "screen-reader"]
   },
-  "credits": "Built on fm1-base (MPL-2.0) and felucca-bsp."
+  "credits": "Built on fm1-base and felucca-bsp, from Felucca by Leo Kuroshita (Hügelton Instruments); the sampler follows Axs7's engine."
 }

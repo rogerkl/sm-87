@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: MPL-2.0
+ * Copyright (C) 2026 Roger Klaveness */
 /* SM-87: the S700/X7000 sampler engine.
  *
  * Plays samples the way an Akai S700 / X7000 does, from the measurements in documentation/akai-s700-x7000/

@@ -1,4 +1,6 @@
-/* SM-87: the MMT-8's functions on the panel (documentation/MMT-8_Manual.pdf, 4-16). On the sequencer's page ALGO
+/* SPDX-License-Identifier: MPL-2.0
+ * Copyright (C) 2026 Roger Klaveness */
+/* SM-87: the MMT-8's functions on the panel (its manual, 4-16: documentation/manuals.md). On the sequencer's page ALGO
  * turns from the part (or song) playing through them, as the MMT-8's buttons: LENGTH, ERASE, COPY, MERGE, QUANTIZE,
  * TRANSPOSE, MIDI CHANNEL, NAME and EDIT (in SONG: ERASE, COPY, QUANTIZE, NAME, EDIT), then CLOCK (its own or MIDI's)
  * and MIDI DUMP (the memory out, as an MMT-8's SysEx dump). The first eight white keys are the

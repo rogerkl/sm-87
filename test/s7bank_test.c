@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: MPL-2.0
+ * Copyright (C) 2026 Roger Klaveness */
 /* SM-87: the sample bank's reader (app/s700/s7bank.c): a bank as tools/mkrom.py makes it found and read; one that
  * doesn't check refused, so the firmware does without rather than play from a damaged one */
 #include <stdio.h>

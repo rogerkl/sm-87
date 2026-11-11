@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: MPL-2.0
+ * Copyright (C) 2026 Roger Klaveness */
 /* SM-87: the S700/X7000's MIDI: its sample dump (the Prophet 2000's, F0 7E) and Akai's exclusive messages for a
  * sample's parameters (F0 47 ... 41), as documentation/akai-s700-x7000/01-sample-dump.md and 02-sample-parameters.md
  * describe them. The FM-1 answers as an X7000 with 16 slots, so Axs7 sends and fetches its samples unchanged.

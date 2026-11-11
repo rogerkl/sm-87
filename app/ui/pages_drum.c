@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: MPL-2.0
+ * Copyright (C) 2026 Roger Klaveness */
 /* SM-87: the HR-16's page (ARP). The LCD as the HR-16 shows a pattern: its number, the beat playing; the sixteen
  * white keys its pads. PRESET picks the pattern (queued for the end of the one playing), K1 the tempo, K2 the
  * quantize, K3 the swing; REC arms recording (hits played go into the pattern as it loops, quantized and swung;

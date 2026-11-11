@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: MPL-2.0
+ * Copyright (C) 2026 Roger Klaveness */
 /* SM-87: the sample memory. Samples live packed (12 bits, two words in three bytes) in the flash, read in place by
  * the engine; their parameters in RAM (s7_slot[].p), kept in a store object with the directory.
  *

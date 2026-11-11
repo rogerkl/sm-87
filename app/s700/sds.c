@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: MPL-2.0
+ * Copyright (C) 2026 Roger Klaveness */
 /* SM-87: the S700's sample dump and parameter messages, see sds.h */
 #include "sds.h"
 

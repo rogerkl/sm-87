@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: MPL-2.0
+ * Copyright (C) 2026 Roger Klaveness */
 /* SM-87: the MMT-8's memory and player: the arena, takes made into tracks, the edits, playing a part on time, the
  * count-in and a first take setting its length, mutes, a part queued, a song. Built and run by test/run.sh */
 #include <math.h>

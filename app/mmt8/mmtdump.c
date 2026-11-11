@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: MPL-2.0
+ * Copyright (C) 2026 Roger Klaveness */
 /* SM-87: the MMT-8's memory dump, see mmtdump.h */
 #include "mmtdump.h"
 

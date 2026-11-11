@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: MPL-2.0
+ * Copyright (C) 2026 Roger Klaveness */
 /* SM-87: the HR-16's memory as its SysEx dump has it (documentation/hr16-sysex.md, from the HR-16/HR-16B Service
  * Manual 1.00, 11.0 MIDI Implementation, command 00H): F0 00 00 0E 01 00, the memory from its address 8200H packed
  * seven bytes in eight as the MMT-8's (mmt8/mmtdump.h md_packed_byte, the same table), F7.

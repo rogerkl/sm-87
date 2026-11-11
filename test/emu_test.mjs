@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (C) 2026 Roger Klaveness
 // SM-87 in the browser emulator (fm1-base tools/build.py ../app --web), under node with fm1-base's harness: the
 // worklet and app.wasm as a browser runs them. As Axs7 talks to an X7000 through the emulator's MIDI part:
 // ROVS, a whole dump (32,752 words, 66,632 bytes, one frame) and its ACKS, RSPRM, RSD back word for word, then the
@@ -91,8 +93,9 @@ const peak = emu.run(300);
 midi([0x80, 60, 64]);
 check(peak > 0.01, `it sounds (peak ${peak.toFixed(3)})`);
 
-// an MMT-8's memory dump, nearly full (documentation/MMT-8 SYSEX.odt; the BCD beats + 1): eight parts of 1,000 notes
-// on track 1, 64 beats each; it replaces the sequencer's memory, and MIDI DUMP (ALGO) sends it back the same
+// an MMT-8's memory dump, nearly full (its SysEx document, documentation/manuals.md; the BCD beats + 1): eight parts of
+// 1,000 notes on track 1, 64 beats each; it replaces the sequencer's memory, and MIDI DUMP (ALGO) sends it back the
+// same
 const mem = new Uint8Array(0xff00 - 0x400);
 let at = 0x200;
 const le = (v) => { mem[at++] = v & 255; mem[at++] = v >> 8; };

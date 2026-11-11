@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (C) 2026 Roger Klaveness
 // web/sm87bank.js against tools/mkrom.py: the same bank from the same samples, and the same package with them put
 // in, byte for byte (so fm1-base's tools/fm1pkg_make.py's: test/bank_test.py checks mkrom.py's against it). The
 // packages are bank_test.py's, left in DIR; the device build's too when there was one.

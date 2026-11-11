@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: MPL-2.0
+ * Copyright (C) 2026 Roger Klaveness */
 /* SM-87: the sample bank, see s7bank.h */
 #include "s7bank.h"
 #include <stddef.h>

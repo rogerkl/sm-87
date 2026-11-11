@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: MPL-2.0
+ * Copyright (C) 2026 Roger Klaveness */
 /* SM-87: an MMT-8 style sequencer, an Akai S700 / X7000 style sampler and an HR-16 style drum machine on the M-VAVE
  * FM-1. The app's glue: the sound (app_render), MIDI in, the panel and the screen. Part of fm1-base's unity build
  * (device/unity.c, host/plat_host.c), after the platform: gfx.c and announce.c are in scope. The sampler (s700/), the

@@ -1,0 +1,38 @@
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (C) 2026 Roger Klaveness
+# SM-87's tests on every push and pull request (test/run.sh): the C unit tests, the samples put into a package in
+# Python and JavaScript, and the host simulator's scripts. They need no JieLi toolchain: the firmware itself is built
+# by release.yml, on the FM-1 builder. Axs7's test fixtures come from github.com/rogerkl/Axs7 at a fixed commit.
+name: Tests
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Python packages
+        run: python3 -m pip install -q numpy Pillow mido
+      - name: Axs7's test fixtures
+        run: |
+          set -euo pipefail
+          git clone -q --filter=blob:none --no-checkout https://github.com/rogerkl/Axs7.git "$RUNNER_TEMP/Axs7"
+          git -C "$RUNNER_TEMP/Axs7" sparse-checkout set web/test/fixtures
+          git -C "$RUNNER_TEMP/Axs7" checkout -q ac3add399c8e64cd68f96e535d7dada1e788ece0
+      - name: Tests
+        env:
+          PYTHON: python3
+          AXS7: ${{ runner.temp }}/Axs7
+        run: sh test/run.sh

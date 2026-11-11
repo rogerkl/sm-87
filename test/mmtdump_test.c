@@ -1,6 +1,9 @@
-/* SM-87: the MMT-8's memory dump (app/mmt8/mmtdump.c) against documentation/MMT-8 SYSEX.odt: the 7-in-8 packing as
- * its table has it, a dump made here by hand from the document taken in, ours sent and taken in again the same, the
- * header's other bytes kept, a dump too big for the sequencer taken in as far as it goes. Built and run by test/run.sh */
+/* SPDX-License-Identifier: MPL-2.0
+ * Copyright (C) 2026 Roger Klaveness */
+/* SM-87: the MMT-8's memory dump (app/mmt8/mmtdump.c) against the MMT-8's SysEx document (documentation/manuals.md):
+ * the 7-in-8 packing as its table has it, a dump made here by hand from the document taken in, ours sent and taken in
+ * again the same, the header's other bytes kept, a dump too big for the sequencer taken in as far as it goes. Built and
+ * run by test/run.sh */
 #include <stdio.h>
 #include <string.h>
 #include "mmtdump.h"

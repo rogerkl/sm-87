@@ -1,0 +1,88 @@
+# The manual's pictures and the firmware's card (screen.png, fm1.toml screenshot): tools/build.py ../app --host, then
+#   app/build/host/sm87_host app/tests/screens.txt app/docs/img
+# (test/run.sh runs it with the other scripts, its pictures then in app/build/host). 120 BPM: a beat is 500 ms.
+wait 600
+# the sequencer: a part of two tracks recorded from MIDI, playing
+tap SEQ
+wait 30
+tap REC
+tap PLAY
+wait 2030
+midi TRS 90 3C 64
+wait 240
+midi TRS 80 3C 40
+wait 260
+midi TRS 90 40 50
+wait 240
+midi TRS 80 40 40
+wait 260
+midi TRS 90 43 60
+wait 240
+midi TRS 80 43 40
+wait 260
+midi TRS 90 48 70
+wait 240
+midi TRS 80 48 40
+wait 200
+tap PLAY
+wait 100
+expect beats 4
+expect tracks 1
+# track 2: REC arms the lowest empty one
+tap REC
+wait 30
+expect rectrack 2
+tap PLAY
+wait 2030
+midi TRS 91 30 80
+wait 480
+midi TRS 81 30 40
+wait 20
+midi TRS 91 37 70
+wait 480
+midi TRS 81 37 40
+wait 20
+midi TRS 91 30 80
+wait 480
+midi TRS 81 30 40
+wait 20
+midi TRS 91 2B 70
+wait 450
+midi TRS 81 2B 40
+tap PLAY
+wait 100
+expect tracks 3
+tap PLAY
+wait 1300
+shot screen.png
+shot seq.png
+tap PLAY
+wait 100
+# the drum machine: kick and snare recorded as the pattern loops, playing
+tap ARP
+wait 30
+tap REC
+wait 30
+press PLAY
+wait 30
+midi 99 24 64
+wait 468
+midi 99 26 64
+wait 498
+midi 99 24 64
+wait 498
+midi 99 2A 50
+wait 250
+midi 99 26 64
+release PLAY
+wait 100
+tap REC
+wait 2500
+expect drrec 0
+shot drums.png
+tap PLAY
+wait 100
+# the sampler: EDIT's first page, the slot's START and END
+tap EDIT
+wait 30
+shot sampler.png

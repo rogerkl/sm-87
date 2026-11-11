@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: MPL-2.0
+ * Copyright (C) 2026 Roger Klaveness */
 /* SM-87: the HR-16: its patterns (hits in, out, a pad's out, the length, COPY), quantize with swing, the player (alone,
  * with the sequencer's part, a song's steps), recording as it loops, the pads' voices (the hats' group, a pad's poly,
  * the pan), and a pattern's own sounds. Built and run by test/run.sh */

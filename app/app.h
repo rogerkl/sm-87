@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: MPL-2.0
+ * Copyright (C) 2026 Roger Klaveness */
 /* SM-87: the app's half of the contract with fm1-base (device/unity.c, host/plat_host.c) */
 #pragma once
 #include <stdint.h>

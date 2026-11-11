@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: MPL-2.0
+ * Copyright (C) 2026 Roger Klaveness */
 /* SM-87: the MMT-8's page. The LCD as the MMT-8 shows a part or a song playing; the first eight white keys are its
  * eight track buttons while SEL is held (mutes; the ninth the drums), and choose the record track with REC held;
  * PRESET picks the part (or the song), queued while playing; K1 the tempo, K2 the record track's channel, K4 the

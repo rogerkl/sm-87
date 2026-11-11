@@ -12,5 +12,8 @@
 # example sounds for testing
 /sounds/
 
+# your copies of the manuals (Alesis's and Akai's, not ours to publish: documentation/manuals.md)
+/documentation/manuals/
+
 # Python bytecode
 __pycache__/

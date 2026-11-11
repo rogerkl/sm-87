@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (C) 2026 Roger Klaveness
 """Writes app/tests/sysex.txt: the FM-1 as an X7000 to Axs7, in the host simulator. The messages are built here from
 documentation/akai-s700-x7000/01-sample-dump.md and 02-sample-parameters.md, apart from the firmware's C code, so the
 script checks the firmware against the documents.
@@ -153,8 +155,8 @@ def main():
     hr16_test()
 
 
-# ---- the MMT-8's memory dump, as documentation/MMT-8 SYSEX.odt has it (with mmt8utils' finding: the BCD beats are
-# the beats + 1) ----
+# ---- the MMT-8's memory dump, as its SysEx document has it (documentation/manuals.md), with mmt8utils' finding: the
+# BCD beats are the beats + 1 ----
 def mmt8_body(ev):
     """an event's five bytes: number, amount (bit 7: not a note), channel, two more"""
     kind = ev[1]
@@ -241,7 +243,7 @@ def mmt8_test():
             0x1FF: 0x99}
     dump = mmt8_sysex(mmt8_memory(parts, songs, keep))
     lines = [
-        "# The MMT-8's memory dump: made by test/gen_sysex_test.py from documentation/MMT-8 SYSEX.odt, do not edit.",
+        "# The MMT-8's memory dump: made by test/gen_sysex_test.py from the MMT-8's SysEx document, do not edit.",
         "# A dump from an MMT-8 replaces the sequencer's memory; MIDI DUMP (ALGO) sends it back the same, its header",
         "# as the MMT-8's was.",
         "wait 600",
