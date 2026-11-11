@@ -398,8 +398,9 @@ take its set-up (the settings keep which kit they were saved with); a pattern's 
 number.
 
 Axs7 does it in the browser: INIT SM-87 BANKS (its BANK page) makes a SAMPLES bank and a DRUMS bank of the HR-16's
-16 drums, which PROGRAM then edits as drums (one keygroup each, tuned in semitones, a pan); BUILD IN puts both into a
-package you open, with a meter of the room they take. It uses `web/sm87bank.js`, which does the same as `mkrom.py`
+16 drums, which PROGRAM then edits as drums (one keygroup each, tuned in semitones, a pan). It puts both into a
+package you open, with a meter of the room they take, and saves it or installs it on the FM-1 over USB (fm1-base's
+installer, as its web page runs it). It uses `web/sm87bank.js`, which does the same as `mkrom.py`
 for a page that makes the samples itself: `makeBank` makes the bytes of the samples and a kit, `Sm87Package` opens a
 package, says what it holds and its room, takes them (`put`) and gives the package back (`bytes`). For a kit of the
 HR-16's 16 drums, `HR16_DRUMS` says which pad each goes on (where an HR-16 dump puts it) with its name and note, and
@@ -553,5 +554,4 @@ The first things to measure on a device, before more is built on these assumptio
 
 - A dump sent to a real HR-16, and one of its dumps taken in: its sound numbers, the BCD beats.
 - A dump sent to a real MMT-8, and MIDI clock in with `midi_stamp` (fm1.toml) for timing finer than a block.
-- Installing a package from Axs7 over Web MIDI (it saves one now, for fm1-base's installer).
 - On a device: samples built in at the very top of the slot played (nothing has read that high there yet).
