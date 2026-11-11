@@ -151,16 +151,17 @@ The HR-16's 16 drums go on these pads (an HR-16 dump's hits do too: `app/hr16/hr
 
 ### A kit from a sampler's programs (Axs7's SM-87 drums)
 
-A tool that edits samples as an X7000 does (Axs7) can make a kit of them. It then edits them as SM-87's drums: a
-program for each HR-16 drum, one keygroup each, tuned in whole semitones. Each drum's keygroup becomes its pad and a
-sound:
+A tool that edits samples as an X7000 does can make a kit of them. Axs7 does (its DRUMS bank, `model/sm87.ts`): it
+edits them as SM-87's drums, a program for each HR-16 drum, one keygroup each, tuned in whole semitones. Each drum's
+first keygroup becomes its pad and a sound:
 - **The sound:** the sample's words from START to END (reversed with REVERSE), its rate code, and VEL>LV as its
   velocity's say. It plays once, start to end: its loop, filter, release and LFO don't apply. Drums with the same
   sample, START, END and REVERSE share one sound.
 - **Its name:** the drum's kind (`KICK`, `SNARE`, `CLHAT`, `OPHAT`, `CLAPS`, `TOM1`, `RIDE`, `CRASH`, `PERC1`, ...),
   so an HR-16 dump finds it.
-- **The pad's tuning:** the drum's note less the keygroup's root key, plus its transpose, in semitones: -24..24.
-  Played on the drum's note, the sample sounds as the tool plays it. A pad has no cents (fine tuning).
+- **The pad's tuning:** C3 (60) less the keygroup's root key, plus its transpose (with CONSTANT PITCH, the transpose
+  alone), in semitones: -24..24. The pad plays the sample as the tool plays it on C3, so a new keygroup (root C3)
+  is the sample at its own pitch, and the root or the transpose tunes it. A pad has no cents (fine tuning).
 - **The pad's level:** the sample's LOUDNESS, 0-99. A pad's level and the sampler's LOUDNESS take the same curve
   (`s7_level_db`), so the drum is as loud as the sampler would play it.
 - **The pad's pan:** -3..3 (the X7000 has none).
