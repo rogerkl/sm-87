@@ -1,5 +1,10 @@
 # SM-87
 
+![An illustration of SM-87 on the FM-1 in late-1980s studio style: a charcoal grey keyboard with a green backlit LCD showing PART 00 BT 003, on a desk beside rack gear, MIDI cables, a cassette and a floppy disk](app/site/img/sm87.jpg)
+
+*SM-87 as a 1987 studio might have had it: an illustration, made with an image generator. The FM-1 itself looks
+different.*
+
 A firmware for the M-VAVE FM-1 that recreates a 1986/87 studio: an **Alesis MMT-8** style part/song sequencer
 driving an **Akai S700 / X7000** style sampler and an **Alesis HR-16** style drum machine. It is built on
 [fm1-base](https://github.com/charlesvestal/fm1-base) (MPL-2.0, a git submodule here) and felucca-bsp.

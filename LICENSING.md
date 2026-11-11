@@ -8,6 +8,7 @@ file under MPL-2.0. Files of your own that you combine with SM-87 may use any li
 | --- | --- | --- |
 | SM-87's code, tools, tests and documentation | MPL-2.0, Copyright (C) 2026 Roger Klaveness | `app/`, `tools/`, `test/`, `web/`, `documentation/`, `README.md` |
 | The drum kit's sounds, built into every firmware (Roger Klaveness's) | MPL-2.0, as the rest | `resources/kit/` |
+| The illustration on the README and the site, and its square crop, made with Google's Gemini image model from Roger Klaveness's prompt (a word on a prop manual in it retouched out) | MPL-2.0, as the rest | `app/site/img/` |
 | fm1-base, the platform SM-87 is built on | MPL-2.0 (its `LICENSING.md` lists its parts' origins) | `fm1-base/`, a git submodule |
 | felucca-bsp, fm1-base's board support | MPL-2.0 | `fm1-base/bsp/`, a git submodule of fm1-base |
 | fm1-base's changes for the browser emulator's SysEx, until they are in fm1-base | MPL-2.0, as the files they change | `patches/fm1-base-emu-sysex.patch` |

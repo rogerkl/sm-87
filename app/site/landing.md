@@ -1,5 +1,7 @@
 # SM-87
 
+![An illustration of SM-87 on the FM-1 in late-1980s studio style: a charcoal grey keyboard with a green backlit LCD showing PART 00 BT 003, on a desk beside rack gear, MIDI cables, a cassette and a floppy disk](img/sm87.svg "SM-87 as a 1987 studio might have had it: an illustration (the FM-1 itself looks different)")
+
 SM-87 turns the M-VAVE FM-1 into a 1987 studio: an Alesis MMT-8 style sequencer of 100 parts and songs, playing an
 Akai S700/X7000 style sampler and an Alesis HR-16 style drum machine. Record from the keys or from MIDI, send samples
 over USB from [Axs7](https://rogerkl.github.io/Axs7/), and trade memory dumps with a real MMT-8 or HR-16.
