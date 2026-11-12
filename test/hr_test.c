@@ -118,14 +118,24 @@ static void test_patterns(void)
     CHECK(sq_valid(), "the memory holds together");
 
     /* quantize: to the nearest, every second place swung */
-    CHECK(hr_quantize(13, 24, 50) == 24u && hr_quantize(11, 24, 50) == 0u && hr_quantize(37, 24, 50) == 48u,
-          "1/16: 13 -> %u, 11 -> %u, 37 -> %u", hr_quantize(13, 24, 50), hr_quantize(11, 24, 50),
-          hr_quantize(37, 24, 50));
-    CHECK(hr_quantize(24, 24, 66) == 32u && hr_quantize(15, 24, 66) == 0u && hr_quantize(17, 24, 66) == 32u &&
-              hr_quantize(41, 24, 66) == 48u && hr_quantize(72, 24, 66) == 80u,
-          "1/16 swung 66%%: 24 -> %u, 15 -> %u, 17 -> %u, 41 -> %u", hr_quantize(24, 24, 66), hr_quantize(15, 24, 66),
-          hr_quantize(17, 24, 66), hr_quantize(41, 24, 66));
-    CHECK(hr_quantize(37, 1, 66) == 37u && hr_quantize(130, 96, 50) == 96u, "off, and 1/4");
+    CHECK(hr_quantize(13, 24, 0) == 24u && hr_quantize(11, 24, 0) == 0u && hr_quantize(37, 24, 0) == 48u,
+          "1/16: 13 -> %u, 11 -> %u, 37 -> %u", hr_quantize(13, 24, 0), hr_quantize(11, 24, 0),
+          hr_quantize(37, 24, 0));
+    CHECK(hr_quantize(24, 24, 8) == 32u && hr_quantize(15, 24, 8) == 0u && hr_quantize(17, 24, 8) == 32u &&
+              hr_quantize(41, 24, 8) == 48u && hr_quantize(72, 24, 8) == 80u,
+          "1/16 swung 8 clocks (66.7%%): 24 -> %u, 15 -> %u, 17 -> %u, 41 -> %u", hr_quantize(24, 24, 8),
+          hr_quantize(15, 24, 8), hr_quantize(17, 24, 8), hr_quantize(41, 24, 8));
+    CHECK(hr_quantize(37, 1, 8) == 37u && hr_quantize(130, 96, 0) == 96u, "off, and 1/4");
+    /* the HR-16's swing table: each grid's most, and as a percentage */
+    CHECK(hr_swing_max(96) == 0u && hr_swing_max(64) == 24u && hr_swing_max(48) == 16u && hr_swing_max(32) == 12u &&
+              hr_swing_max(24) == 8u && hr_swing_max(16) == 6u && hr_swing_max(12) == 4u && hr_swing_max(8) == 2u &&
+              hr_swing_max(6) == 1u && hr_swing_max(1) == 0u,
+          "the swing's most, by quantize");
+    CHECK(hr_swing_pct10(64, 24) == 688u && hr_swing_pct10(48, 16) == 667u && hr_swing_pct10(32, 12) == 688u &&
+              hr_swing_pct10(24, 8) == 667u && hr_swing_pct10(8, 2) == 625u && hr_swing_pct10(6, 1) == 583u &&
+              hr_swing_pct10(24, 2) == 542u && hr_swing_pct10(1, 0) == 500u,
+          "as the manual's percentages: 1/16 at 2 %u", hr_swing_pct10(24, 2));
+    CHECK(hr_quantize(24, 24, 20) == 32u && hr_swing_pct10(24, 20) == 667u, "past its most: its most");
 }
 
 /* the hits played between from and to (clocks from the start c0), as "clock:pad" */
@@ -214,7 +224,7 @@ static void test_record(void)
     sqp_init(FS);
     hrp.pattern = 4;
     hrp.quant = 3;                        /* 1/16 */
-    hrp.swing = 50;
+    hrp.swing = 0;
     hrp.rec = 1;
     n_hit = 0;
     CHECK(!hrp_recording(), "not running: not recording");
@@ -266,17 +276,17 @@ static void test_step(void)
     hr_add(2, 0, 2, 90, scratch);
     hr_add(2, 30, 1, 80, scratch);
     hr_add(2, 96, 0, 70, scratch);
-    CHECK(hr_step_next(2, 0, 24, 50) == 24u && hr_step_next(2, 24, 24, 50) == 30u &&
-              hr_step_next(2, 30, 24, 50) == 48u && hr_step_next(2, 168, 24, 50) == 0u,
-          "on: 0 -> %u -> %u -> %u, 168 -> %u", hr_step_next(2, 0, 24, 50), hr_step_next(2, 24, 24, 50),
-          hr_step_next(2, 30, 24, 50), hr_step_next(2, 168, 24, 50));
-    CHECK(hr_step_prev(2, 0, 24, 50) == 168u && hr_step_prev(2, 48, 24, 50) == 30u &&
-              hr_step_prev(2, 30, 24, 50) == 24u && hr_step_prev(2, 97, 1, 50) == 96u,
-          "back: 0 -> %u, 48 -> %u, 30 -> %u", hr_step_prev(2, 0, 24, 50), hr_step_prev(2, 48, 24, 50),
-          hr_step_prev(2, 30, 24, 50));
-    CHECK(hr_step_next(2, 0, 24, 66) == 30u && hr_step_next(2, 30, 24, 66) == 32u &&
-              hr_step_prev(2, 48, 24, 66) == 32u && hr_step_next(2, 33, 24, 66) == 48u,
-          "swung 66%%: 0 -> %u, 30 -> %u", hr_step_next(2, 0, 24, 66), hr_step_next(2, 30, 24, 66));
+    CHECK(hr_step_next(2, 0, 24, 0) == 24u && hr_step_next(2, 24, 24, 0) == 30u &&
+              hr_step_next(2, 30, 24, 0) == 48u && hr_step_next(2, 168, 24, 0) == 0u,
+          "on: 0 -> %u -> %u -> %u, 168 -> %u", hr_step_next(2, 0, 24, 0), hr_step_next(2, 24, 24, 0),
+          hr_step_next(2, 30, 24, 0), hr_step_next(2, 168, 24, 0));
+    CHECK(hr_step_prev(2, 0, 24, 0) == 168u && hr_step_prev(2, 48, 24, 0) == 30u &&
+              hr_step_prev(2, 30, 24, 0) == 24u && hr_step_prev(2, 97, 1, 0) == 96u,
+          "back: 0 -> %u, 48 -> %u, 30 -> %u", hr_step_prev(2, 0, 24, 0), hr_step_prev(2, 48, 24, 0),
+          hr_step_prev(2, 30, 24, 0));
+    CHECK(hr_step_next(2, 0, 24, 8) == 30u && hr_step_next(2, 30, 24, 8) == 32u &&
+              hr_step_prev(2, 48, 24, 8) == 32u && hr_step_next(2, 33, 24, 8) == 48u,
+          "swung 8 clocks: 0 -> %u, 30 -> %u", hr_step_next(2, 0, 24, 8), hr_step_next(2, 30, 24, 8));
     {                                     /* the whole pattern at 1/8: 4 steps, and the hit at 30 */
         uint32_t at = 0, stops = 0;
         do {
@@ -330,7 +340,7 @@ static void test_offset_fill(void)
     sqp_init(FS);
     hrp.pattern = 6;
     hrp.quant = 3;
-    hrp.swing = 50;
+    hrp.swing = 0;
     hrp.rec = 1;
     n_hit = 0;
     sqp_aux_play(0);

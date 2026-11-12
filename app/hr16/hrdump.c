@@ -289,7 +289,7 @@ int hd_import(const uint8_t *img, uint32_t len, uint8_t *scratch, hd_report_t *r
     if (img[0x2DAu] < 10u)
         r->quant = (int8_t)Q_GRID[img[0x2DAu]];
     if (img[0x2D5u] <= 24u)
-        r->swing = (int8_t)(50u + img[0x2D5u]);
+        r->swing = (int8_t)img[0x2D5u];
     if (img[0xDDu] <= 1u)
         r->prog = (int8_t)img[0xDDu];
     return 0;
@@ -387,7 +387,7 @@ int32_t hd_export(uint8_t *img, uint32_t max, const hd_settings_t *st)
     pos += 3u;
     put_le16(img + 0x2CDu, pos + HD_BASE);   /* the free memory: where it starts, how much */
     put_le16(img + 0x2D1u, HD_END - (pos + HD_BASE));
-    img[0x2D5] = (uint8_t)(st->swing < 50u ? 0u : st->swing - 50u > 24u ? 24u : st->swing - 50u);
+    img[0x2D5] = (uint8_t)(st->swing > 24u ? 24u : st->swing);
     for (q = 0; q < 10u && (Q_CLOCKS[q] != HR_GRID[st->quant % HR_GRIDS]); q++)
         ;
     q = q < 10u ? q : 4u;

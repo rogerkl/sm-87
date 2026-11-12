@@ -57,7 +57,7 @@ typedef struct {
     uint32_t got, want;           /* the bytes that came, and those its header says it has (0: not said) */
     uint16_t songs;               /* its songs with steps: not taken */
     int8_t quant;                 /* its quantize as HR_GRID's index (1/6: 1/8), -1 not one */
-    int8_t swing;                 /* %, 50..74; -1 not one */
+    int8_t swing;                 /* clocks, 0..24 (the HR-16's swing); -1 not one */
     int8_t prog;                  /* its MIDI PROGRAM CHANGE (patterns chosen by program change): 1 on, 0 off, -1 not
                                    * one */
 } hd_report_t;
@@ -70,7 +70,7 @@ int hd_import(const uint8_t *img, uint32_t len, uint8_t *scratch, hd_report_t *r
 uint32_t hd_want(const uint8_t *img, uint32_t n);
 
 typedef struct {
-    uint8_t quant, swing;         /* the recording's: HR_GRID's index, % */
+    uint8_t quant, swing;         /* the recording's: HR_GRID's index, clocks */
     uint8_t channel;              /* the drums', 0..15 (a header made up) */
     uint16_t tempo;               /* BPM (a header made up) */
     uint8_t prog;                 /* MIDI PROGRAM CHANGE on (the header's, made up or the HR-16's) */

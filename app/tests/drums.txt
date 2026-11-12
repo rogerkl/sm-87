@@ -63,16 +63,23 @@ expect aux 0
 tap REC
 wait 30
 expect drrec 0
-# quantize (K2) and swing (K3)
+# quantize (K2) and swing (K3, the HR-16's clocks: at 1/12 up to 12); another quantize, none again
 turn K2 -1
 wait 30
 expect drquant 2
 turn K3 4 20
 wait 30
-expect drswing 54
+expect drswing 4
+turn K3 20 20
+wait 30
+expect drswing 12
 turn K2 1
+wait 30
+expect drquant 3
+expect drswing 0
 turn K3 -4 20
 wait 30
+expect drswing 0
 # LENGTH: 4 beats (the hits all in them)
 turn ALGO 2
 wait 30

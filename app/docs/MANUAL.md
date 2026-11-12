@@ -91,7 +91,8 @@ sampler's dumps, as many as the file holds.
   - The sounds are the sampler's format (12 bits, at its rates) and play on its voices, without the filter: a kit
     built into the firmware (`resources/kit`), or any of the sampler's 16 slots.
   - 100 patterns of up to 682 beats, in the sequencer's memory. Recorded as they loop, each hit quantized (1/4 ..
-    1/64, or off) and swung (50-75%) as it goes in, the HR-16's way. Its STEP EDIT, OFFSET and FILL too.
+    1/64, or off) and swung (the HR-16's swing, up to 58-69%) as it goes in, the HR-16's way. Its STEP EDIT,
+    OFFSET and FILL too.
   - A pattern can keep its own sounds, as the HR-16 stores VOICE, TUNE and MIX with a pattern; one without them
     plays the pads' global set-up.
   - The HR-16's memory dump over USB, both ways: an HR-16's dump replaces the drum patterns, and ours goes out in the
@@ -215,7 +216,7 @@ without). The drums muted beside a part show `MUTED`.
 | White keys | The 16 pads, by velocity (the black keys do nothing here) |
 | PLAY | The drums alone, from the top / stop; SEL + PLAY: on from the beat |
 | PRESET | The pattern; while playing, queued for the end of the one playing |
-| K1 / K2 / K3 | Tempo / quantize (1/4, 1/8, 1/12, 1/16, 1/24, 1/32, 1/48, 1/64, off) / swing, 50-75% |
+| K1 / K2 / K3 | Tempo / quantize (1/4, 1/8, 1/12, 1/16, 1/24, 1/32, 1/48, 1/64, off; another: no swing again) / swing, the HR-16's clocks (below) |
 | REC | Recording on or off: the hits played (pads, or MIDI in on the drums' channel) go into the pattern as it loops |
 | SEL + a pad, recording | Erases that pad's hits as they come by, while held (the HR-16's ERASE + a pad) |
 | OCT+ held | FILL: a pad held repeats at the quantize rate (off: 1/32), at the velocity it was hit at, while the drums play; recorded when recording. (The pads have no octave: OCT- and OCT+ don't change it here) |
@@ -225,6 +226,19 @@ A new pattern is 8 beats long, as on the HR-16. A hit is placed on the nearest s
 as it's played, and played back from the next time round. Recording counts with the click (the SEQ page's
 LOOP/CLICK: its record click, at its value). It records when the drums play alone, or beside a part; it doesn't
 record in a song.
+
+**Swing** is the HR-16's: K3 sets how many clocks (96ths of a beat) every second step of the quantize grid comes
+late, so a hit recorded or step-edited lands there; hits already in the pattern stay where they are. How far it goes
+depends on the quantize, as in the HR-16's table, and choosing another quantize sets it back to none. The strip shows
+it as the HR-16 does beside its number, as a percentage: where the second step falls in the pair, 50.0% none.
+
+| Quantize | 1/4 | 1/8 | 1/12 | 1/16 | 1/24 | 1/32 | 1/48 | 1/64 | off |
+|---|---|---|---|---|---|---|---|---|---|
+| Swing, clocks | 0 | 0-16 | 0-12 | 0-8 | 0-6 | 0-4 | 0-2 | 0-1 | 0 |
+| At most | 50% | 66.7% | 68.8% | 66.7% | 68.8% | 66.7% | 62.5% | 58.3% | 50% |
+
+The HR-16's 1/6 (0-24, up to 68.8%) isn't one of SM-87's quantize values. A swing saved by an earlier SM-87, as a
+percentage, loads as the clocks nearest it.
 
 | Function | K1 | K2 | K3 | K4 | REC |
 |---|---|---|---|---|---|
@@ -298,7 +312,7 @@ says `PATT SELECT  ON`, as on the HR-16, and is kept in the settings (SAVE).
   MMT-8's parts and songs stay. SAVE keeps it. Then the LCD says how many patterns came, and above them
   `HR-16 DUMP IN`, or why not all did, as for the MMT-8's dump below.
 - **What comes across:** each pattern's hits, its length, and its VOICE, TUNE and MIX as the pattern's own sounds;
-  the swing and quantize, as the recording's (its 1/6 becomes 1/8).
+  the swing and quantize, as the recording's (its 1/6 becomes 1/8, its swing at most 1/8's).
 - **What doesn't:**
   - Its songs: SM-87's drums follow the MMT-8's songs. When the dump has any, the LCD says `SONGS NOT TAKEN`.
   - Its MIDI settings and tempo. The drums keep SM-87's notes and channel, so the MMT-8's tracks still play them.

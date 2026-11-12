@@ -1,10 +1,11 @@
 /* SPDX-License-Identifier: MPL-2.0
  * Copyright (C) 2026 Roger Klaveness */
-/* SM-87: the HR-16's page (ARP). The LCD as the HR-16 shows a pattern: its number, the beat playing; the sixteen
- * white keys its pads. PRESET picks the pattern (queued for the end of the one playing), K1 the tempo, K2 the
- * quantize, K3 the swing; REC arms recording (hits played go into the pattern as it loops, quantized and swung;
- * SEL + a pad held erases that pad's hits as they come by); OCT+ held is the HR-16's FILL (a pad held repeats at the
- * quantize rate, recorded too); PLAY plays the drums alone, SEL + PLAY continues.
+/* SM-87: the HR-16's page (ARP). The LCD as the HR-16 shows a pattern: its number, the beat playing; the sixteen white
+ * keys its pads. PRESET picks the pattern (queued for the end of the one playing), K1 the tempo, K2 the quantize (a new
+ * one: no swing, as the HR-16's), K3 the swing (the HR-16's clocks late, as far as the quantize allows; shown as a
+ * percentage too); REC arms recording (hits played go into the pattern as it loops, quantized and swung; SEL + a pad
+ * held erases that pad's hits as they come by); OCT+ held is the HR-16's FILL (a pad held repeats at the quantize rate,
+ * recorded too); PLAY plays the drums alone, SEL + PLAY continues.
  * ALGO turns to its functions: STEP EDIT (below), LENGTH, ERASE (a pad's hits, or the pattern), COPY (appended to
  * another; or a pad's hits onto another pad, of this pattern or another: a pad's key, then the other's), OFFSET (a
  * pad's hits or all moved by clocks, -99..99, round at the ends), PAD SOUND, PAD MIDI (its note, group, voices; the
@@ -259,6 +260,30 @@ static void dr_pattern_turn(int32_t e)
     dr.beats = (uint16_t)hr_beats(dr_pattern());
 }
 
+/* the quantize (recording's, STEP EDIT's grid): another, and the swing none again (the HR-16's) */
+static void dr_quant_turn(int32_t e)
+{
+    uint32_t q = (uint32_t)clamp((int32_t)set.dr_quant + e, 0, HR_GRIDS - 1);
+    if (q == set.dr_quant)
+        return;
+    set.dr_quant = (uint8_t)q;
+    set.dr_swing = 0;
+    hrp.quant = set.dr_quant;
+    hrp.swing = 0;
+    set_dirty = 1;
+}
+
+/* the swing as the HR-16 shows it beside its number: "54.2" (percent, a tenth) */
+static void swing_text(char *t)
+{
+    uint32_t p = hr_swing_pct10(HR_GRID[hrp.quant % HR_GRIDS], hrp.swing);
+    char n[8];
+    fmt_uint(t, p / 10u, 0, ' ');
+    str_cat(t, ".");
+    fmt_uint(n, p % 10u, 0, ' ');
+    str_cat(t, n);
+}
+
 /* an encoder on the drum page */
 static void dr_turn(uint32_t enc, int32_t e, uint32_t btn)
 {
@@ -276,9 +301,7 @@ static void dr_turn(uint32_t enc, int32_t e, uint32_t btn)
         if (enc == EN_SELECT) {
             dr_step_turn(e, (int)(btn >> B_SEL & 1u));
         } else if (enc == EN_K4) {   /* the grid: the steps it stops at */
-            set.dr_quant = (uint8_t)clamp((int32_t)set.dr_quant + e, 0, HR_GRIDS - 1);
-            hrp.quant = set.dr_quant;
-            set_dirty = 1;
+            dr_quant_turn(e);
         } else {
             dr_step_change(enc, e, (int)(btn >> B_SEL & 1u));
         }
@@ -289,11 +312,9 @@ static void dr_turn(uint32_t enc, int32_t e, uint32_t btn)
             sqp_set_tempo((uint32_t)((int32_t)sqp.tempo + e));
             plat_unlock(f);
         } else if (enc == EN_K2) {
-            set.dr_quant = (uint8_t)clamp((int32_t)set.dr_quant + e, 0, HR_GRIDS - 1);
-            hrp.quant = set.dr_quant;
-            set_dirty = 1;
+            dr_quant_turn(e);
         } else if (enc == EN_K3) {
-            set.dr_swing = (uint8_t)clamp((int32_t)set.dr_swing + e, 50, HR_SWING_MAX);
+            set.dr_swing = (uint8_t)clamp((int32_t)set.dr_swing + e, 0, (int32_t)hr_swing_max(HR_GRID[set.dr_quant]));
             hrp.swing = set.dr_swing;
             set_dirty = 1;
         }
@@ -545,10 +566,9 @@ static void dr_draw(int sel_held)
         } else if (hrp.rec) {
             str_cat(t, "REC ");
             str_cat(t, HR_GRID_TXT[hrp.quant % HR_GRIDS]);
-            str_cat(t, " SW ");
-            fmt_uint(n, hrp.swing, 2, '0');
+            str_cat(t, " SW ");   /* "REC 1/16 SW 54.2" */
+            swing_text(n);
             str_cat(t, n);
-            str_cat(t, "%");
         } else {
             fmt_uint(n, hr_beats(p), 0, ' ');
             str_cat(t, n);
@@ -779,7 +799,7 @@ static void dr_status(void)
     cv_text(84, 40, &FONT_XS, "Q", C_GRAY);
     cv_text(96, 40, &FONT_XS, HR_GRID_TXT[hrp.quant % HR_GRIDS], C_HI);
     cv_text(140, 40, &FONT_XS, "SWING", C_GRAY);
-    fmt_uint(n, hrp.swing, 0, ' ');
+    swing_text(n);                /* "54.2%" */
     str_cat(n, "%");
     cv_text(186, 40, &FONT_XS, n, C_HI);
     cv_text(8, 58, &FONT_XS, dr.fn == DF_DUMP ? "IN: ANY TIME" : dr.fn ? DF_TXT[dr.fn] : "ALGO: FUNCTIONS",

@@ -36,7 +36,8 @@ typedef struct {
     uint16_t dr_kit_tag;          /* the kit the pads were saved with (hr_kit_tag; 0: before it was kept) */
     /* the drums' (a settings object saved before them is shorter: these take their defaults) */
     uint8_t dr_channel;           /* their MIDI channel, 0..15 (10: 9) */
-    uint8_t dr_quant, dr_swing;   /* recording's quantize (hr16/hr.h HR_GRID's index) and swing, % */
+    uint8_t dr_quant, dr_swing;   /* recording's quantize (hr16/hr.h HR_GRID's index) and swing, clocks (the HR-16's;
+                                   * before, a percentage, 50..75: taken as clocks as it loads) */
     uint8_t dr_kit_n;             /* the kit's sounds when the pads were saved (hr_pads_rekit) */
     hr_pad_t pads[HR_PADS];       /* their global set-up (hr16/hr.h hr_std) */
     /* the mix (the MIX page; an object saved before it: each slot at full, in the middle, as the S700 is) */
@@ -74,7 +75,7 @@ static void drums_defaults(void)
     uint32_t i;
     set.dr_channel = 9;
     set.dr_quant = 3;             /* 1/16 */
-    set.dr_swing = 50;
+    set.dr_swing = 0;
     for (i = 0; i < HR_PADS; i++) {
         hr_pad_default(i);
         hr_std[i] = hr_pad[i];
@@ -146,11 +147,17 @@ static void settings_load(void)
         loop_click_defaults();
     if (n < (int)sizeof set || set.rec_filter > 15u || set.rec_ch > 16u)
         filter_defaults();
-    if (n < (int)SET_V2_LEN || set.dr_channel > 15u || set.dr_quant >= HR_GRIDS || set.dr_swing < 50u ||
-        set.dr_swing > HR_SWING_MAX) {
+    if (n < (int)SET_V2_LEN || set.dr_channel > 15u || set.dr_quant >= HR_GRIDS) {
         drums_defaults();
         mix_defaults();
         return;
+    }
+    {   /* the swing in clocks (one saved as a percentage, 50..75: those clocks at its quantize), at most its grid's */
+        uint32_t g = HR_GRID[set.dr_quant];
+        if (set.dr_swing >= 50u)
+            set.dr_swing = (uint8_t)((((uint32_t)set.dr_swing - 50u) * 2u * g + 50u) / 100u);
+        if (set.dr_swing > hr_swing_max(g))
+            set.dr_swing = (uint8_t)hr_swing_max(g);
     }
     if (hr_kit_same(set.dr_kit_tag)) {
         for (i = 0; i < HR_PADS; i++)
@@ -1177,8 +1184,10 @@ static void hd_service(void)
     (void)hd_import(&stage[0][0], hdrx.n, sq_scratch, &r);
     if (r.quant >= 0)
         set.dr_quant = (uint8_t)r.quant;
-    if (r.swing >= 0)
-        set.dr_swing = (uint8_t)r.swing;
+    if (r.swing >= 0)             /* (at most its quantize's: its 1/6 is our 1/8) */
+        set.dr_swing = (uint8_t)((uint32_t)r.swing > hr_swing_max(HR_GRID[set.dr_quant])
+                                     ? hr_swing_max(HR_GRID[set.dr_quant])
+                                     : (uint32_t)r.swing);
     if (r.prog >= 0)
         set.dr_prog = (uint8_t)r.prog;
     f = plat_lock();

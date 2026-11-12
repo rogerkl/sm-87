@@ -172,11 +172,32 @@ int hr_copy(uint32_t a, uint32_t b, uint8_t *scratch)
     return 0;
 }
 
-/* a pair of grid places' second one, from the pair's start: halfway at 50%, later swung */
-static uint32_t swung(uint32_t pair, uint32_t swing)
+uint32_t hr_swing_max(uint32_t grid)
 {
-    swing = swing < 50u ? 50u : swing > HR_SWING_MAX ? HR_SWING_MAX : swing;
-    return (pair * swing + 50u) / 100u;
+    switch (grid) {
+    case 64: return 24;           /* (1/6: the HR-16's; not one of ours) */
+    case 48: return 16;
+    case 32: return 12;
+    case 24: return 8;
+    case 16: return 6;
+    case 12: return 4;
+    case 8: return 2;
+    case 6: return 1;
+    default: return 0;
+    }
+}
+
+uint32_t hr_swing_pct10(uint32_t grid, uint32_t swing)
+{
+    uint32_t m = hr_swing_max(grid);
+    return grid > 1u ? 500u + (1000u * (swing < m ? swing : m) / grid + 1u) / 2u : 500u;
+}
+
+/* a pair of grid places' second one, from the pair's start: a grid on, the swing's clocks later */
+static uint32_t swung(uint32_t grid, uint32_t swing)
+{
+    uint32_t m = hr_swing_max(grid);
+    return grid + (swing < m ? swing : m);
 }
 
 uint32_t hr_quantize(uint32_t tick, uint32_t grid, uint32_t swing)
@@ -186,7 +207,7 @@ uint32_t hr_quantize(uint32_t tick, uint32_t grid, uint32_t swing)
         return tick;
     base = tick / pair * pair;
     r = tick - base;
-    sw = swung(pair, swing);
+    sw = swung(grid, swing);
     return base + (2u * r < sw ? 0u : 2u * r < sw + pair ? sw : pair);
 }
 
@@ -198,7 +219,7 @@ static uint32_t grid_next(uint32_t tick, uint32_t grid, uint32_t swing)
     if (grid <= 1u)
         return tick + 1u;
     base = tick / pair * pair;
-    sw = swung(pair, swing);
+    sw = swung(grid, swing);
     return base + sw > tick ? base + sw : base + pair;
 }
 
@@ -208,7 +229,7 @@ static uint32_t grid_prev(uint32_t tick, uint32_t grid, uint32_t swing)
     if (grid <= 1u)
         return tick - 1u;
     base = (tick - 1u) / pair * pair;
-    sw = swung(pair, swing);
+    sw = swung(grid, swing);
     return tick - 1u >= base + sw ? base + sw : base;
 }
 
@@ -291,7 +312,7 @@ int hr_offset(uint32_t p, uint32_t pad, int32_t clocks, uint8_t *scratch)
 }
 
 /* ------------------------------------------------------------------------------------------- the player --- */
-volatile hrp_t hrp = {.next = 0xFFu, .quant = 3u, .swing = 50u, .playing = 0xFFu};
+volatile hrp_t hrp = {.next = 0xFFu, .quant = 3u, .swing = 0u, .playing = 0xFFu};
 
 static uint32_t cur;              /* the next hit to play, an offset in the pattern playing */
 static uint8_t cur_p = 0xFFu;     /* the pattern it is in (0xFF: none played yet) */

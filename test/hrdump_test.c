@@ -56,7 +56,8 @@ static void setup(void)
     }
 }
 
-static const hd_settings_t SET = {3, 54, 9, 120, 0};   /* 1/16, 54%, channel 10, 120 BPM, program change off */
+/* 1/16, swing 2 clocks (54.2%), channel 10, 120 BPM, program change off */
+static const hd_settings_t SET = {3, 2, 9, 120, 0};
 
 static uint8_t *take(uint32_t *max)
 {
@@ -136,7 +137,7 @@ static void test_export(void)
               img[0xCE] == 42u && img[0xD0] == 46u && img[0xD8] == 51u && img[0xD9] == 49u && img[0xE6] == 1u,
           "a header made up: the manual's two bytes, channel %u, the notes %u %u %u", img[0xC8], img[0xCC], img[0xCE],
           img[0xD9]);
-    CHECK(img[0x2D8] == 120u && img[0x2D5] == 4u && img[0x2D9] == 24u && img[0x2DA] == 4u,
+    CHECK(img[0x2D8] == 120u && img[0x2D5] == 2u && img[0x2D9] == 24u && img[0x2DA] == 4u,
           "tempo %u, swing %u, quantize %u clocks (%u)", img[0x2D8], img[0x2D5], img[0x2D9], img[0x2DA]);
     CHECK(img[0x200] == 0x86u && img[0x201] == 0x00u && img[0x202] == 0 && img[0x203] == 0 && img[0x20A] == 0x86u &&
               img[0x20B] == 0x3Cu,
@@ -191,7 +192,7 @@ static void test_round_trip(void)
     CHECK(len == (uint32_t)n && !memcmp(rxbuf, img, len), "through the receiver: %u of %d bytes", len, n);
     hit(9, 0, 3, 50);             /* (gone as it comes in) */
     CHECK(hd_import(rxbuf, len, scratch, &r) == 0 && r.patterns == 3u && !r.lost && !r.songs && r.quant == 3 &&
-              r.swing == 54,
+              r.swing == 2,
           "taken in: %u patterns, %u lost, %u songs, quantize %d, swing %d", r.patterns, r.lost, r.songs, r.quant,
           r.swing);
     CHECK(hr_hits(0) == 4u && hr_beats(0) == 2u && hr_beats(5) == 3u && hr_hits(42) == 1u && hr_beats(42) == 8u &&
@@ -290,7 +291,7 @@ static void test_document(void)
     m[at] = 3, m[at + 2] = 0xFF;
     at += 3;
     CHECK(hd_import(m, at, scratch, &r) == 0 && r.patterns == 2u && !r.lost && r.songs == 1u && r.quant == 1 &&
-              r.swing == 57,
+              r.swing == 7,
           "taken in: %u patterns, %u songs not, quantize %d (1/6: 1/8), swing %d", r.patterns, r.songs, r.quant,
           r.swing);
     CHECK(hr_beats(2) == 8u && !hr_hits(2) && hr_sounds_own(2) && !sq.pattern[3].beats && !hr_sounds_own(3) &&

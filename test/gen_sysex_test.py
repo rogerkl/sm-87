@@ -452,7 +452,7 @@ def hr16_test():
         "expect patown12 1",
         "expect patown5 0",
         "expect drquant 3",
-        "expect drswing 56",
+        "expect drswing 6",
         "expect drch 10",
         "expect unsaved 1",
         "# pattern 00's first hits: the kick, the crash (pad 5), the mid hat (pad 7), each dynamics as a velocity",
@@ -508,7 +508,7 @@ def hr16_test():
         "expect drbeats0 2",
         "expect drhits0 7",
         "expect patown3 1",
-        "expect drswing 56",
+        "expect drswing 6",
         "expect drprog 1",
     ]
     (ROOT / "app" / "tests" / "hr16.txt").write_text("\n".join(lines) + "\n")

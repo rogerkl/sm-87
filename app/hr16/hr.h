@@ -9,7 +9,8 @@
  *     it replaces the firmware's), or any of the sampler's 16 slots. They are the sampler's format (12-bit words,
  *     packed, at one of its rates) and play on its voices (s700/s7.h s7_drum_start), without its filter;
  *   - 100 patterns of up to 682 beats, in the sequencer's memory (mmt8/seq.h): recorded as they loop, each hit
- *     quantized (1/4 .. 1/64, or off) and swung (50 .. 75%) as it goes in, the HR-16's way;
+ *     quantized (1/4 .. 1/64, or off) and swung (the HR-16's clocks late, as its quantize allows) as it goes in,
+ *     the HR-16's way;
  *   - no songs of its own: a step of an MMT-8 song chooses the pattern that plays with it.
  *
  * The kit grows by a longer list: a pad keeps its sound by number, so new sounds go at the list's end. */
@@ -24,7 +25,6 @@
 #define HR_TUNE_MAX 24            /* semitones either way */
 #define HR_PAN_MAX 3              /* the HR-16's seven places: <3 .. <> .. 3> */
 #define HR_NAME 6u                /* a sound's or a pad's name, at most */
-#define HR_SWING_MAX 75u
 
 typedef struct {
     uint8_t sound;                /* the kit's 0..n-1, then the sampler's slots (n + 0..15); HR_NO_SOUND: none */
@@ -130,7 +130,12 @@ int hr_copy(uint32_t a, uint32_t b, uint8_t *scratch);
  * kept (a's hits past its end not copied), a hit pb has at a clock taking the copied one's velocity; pb keeps its
  * sound. 0, SQ_E_NONE (pa has no hits there), SQ_E_ROOM */
 int hr_copy_pad(uint32_t a, uint32_t pa, uint32_t b, uint32_t pb, uint8_t *scratch);
-/* where a hit played at tick goes: the nearest place on the grid (clocks), every second one swung (50..75%) */
+/* the HR-16's swing: the clocks every second step of the grid comes late, 0 .. hr_swing_max(grid) (its manual's
+ * table: 1/8 16, 1/12 12, 1/16 8, 1/24 6, 1/32 4, 1/48 2, 1/64 1; 1/4 and off none); as a percentage, tenths (the
+ * second step's place in the pair: 500 none, 667 at 1/16's 8) */
+uint32_t hr_swing_max(uint32_t grid);
+uint32_t hr_swing_pct10(uint32_t grid, uint32_t swing);
+/* where a hit played at tick goes: the nearest place on the grid (clocks), every second one swung (that late) */
 uint32_t hr_quantize(uint32_t tick, uint32_t grid, uint32_t swing);
 /* STEP EDIT (the HR-16's): the places it stops at, each step of the grid (swung) and each hit; after the pattern's
  * end round to its start (and back). The hits at a place: how many, the first's index */
@@ -152,7 +157,7 @@ typedef struct {
     uint8_t next;                 /* queued for the pattern's end, 0xFF none */
     uint8_t mute;                 /* not with the sequencer's parts */
     uint8_t rec;                  /* record: hits played go into its own pattern while it loops */
-    uint8_t quant, swing;         /* the recording's: HR_GRID's index, % */
+    uint8_t quant, swing;         /* the recording's: HR_GRID's index, clocks (hr_swing_max) */
     uint8_t playing;              /* the pattern sounding (a song step's, or its own), 0xFF none */
     uint16_t tick;                /* its own loop's next clock */
     uint16_t at;                  /* the clock playing (shown) */
