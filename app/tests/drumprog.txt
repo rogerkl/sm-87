@@ -1,0 +1,132 @@
+# A program change on the drums' channel chooses their pattern, as the HR-16's MIDI PROGRAM CHANGE: off until the
+# drum page's PROGRAM CHANGE turns it on. Stopped: at once. Two parts of 8 beats (the drums' default), each with a
+# program change recorded on its downbeat: played, part 00's chooses pattern 03 from the top, and part 01's, queued
+# after it, 07 on its first beat (the drums starting over with it), not a pattern later. One added with EDIT, as the
+# manual says, does the same. Kept with SAVE.
+# 120 BPM: a beat is 500 ms.
+wait 600
+# off: not taken
+midi C9 05
+wait 30
+expect drprog 0
+expect drpat 0
+# the drum page's PROGRAM CHANGE (ALGO 8): K1 on
+tap ARP
+wait 30
+turn ALGO 8
+wait 30
+expect drfn 8
+turn K1 1
+wait 30
+expect drprog 1
+shot drumprog.png
+# stopped: pattern 05 at once
+midi C9 05
+wait 30
+expect drpat 5
+tap ARP
+wait 30
+expect drfn 0
+# part 00: a first take, program 3 in the count-in's last sixteenth (on beat 1), stopped after 8 beats
+tap SEQ
+wait 30
+expect part 0
+tap REC
+wait 30
+expect armed 1
+tap PLAY
+wait 1840
+midi C9 03
+wait 30
+expect drpat 3
+wait 4050
+tap PLAY
+wait 30
+expect seq 0
+expect beats 8
+# part 01: the same with program 7
+turn PRESET 1
+wait 30
+expect part 1
+tap REC
+wait 30
+expect armed 1
+tap PLAY
+wait 1840
+midi C9 07
+wait 4080
+tap PLAY
+wait 30
+expect beats 8
+# played: pattern 05 chosen, part 00's program change makes it 03 at its first clock
+midi C9 05
+wait 30
+expect drpat 5
+turn PRESET -1
+wait 30
+expect part 0
+tap PLAY
+wait 100
+expect drpat 3
+# part 01 queued: on its downbeat the drums start over with 07 (their 8 beats with its 8), none left queued
+turn PRESET 1
+wait 3600
+expect part 0
+expect drpat 3
+wait 300
+expect part 1
+expect drpat 7
+expect drnext -1
+tap PLAY
+wait 30
+expect seq 0
+# part 02: LENGTH 8, then EDIT on track 2: END OF TRACK, K2 to PROG, REC; K2 the program (4), K4 its channel (10)
+turn PRESET 1
+wait 30
+expect part 2
+turn ALGO 1
+wait 30
+expect fn 1
+turn K1 8
+tap REC
+wait 30
+expect beats 8
+turn ALGO 8
+wait 30
+expect fn 9
+key w1 down
+wait 40
+key w1 up
+wait 40
+turn K2 1
+tap REC
+wait 30
+turn K2 4
+turn K4 9
+tap SEQ
+wait 30
+expect fn 0
+tap PLAY
+wait 100
+expect drpat 4
+tap PLAY
+wait 30
+# stopped, and off: not taken
+tap ARP
+wait 30
+turn ALGO 8
+wait 30
+turn K1 -1
+wait 30
+expect drprog 0
+midi C9 02
+wait 30
+expect drpat 4
+# on again, kept
+turn K1 1
+wait 30
+tap SAVE
+wait 300
+reboot
+wait 600
+expect drprog 1

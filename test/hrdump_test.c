@@ -56,7 +56,7 @@ static void setup(void)
     }
 }
 
-static const hd_settings_t SET = {3, 54, 9, 120};   /* 1/16, 54%, channel 10, 120 BPM */
+static const hd_settings_t SET = {3, 54, 9, 120, 0};   /* 1/16, 54%, channel 10, 120 BPM, program change off */
 
 static uint8_t *take(uint32_t *max)
 {
@@ -210,6 +210,15 @@ static void test_round_trip(void)
               pads[5].tune == -3 && pads[8].sound == HR_NO_SOUND,
           "their own sounds: the snare %u tune %d pan %d level %u; the ride's tune %d", pads[1].sound, pads[1].tune,
           pads[1].pan, pads[1].level, pads[5].tune);
+    CHECK(img[0xDD] == 0u && r.prog == 0, "program change off: in its header %u, taken %d", img[0xDD], r.prog);
+    {   /* on: in the HR-16's header kept too, and taken from it */
+        hd_settings_t on = SET;
+        hd_report_t r2;
+        on.prog = 1;
+        n2 = hd_export(img2, HD_MAX, &on);
+        CHECK(n2 == n && img2[0xDD] == 1u && hd_import(img2, (uint32_t)n2, scratch, &r2) == 0 && r2.prog == 1,
+              "program change on: in its header %u, taken %d", img2[0xDD], r2.prog);
+    }
     n2 = hd_export(img2, HD_MAX, &SET);
     CHECK(n2 == n && !memcmp(img, img2, (size_t)n), "sent again: the same, %d bytes (%d)", n2, n);
     {   /* cut short inside pattern 42 (the last): the two before taken, it told as lost on the way */

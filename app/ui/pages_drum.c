@@ -7,8 +7,9 @@
  * quantize rate, recorded too); PLAY plays the drums alone, SEL + PLAY continues.
  * ALGO turns to its functions: STEP EDIT (below), LENGTH, ERASE (a pad's hits, or the pattern), COPY (appended to
  * another), OFFSET (a pad's hits or all moved by clocks, -99..99, round at the ends), PAD SOUND, PAD MIDI (its note,
- * group, voices; the drums' channel; REC: the pad as the kit has it, SEL: all of them), MIDI DUMP (the patterns out as
- * an HR-16's SysEx dump, hr16/hrdump.h; one coming in is taken any time), each done with REC. A pad key on a pad's
+ * group, voices; the drums' channel; REC: the pad as the kit has it, SEL: all of them), PROGRAM CHANGE (K1: a program
+ * change on the drums' channel chooses the pattern, or not; hr16/hr.h hrp_program), MIDI DUMP (the patterns out as an
+ * HR-16's SysEx dump, hr16/hrdump.h; one coming in is taken any time), each done with REC. A pad key on a pad's
  * function chooses it. Part of the unity build (app.c, after ui/pages_seq.c).
  *
  * PAD SOUND: a pad's sound, tuning, level, pan, as the pattern playing (stopped: chosen) has them, the HR-16's VOICE,
@@ -23,9 +24,9 @@
  * the hit shown a clock (SEL: a step), K2 its velocity, K3 its pad, K4 the grid; REC erases it. PLAY leaves it and
  * plays from the top, as the HR-16. */
 
-enum { DF_PLAY, DF_STEP, DF_LENGTH, DF_ERASE, DF_COPY, DF_OFFSET, DF_SOUND, DF_MIDI, DF_DUMP, DF_N };
-static const char *const DF_TXT[DF_N] = {"",     "STEP EDIT", "LENGTH",    "ERASE",   "COPY",
-                                         "OFFSET", "PAD SOUND", "PAD MIDI", "MIDI DUMP"};
+enum { DF_PLAY, DF_STEP, DF_LENGTH, DF_ERASE, DF_COPY, DF_OFFSET, DF_SOUND, DF_MIDI, DF_PROG, DF_DUMP, DF_N };
+static const char *const DF_TXT[DF_N] = {"",          "STEP EDIT", "LENGTH",         "ERASE",    "COPY", "OFFSET",
+                                         "PAD SOUND", "PAD MIDI",  "PROGRAM CHANGE", "MIDI DUMP"};
 #define DF_HAS_PAD(fn) ((fn) == DF_SOUND || (fn) == DF_MIDI || (fn) == DF_ERASE || (fn) == DF_OFFSET)
 
 static struct {
@@ -343,6 +344,12 @@ static void dr_turn(uint32_t enc, int32_t e, uint32_t btn)
         set_dirty = 1;
         break;
     }
+    case DF_PROG:                 /* K1: on or off (at once; SAVE keeps it) */
+        if (enc == EN_K1 && (uint32_t)clamp((int32_t)set.dr_prog + e, 0, 1) != set.dr_prog) {
+            set.dr_prog = (uint8_t)!set.dr_prog;
+            set_dirty = 1;
+        }
+        break;
     default:
         break;
     }
@@ -672,6 +679,11 @@ static void dr_draw(int sel_held)
         str_cat(t, pd->poly > 1u ? " V2 CH" : " V1 CH");
         fmt_uint(n, set.dr_channel + 1u, 2, '0');
         str_cat(t, n);
+        lcd_row(1, t);
+        return;
+    case DF_PROG:                 /* "PROGRAM CHANGE" / "PATT SELECT  OFF", as the HR-16's */
+        lcd_row(0, "PROGRAM CHANGE");
+        ed_lr(t, "PATT SELECT", set.dr_prog ? "ON" : "OFF");
         lcd_row(1, t);
         return;
     case DF_DUMP:                 /* "MIDI DUMP  HR-16" / "REC SENDS ALL" */

@@ -173,4 +173,10 @@ void hrp_step_in(uint32_t pad, uint32_t vel);
 /* FILL (the HR-16's): a pad pressed (on) with hrp.fill set, or let go: while the clock runs it repeats on each step
  * of the quantize grid (off: 1/32) after the one it was played on, at its first velocity; recorded when recording */
 void hrp_fill_pad(uint32_t pad, uint32_t vel, int on);
+/* a program change on the drums' channel, as the HR-16's MIDI PROGRAM CHANGE (the app's switch: on): program 0..99
+ * the pattern, 100..127 patterns 00..27. As PRESET on the drum page: stopped, chosen at once; playing, queued for the
+ * pattern's end (one that comes as the pattern starts over: at once, so a part's program change on its first clock
+ * changes the drums on that downbeat). Not while recording (the HR-16: no other pattern), nor while a song plays (its
+ * steps choose) */
+void hrp_program(uint32_t prog);
 void hr_emit(uint32_t pad, uint32_t vel);   /* the app's: a pattern's hit (the pad, and MIDI out) */

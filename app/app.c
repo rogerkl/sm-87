@@ -45,7 +45,9 @@ typedef struct {
     uint8_t drum_level;           /* the drums' bus, 0..99 */
     uint8_t s7_poly;              /* the sampler's voices, S7_POLY_STD (6, the S700's) .. S7_VOICES (0, before it was
                                    * kept: 6) */
-    uint8_t rsv2[2];
+    uint8_t dr_prog;              /* a program change on the drums' channel chooses their pattern (the HR-16's MIDI
+                                   * PROGRAM CHANGE; off, as its default) */
+    uint8_t rsv2[1];
 } settings_t;
 #define SET_V1_LEN 12u            /* (to the drums') */
 #define SET_V2_LEN offsetof(settings_t, mix_level)   /* (to the mix) */
@@ -86,6 +88,7 @@ static void settings_defaults(void)
     set.clock_out_off = 0;
     set.s7_mode = S7_OMNI_OFF;
     set.s7_poly = S7_POLY_STD;
+    set.dr_prog = 0;
     drums_defaults();
     mix_defaults();
 }
@@ -103,6 +106,8 @@ static void settings_load(void)
     }
     if (set.s7_poly < S7_POLY_STD || set.s7_poly > S7_VOICES)
         set.s7_poly = S7_POLY_STD;
+    if (set.dr_prog > 1u)
+        set.dr_prog = 0;
     if (n < (int)SET_V2_LEN || set.dr_channel > 15u || set.dr_quant >= HR_GRIDS || set.dr_swing < 50u ||
         set.dr_swing > HR_SWING_MAX) {
         drums_defaults();
@@ -237,6 +242,8 @@ static void hr_message(uint32_t st, uint32_t d1, uint32_t d2)
         hr_note(d1, d2);
     else if ((st & 0xF0u) == 0xB0u && d1 == 120u)
         hr_kill();
+    else if ((st & 0xF0u) == 0xC0u && set.dr_prog)
+        hrp_program(d1);          /* (the sequencer's, MIDI in's: a part's track can choose the drums) */
 }
 
 /* ------------------------------------------------------------------------------------------ the routing --- */
@@ -895,6 +902,7 @@ static void hd_send(void)
     s.swing = set.dr_swing;
     s.channel = set.dr_channel;
     s.tempo = sqp.tempo;
+    s.prog = set.dr_prog;
     if (dump_hold())
         dump_go(HD_PRE, HD_PREFIX, hd_export(&stage[0][0], HD_MAX, &s), "HR-16");
 }
@@ -1128,6 +1136,8 @@ static void hd_service(void)
         set.dr_quant = (uint8_t)r.quant;
     if (r.swing >= 0)
         set.dr_swing = (uint8_t)r.swing;
+    if (r.prog >= 0)
+        set.dr_prog = (uint8_t)r.prog;
     f = plat_lock();
     hrp.quant = set.dr_quant;
     hrp.swing = set.dr_swing;
@@ -1811,6 +1821,8 @@ int app_expect(const char *what, int *got)
         *got = (int)s7_program_of((uint32_t)atoi(what + 6) - 1u) + 1;
     else if (!strcmp(what, "drpat"))        /* the drums: their own pattern */
         *got = hrp.pattern;
+    else if (!strcmp(what, "drprog"))       /* program change chooses the drums' pattern: 1 on */
+        *got = set.dr_prog;
     else if (!strcmp(what, "drnext"))       /* the one queued (-1 none) */
         *got = hrp.next == 0xFFu ? -1 : hrp.next;
     else if (!strcmp(what, "drplaying"))    /* the pattern sounding (a song step's), -1 none */

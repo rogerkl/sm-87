@@ -422,7 +422,7 @@ def hr16_test():
         40: (3, voices, [(130, 9, 4), (287, 10, 7)]),
     }
     notes = [35, 38, 42, 44, 46, 39, 60, 61, 50, 48, 45, 41, 51, 49, 62, 63]
-    keep = {0x10: 0x11, 0x50: 0x22, 0xC8: 9, 0xC9: 1, 0xCA: 1, 0xCB: 37, 0xE6: 1, 0x120: 0x33, 0x2C8: 0x44,
+    keep = {0x10: 0x11, 0x50: 0x22, 0xC8: 9, 0xC9: 1, 0xCA: 1, 0xCB: 37, 0xDD: 1, 0xE6: 1, 0x120: 0x33, 0x2C8: 0x44,
             0x2D5: 6, 0x2D8: 112, 0x2D9: 24, 0x2DA: 4, 0x3D3: 0x55}
     keep.update({0xCC + d: n for d, n in enumerate(notes)})
     keep.update({0xE7 + i: c for i, c in enumerate(b" 1.07")})
@@ -439,6 +439,7 @@ def hr16_test():
         "sysex " + hx(dump),
         "wait 200",
         "expect hr16hdr 1",
+        "expect drprog 1",
         "expect drbeats0 2",
         "expect drhits0 7",
         "expect drbeats3 1",
@@ -478,9 +479,9 @@ def hr16_test():
         "wait 1300",
         "shot hr16_in.png",
         "# MIDI DUMP (the drum page's last function): REC sends them back, byte for byte the dump that came",
-        "turn ALGO 8",
+        "turn ALGO 9",
         "wait 30",
-        "expect drfn 8",
+        "expect drfn 9",
         "wait 1300",
         "shot hr16_dump.png",
         "sysex_out",
@@ -508,6 +509,7 @@ def hr16_test():
         "expect drhits0 7",
         "expect patown3 1",
         "expect drswing 56",
+        "expect drprog 1",
     ]
     (ROOT / "app" / "tests" / "hr16.txt").write_text("\n".join(lines) + "\n")
 

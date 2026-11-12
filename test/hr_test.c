@@ -612,6 +612,53 @@ static void test_bank_kit(void)
     hr_kit_use(KIT, 3, KIT_PAD, 4);   /* (the others' kit again) */
 }
 
+/* a program change on the drums' channel (the app's switch on): stopped, the pattern at once (100-127: 00-27);
+ * playing, queued for the pattern's end, or at once as it starts over; not while recording, nor in a song */
+static void test_program(void)
+{
+    sq_clear();
+    sqp_init(FS);
+    hrp.pattern = 0;
+    hrp.next = 0xFF;
+    hrp.rec = 0;
+    hrp_program(5);
+    CHECK(hrp.pattern == 5u && hrp.next == 0xFFu, "stopped: 05 at once (%u, %u)", hrp.pattern, hrp.next);
+    hrp_program(112);
+    CHECK(hrp.pattern == 12u, "program 112: pattern 12 (%u)", hrp.pattern);
+    hrp_program(3);
+    sqp_aux_play(0);              /* the drums alone, pattern 03: 8 beats */
+    hrp_program(7);
+    CHECK(hrp.pattern == 7u && hrp.next == 0xFFu, "from the top, before its first clock: 07 at once (%u, %u)",
+          hrp.pattern, hrp.next);
+    ticks(100);
+    hrp_program(9);
+    CHECK(hrp.pattern == 7u && hrp.next == 9u, "playing: 09 queued (%u, %u)", hrp.pattern, hrp.next);
+    hrp_program(7);
+    CHECK(hrp.next == 0xFFu, "the one playing again: the queue cleared (%u)", hrp.next);
+    hrp_program(9);
+    ticks(8u * SQ_PPQN - 101u);   /* to its last clock */
+    CHECK(hrp.pattern == 7u, "its last clock: still 07 (%u)", hrp.pattern);
+    ticks(1);
+    CHECK(hrp.pattern == 9u && hrp.next == 0xFFu, "its end: 09 (%u, %u)", hrp.pattern, hrp.next);
+    ticks(8u * SQ_PPQN);          /* round once: at its first clock again, before it plays */
+    CHECK(hrp.tick == 0u, "at its start (%u)", hrp.tick);
+    hrp_program(4);
+    CHECK(hrp.pattern == 4u && hrp.next == 0xFFu, "as it starts over: 04 at once (%u, %u)", hrp.pattern, hrp.next);
+    ticks(10);
+    hrp.rec = 1;
+    hrp_program(6);
+    CHECK(hrp.pattern == 4u && hrp.next == 0xFFu, "recording: not taken (%u, %u)", hrp.pattern, hrp.next);
+    hrp.rec = 0;
+    sqp_stop();
+    sqp.song_mode = 1;
+    sqp.state = SQP_PLAYING;      /* (a song playing) */
+    hrp_program(6);
+    CHECK(hrp.pattern == 4u && hrp.next == 0xFFu, "a song playing: not taken (%u, %u)", hrp.pattern, hrp.next);
+    sqp.state = SQP_STOPPED;
+    sqp.song_mode = 0;
+    hrp.pattern = 0;
+}
+
 int main(void)
 {
     test_patterns();
@@ -619,6 +666,7 @@ int main(void)
     test_record();
     test_step();
     test_offset_fill();
+    test_program();
     test_voices();
     test_sounds();
     test_bank_kit();

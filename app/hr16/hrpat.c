@@ -447,6 +447,23 @@ void hrp_fill_pad(uint32_t pad, uint32_t vel, int on)
     fill_mask |= (uint16_t)(1u << pad);
 }
 
+void hrp_program(uint32_t prog)
+{
+    uint32_t v = prog & 0x7Fu, running = sqp.aux || sqp.state != SQP_STOPPED, at_start;
+    v = v >= SQ_PATTERNS ? v - SQ_PATTERNS : v;
+    if (song_playing() || (running && hrp.rec))
+        return;
+    /* the drums' own loop about to start over (this clock's tracks come before its drums: sqp_on_tick): from the
+     * top (the tick is made 0 there), on from a beat (made the beat's), or at the end of a round */
+    at_start = sqp.started == 1u || (sqp.started == 2u ? hrp.tick < SQ_PPQN : hrp.tick == 0u);
+    if (!running || at_start) {
+        hrp.pattern = (uint8_t)v;
+        hrp.next = 0xFFu;
+    } else {
+        hrp.next = v == hrp.pattern ? 0xFFu : (uint8_t)v;
+    }
+}
+
 void hrp_step_in(uint32_t pad, uint32_t vel)
 {
     if (pad < HR_PADS && vel)

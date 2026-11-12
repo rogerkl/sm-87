@@ -93,7 +93,8 @@ sampler's dumps, as many as the file holds.
   - The HR-16's memory dump over USB, both ways: an HR-16's dump replaces the drum patterns, and ours goes out in the
     same format, also when an HR-16's request for one comes.
   - With the MMT-8: one clock and tempo. A song step chooses the drum pattern that plays with it (or none). Playing
-    a part, the drums loop their own pattern beside it. On their own page they play alone.
+    a part, the drums loop their own pattern beside it; with PROGRAM CHANGE on, a program change in the part
+    chooses it. On their own page they play alone.
 - **The screen** is a 2 × 16 character LCD, drawn dot by dot, with a status strip under it.
 
 ---
@@ -210,6 +211,7 @@ when the drums play alone, or beside a part; it doesn't record in a song.
 | OFFSET | Clocks, -99..99 (384ths; SEL: tens) | A pad, or all (a pad's key chooses it) | | | Moves the hits that much later (+) or earlier; past the end round to the start, and back. Again: as much again |
 | PAD SOUND | The sound: the kit's, then SLOT01-16 | Tuning, ±24 | Level | Pan, <3 .. 3> | Keeps the pads' sounds with the pattern; SEL + REC: lets them go (the global set-up again) |
 | PAD MIDI | Its note | Its group (pads that cut each other) | Voices, 1 or 2 | The drums' channel | The pad as the kit sets it (sound and MIDI); SEL + REC: all of them |
+| PROGRAM CHANGE | `PATT SELECT` ON or OFF: a program change on the drums' channel chooses the pattern (below) | | | | |
 | MIDI DUMP | | | | | Sends the drum patterns as an HR-16's SysEx dump, over USB (below) |
 
 On a pad's function, a pad's key chooses it (and plays it); so does SELECT.
@@ -229,6 +231,22 @@ level and pan. PAD SOUND's top line says whose the pads have:
 - **A pad's MIDI** (note, group, voices) is the same in every pattern.
 - Each pattern's sounds take 64 bytes of the sequencer's memory. They keep a kit sound by its number and a slot as
   the slot, so a kit grown later leaves them as they were. A memory saved before this loads with none.
+
+**Program change** (the HR-16's MIDI PROGRAM CHANGE) lets a part choose its drums. It's off until PROGRAM CHANGE
+says `PATT SELECT  ON`, as on the HR-16, and is kept in the settings (SAVE).
+- **Program 0-99 chooses pattern 00-99**, and 100-127 patterns 00-27, as on the HR-16. It comes on the drums'
+  channel (10), from a track of a part playing or from MIDI in.
+- **It works as PRESET does:** stopped, the pattern changes at once; playing, it's queued for the end of the one
+  playing (the HR-16's NEXT). One that comes just as the drums start over takes over at once: a program change on a
+  part's first clock changes the drums on that downbeat, when the part and the pattern start together (their
+  lengths fit, or PLAY started both).
+- **Ignored while the drums record** (the HR-16 doesn't change pattern while recording) and **while a song plays**,
+  whose steps choose the drums.
+- **To give a part its drums:** put a program change on channel 10 at its first beat. Play one into a take in the
+  count-in's last sixteenth (it lands on beat 1), or add it with EDIT: a track's key, SELECT to END OF TRACK, K2 to
+  `ADD PROG` (K1 leaves it at `001.00`), REC; then on the event K2 sets the program and K4 its channel, 10. A track
+  whose channel is set plays everything on that channel, so use a track left UNCHANGED, or one set to 10.
+- In OMNI ON the sampler hears every channel, so a program change on 10 changes its program too, as on an S700.
 
 **STEP EDIT** is the HR-16's step mode. `STEP 001 + 24/96` is beat 1, clock 24 of 96, and below it is the hit there
 (`CLHAT  V 40 2/2`: the closed hat at velocity 40, the second of two hits), or EMPTY.
@@ -254,7 +272,8 @@ level and pan. PAD SOUND's top line says whose the pads have:
 - **What doesn't:**
   - Its songs: SM-87's drums follow the MMT-8's songs. When the dump has any, the LCD says `SONGS NOT TAKEN`.
   - Its MIDI settings and tempo. The drums keep SM-87's notes and channel, so the MMT-8's tracks still play them.
-    Those bytes are kept, though, and go back out in ours.
+    Those bytes are kept, though, and go back out in ours. Its PROGRAM CHANGE switch is the exception: it comes
+    across, and ours goes out in its place.
 - **Its drums on the pads**, by role:
 
   | Pads 1-6 | Pads 7-8 | Pads 9-12 | Pads 13-16 |

@@ -58,6 +58,8 @@ typedef struct {
     uint16_t songs;               /* its songs with steps: not taken */
     int8_t quant;                 /* its quantize as HR_GRID's index (1/6: 1/8), -1 not one */
     int8_t swing;                 /* %, 50..74; -1 not one */
+    int8_t prog;                  /* its MIDI PROGRAM CHANGE (patterns chosen by program change): 1 on, 0 off, -1 not
+                                   * one */
 } hd_report_t;
 
 /* an unpacked dump (len bytes from the header) into the drum patterns, replacing all of them (the MMT-8's parts and
@@ -71,6 +73,7 @@ typedef struct {
     uint8_t quant, swing;         /* the recording's: HR_GRID's index, % */
     uint8_t channel;              /* the drums', 0..15 (a header made up) */
     uint16_t tempo;               /* BPM (a header made up) */
+    uint8_t prog;                 /* MIDI PROGRAM CHANGE on (the header's, made up or the HR-16's) */
 } hd_settings_t;
 /* the drum patterns as an HR-16 dump's memory (unpacked) into img: its length, or -1 when it doesn't fit max (an
  * HR-16's memory: HD_MAX) */

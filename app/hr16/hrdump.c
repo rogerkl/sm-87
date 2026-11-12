@@ -215,7 +215,7 @@ int hd_import(const uint8_t *img, uint32_t len, uint8_t *scratch, hd_report_t *r
     uint32_t p, s, d, i, short_;
     r->patterns = r->lost = r->songs = 0;
     r->first_lost = -1;
-    r->quant = r->swing = -1;
+    r->quant = r->swing = r->prog = -1;
     r->cut = r->bad = r->full = 0;
     r->got = len;
     r->want = 0;
@@ -290,6 +290,8 @@ int hd_import(const uint8_t *img, uint32_t len, uint8_t *scratch, hd_report_t *r
         r->quant = (int8_t)Q_GRID[img[0x2DAu]];
     if (img[0x2D5u] <= 24u)
         r->swing = (int8_t)(50u + img[0x2D5u]);
+    if (img[0xDDu] <= 1u)
+        r->prog = (int8_t)img[0xDDu];
     return 0;
 }
 
@@ -317,7 +319,6 @@ static void header_made_up(uint8_t *img, const hd_settings_t *st)
     img[0xC9] = img[0xCA] = 1;    /* drum triggers in and out */
     for (i = 0; i < HD_DRUMS; i++)
         img[0xCCu + i] = hr_std[HD_PAD[i]].note & 0x7Fu;
-    img[0xDD] = 1;                /* program change selects a pattern */
     img[0xDF] = img[0xE0] = 1;    /* clock out, auto start */
     img[0xE4] = 5;                /* pad dynamics */
     img[0xE6] = 1;                /* SysEx on */
@@ -339,6 +340,7 @@ int32_t hd_export(uint8_t *img, uint32_t max, const hd_settings_t *st)
             img[i] = sq.hr16[i];
     else
         header_made_up(img, st);
+    img[0xDD] = st->prog ? 1u : 0u;   /* MIDI PROGRAM CHANGE: patterns chosen by program change */
     for (i = 0; i < 2u * SQ_PATTERNS; i++)
         img[0x200u + i] = 0;
     for (i = 0; i < 200u; i++)
