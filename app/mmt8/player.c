@@ -302,6 +302,85 @@ void sqp_continue(void)
     }
 }
 
+/* a song's step's beats (an empty part: none) */
+static uint32_t step_beats(uint32_t step) { return sq_part_ticks(step_part(step, 0)) / SQ_PPQN; }
+
+int32_t sqp_locate(int32_t steps, int32_t beats)
+{
+    uint32_t playing = sqp.state == SQP_PLAYING, n, pos;
+    int32_t moved = 0;
+    if (sqp.state == SQP_COUNTIN || sqp.take_state == SQP_TAKE_RUNNING || sqp.aux)
+        return 0;
+    if (sqp.song_mode) {
+        int32_t step = sqp.step, b = (int32_t)(sqp.tick / SQ_PPQN), last;
+        n = sq_song_steps(sqp.song);
+        if (!n)
+            return 0;
+        if (steps) {              /* to a step's start: round with the song's LOOP, else held at the first and last */
+            step += steps;
+            step = sqp.loop_song ? (step % (int32_t)n + (int32_t)n) % (int32_t)n
+                                 : step < 0 ? 0 : step >= (int32_t)n ? (int32_t)n - 1 : step;
+            b = 0;
+        }
+        for (; beats > 0; beats--) {   /* by beats, over the steps' ends (an empty part's step: none to stop on) */
+            if (b + 1 < (int32_t)step_beats((uint32_t)step))
+                b++;
+            else if (step + 1 < (int32_t)n || sqp.loop_song)
+                step = step + 1 < (int32_t)n ? step + 1 : 0, b = 0;
+            else
+                break;
+        }
+        for (; beats < 0; beats++) {
+            if (b > 0) {
+                b--;
+                continue;
+            }
+            if (step == 0 && !sqp.loop_song)
+                break;
+            step = step ? step - 1 : (int32_t)n - 1;
+            last = (int32_t)step_beats((uint32_t)step) - 1;
+            b = last > 0 ? last : 0;
+        }
+        sqp.step = (uint8_t)step;
+        load_step();
+        sqp.tick = (uint32_t)b * SQ_PPQN;
+        if (playing)
+            tp_place();           /* (stopped: CONTINUE places them) */
+    } else {
+        int32_t at = (int32_t)(sqp.tick / SQ_PPQN), want = at + beats, to;
+        n = sq.part[sqp.part].beats;
+        if (!n)
+            return 0;             /* (an empty part: no beats to go to) */
+        to = sqp.loop_part ? (want % (int32_t)n + (int32_t)n) % (int32_t)n
+                           : want < 0 ? 0 : want >= (int32_t)n ? (int32_t)n - 1 : want;
+        moved = (sqp.loop_part ? want : to) * (int32_t)SQ_PPQN - (int32_t)sqp.tick;   /* (round: on in time) */
+        sqp.tick = (uint32_t)to * SQ_PPQN;
+    }
+    if (playing) {                /* on from the beat reached at once, the notes sounding cut (the MMT-8's FF/RW) */
+        sqp_all_notes_off();
+        sqp_resync();
+        if (sqp.clock_out) {      /* what follows our clock: stopped, the song position, on again */
+            pos = sqp.tick / 24u;
+            sqp_midi_rt(0xFC);
+            sqp_emit(0xF2, pos & 0x7Fu, pos >> 7 & 0x7Fu);
+            sqp_midi_rt(0xFB);
+        }
+    } else {
+        sqp_resync();
+    }
+    return moved;
+}
+
+void sqp_to_step(uint32_t step)
+{
+    if (!sqp.song_mode || sqp.state != SQP_STOPPED || step >= sq_song_steps(sqp.song))
+        return;
+    sqp.step = (uint8_t)step;
+    load_step();
+    sqp.tick = 0;
+    sqp_resync();
+}
+
 void sqp_aux_play(int cont)
 {
     if (running())

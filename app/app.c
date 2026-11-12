@@ -1384,7 +1384,47 @@ static void track_key(uint32_t t, uint32_t btn)
 }
 
 /* the sequencer's encoders */
-static void seq_turn(uint32_t enc, int32_t e)
+/* SELECT on the SEQ page: the place, as the MMT-8's FF/RW. A part by beats (SEL: by four); a song by steps (stopped:
+ * the step shown and edited, up to its END, and SEL + PLAY plays from its start), SEL by beats over them. Not while
+ * recording, nor following MIDI clock (its song position sets the place) */
+static void seq_locate(int32_t e, int sel)
+{
+    uint32_t f, n = sq_song_steps(sqp.song);
+    int32_t moved;
+    if (sqp.song_mode && sqp.state == SQP_STOPPED && !sel) {
+        int32_t st = (int32_t)seq_song_step + e;
+        seq_song_step = (uint32_t)(st < 0 ? 0 : st > (int32_t)n ? (int32_t)n : st);
+        f = plat_lock();
+        sqp_to_step(seq_song_step);
+        plat_unlock(f);
+        return;
+    }
+    if (sqp.state == SQP_COUNTIN || sqp.take_state == SQP_TAKE_RUNNING || hrp_recording()) {
+        app_say("RECORDING", "STOP FIRST");
+        return;
+    }
+    if (sqp.clock_in) {
+        app_say("CLOCK: MIDI", "IT SETS THE BEAT");
+        return;
+    }
+    if (!sqp.song_mode && !sq.part[sqp.part].beats) {
+        app_say("EMPTY PART", "NO BEATS YET");
+        return;
+    }
+    f = plat_lock();
+    if (sqp.song_mode) {
+        (void)sqp_locate(sel ? 0 : e, sel ? e : 0);
+    } else {
+        moved = sqp_locate(0, e * (sel ? 4 : 1));
+        if (moved)
+            hrp_shift(moved);     /* (the drums' own loop: as far, so they stay with the part) */
+    }
+    plat_unlock(f);
+    if (sqp.song_mode && sqp.state == SQP_STOPPED)
+        seq_song_step = sqp.step;
+}
+
+static void seq_turn(uint32_t enc, int32_t e, uint32_t btn)
 {
     uint32_t f;
     if (enc == EN_PRESET && !sqp.song_mode && sqp.state != SQP_STOPPED && !sq.part[sqp.part].beats &&
@@ -1422,9 +1462,8 @@ static void seq_turn(uint32_t enc, int32_t e)
         int32_t c = (int32_t)sq.part[sqp.part].chan[sqp.rec_track] + e;
         sq.part[sqp.part].chan[sqp.rec_track] = (uint8_t)(c < 0 ? 0 : c > 16 ? 16 : c);
         sq_dirty = 1;
-    } else if (sqp.song_mode && sqp.state == SQP_STOPPED && enc == EN_SELECT) {   /* the step to edit */
-        int32_t st = (int32_t)seq_song_step + e, n = (int32_t)sq_song_steps(sqp.song);
-        seq_song_step = (uint32_t)(st < 0 ? 0 : st > n ? n : st);
+    } else if (enc == EN_SELECT) {           /* the place (a song stopped: the step to edit too) */
+        seq_locate(e, (int)(btn >> B_SEL & 1u));
     } else if (sqp.song_mode && sqp.state == SQP_STOPPED && enc == EN_K3) {       /* the step's part; past 99: END */
         uint32_t n = sq_song_steps(sqp.song);
         uint8_t part = 100, mask = sqp.mask;
@@ -1592,7 +1631,7 @@ static void input(void)
             } else if (ed.fn && k != EN_PRESET) {
                 ed_turn(k, e, btn);
             } else {
-                seq_turn(k, e);
+                seq_turn(k, e, btn);
                 if (ed.fn)
                     ed_load();               /* another part (or song) */
             }
@@ -1745,6 +1784,12 @@ void app_frame(void)
     int32_t cursor = -1;
     hrp.step = (uint8_t)(ui.page == PG_DRUM && dr.fn == DF_STEP);   /* (the pads go to its place) */
     input();
+    {   /* a song stopped (PLAY, or its end): the step shown is where it stopped, and SEL + PLAY goes on from there */
+        static uint8_t song_ran;
+        if (song_ran && sqp.state == SQP_STOPPED && sqp.song_mode)
+            seq_song_step = sqp.step;
+        song_ran = (uint8_t)(sqp.state != SQP_STOPPED && sqp.song_mode);
+    }
     s700_midi_service();
     md_service();
     take_service();
@@ -1847,6 +1892,10 @@ int app_expect(const char *what, int *got)
         *got = (int)s7_keys_channel() + 1;
     else if (!strncmp(what, "progof", 6))   /* progofN: the program channel N plays, 1..32 */
         *got = (int)s7_program_of((uint32_t)atoi(what + 6) - 1u) + 1;
+    else if (!strcmp(what, "drbeat"))       /* the drums' own loop: the beat it is at (from 1) */
+        *got = hrp.tick / SQ_PPQN + 1;
+    else if (!strcmp(what, "seqstep"))      /* the song's step playing, or to go on from (from 1) */
+        *got = sqp.step + 1;
     else if (!strcmp(what, "drpat"))        /* the drums: their own pattern */
         *got = hrp.pattern;
     else if (!strcmp(what, "loop"))         /* LOOP: 0 off, 1 parts, 2 all */

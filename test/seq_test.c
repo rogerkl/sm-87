@@ -820,6 +820,112 @@ static void test_loop_click(void)
     sqp_init(FS);
 }
 
+/* the place moved (the MMT-8's FF/RW): a part by beats, stopped (CONTINUE from there) and playing (on at once from
+ * the beat, the clocks moved in time back), round its ends with its LOOP, held without; not in a count-in; a song by
+ * steps and by beats over the steps' ends */
+static void first_on(uint32_t *key)
+{
+    uint32_t i;
+    *key = 0;
+    for (i = 0; i < n_out; i++)
+        if ((out[i].st & 0xF0u) == 0x90u) {
+            *key = out[i].d1;
+            return;
+        }
+}
+
+static void test_locate(void)
+{
+    sq_raw_t t[8];
+    uint32_t i, key;
+    int32_t moved;
+    sq_clear();
+    for (i = 0; i < 4u; i++) {    /* part 00: 4 beats, C4 C#4 D4 D#4 on them; part 01: 2 beats, E4 F4 */
+        raw(&t[2 * i], 96u * i, 0x90, 60 + i, 100);
+        raw(&t[2 * i + 1], 96u * i + 10u, 0x80, 60 + i, 0);
+    }
+    sq_commit(0, 0, t, 8, 4, scratch);
+    for (i = 0; i < 2u; i++) {
+        raw(&t[2 * i], 96u * i, 0x90, 64 + i, 100);
+        raw(&t[2 * i + 1], 96u * i + 10u, 0x80, 64 + i, 0);
+    }
+    sq_commit(1, 0, t, 4, 2, scratch);
+    sqp_init(FS);
+    sqp_select_part(0);
+    moved = sqp_locate(0, 2);
+    CHECK(sqp.tick == 192u && moved == 192, "stopped: beat 3 (tick %u, moved %d)", (unsigned)sqp.tick, moved);
+    n_out = 0;
+    sqp_continue();
+    run(frames_for_ticks(5.0f));
+    first_on(&key);
+    CHECK(key == 62u, "CONTINUE: from beat 3 (%u)", key);
+    sqp_stop();
+    n_out = 0;
+    sqp_play();
+    run(frames_for_ticks(5.0f));    /* C4 sounding */
+    n_out = 0;
+    moved = sqp_locate(0, 1);
+    CHECK(n_out >= 2u && out[0].st == 0x80u && out[0].d1 == 60u && out[1].st == 0xF2u && out[1].d1 == 4u,
+          "playing: the note sounding off, the song position out (16th 4)");
+    run(frames_for_ticks(5.0f));
+    first_on(&key);
+    CHECK(sqp.state == SQP_PLAYING && moved == 91 && key == 61u, "on at once from beat 2 (moved %d, key %u)", moved,
+          key);
+    moved = sqp_locate(0, 3);       /* past the end: round, as LOOP has it */
+    CHECK(sqp.tick == 0u && moved == 3 * 96 - 5, "round its end: beat 1 (tick %u), on in time %d", (unsigned)sqp.tick,
+          moved);
+    moved = sqp_locate(0, -1);
+    CHECK(sqp.tick == 288u, "back round: beat 4 (tick %u)", (unsigned)sqp.tick);
+    sqp.loop_part = 0;
+    moved = sqp_locate(0, 2);
+    CHECK(sqp.tick == 288u && moved == 0, "LOOP off: held at the last beat (tick %u, %d)", (unsigned)sqp.tick, moved);
+    moved = sqp_locate(0, -9);
+    CHECK(sqp.tick == 0u, "and at the first (tick %u)", (unsigned)sqp.tick);
+    sqp.loop_part = 1;
+    sqp_stop();
+    sqp.rec_armed = 1;
+    sqp.rec_track = 1;
+    sqp_play();
+    moved = sqp_locate(0, 1);
+    CHECK(sqp.state == SQP_COUNTIN && moved == 0 && sqp.tick == 0u, "in a count-in: not moved");
+    sqp_stop();
+    sqp.take_state = SQP_TAKE_NONE;
+    sqp.rec_armed = 0;
+    /* a song: part 00, then part 01 */
+    sq_song_set(4, 0, 0, 0xFF, scratch);
+    sq_song_set(4, 1, 1, 0xFF, scratch);
+    sq.song[4].tempo = 120;
+    sqp.song_mode = 1;
+    sqp_select_song(4);
+    (void)sqp_locate(1, 0);
+    CHECK(sqp.step == 1u && sqp.part == 1u && sqp.tick == 0u, "stopped: step 2 (%u, part %u)", sqp.step, sqp.part);
+    (void)sqp_locate(0, -1);
+    CHECK(sqp.step == 0u && sqp.tick == 288u, "a beat back: step 1's last (%u, tick %u)", sqp.step,
+          (unsigned)sqp.tick);
+    (void)sqp_locate(0, 2);
+    CHECK(sqp.step == 1u && sqp.tick == 96u, "two on: step 2's second (%u, tick %u)", sqp.step, (unsigned)sqp.tick);
+    (void)sqp_locate(1, 0);
+    CHECK(sqp.step == 1u && sqp.tick == 0u, "a step on from the last, LOOP off: its start (%u)", sqp.step);
+    sqp.loop_song = 1;
+    (void)sqp_locate(1, 0);
+    CHECK(sqp.step == 0u, "LOOP on: round to the first (%u)", sqp.step);
+    sqp.loop_song = 0;
+    sqp_to_step(1);
+    CHECK(sqp.step == 1u && sqp.tick == 0u, "to step 2's start (%u)", sqp.step);
+    n_out = 0;
+    sqp_play();                   /* from the top; then a step on, playing */
+    run(frames_for_ticks(20.0f));
+    n_out = 0;
+    (void)sqp_locate(1, 0);
+    run(frames_for_ticks(5.0f));
+    first_on(&key);
+    CHECK(sqp.state == SQP_PLAYING && sqp.step == 1u && key == 64u, "playing: step 2 at once (%u, key %u)", sqp.step,
+          key);
+    sqp_stop();
+    sqp.song_mode = 0;
+    sqp_init(FS);
+}
+
 int main(void)
 {
     test_arena();
@@ -833,6 +939,7 @@ int main(void)
     test_queue_and_song();
     test_song_offsets();
     test_loop_click();
+    test_locate();
     test_image_versions();
     test_clock_in();
     printf("seq: %d checks, %d failed\n", checks, fails);

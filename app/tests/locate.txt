@@ -1,0 +1,109 @@
+# SELECT on the SEQ page moves the place, as the MMT-8's FF/RW: a part by beats (SEL: by four), round its ends with
+# LOOP; stopped, SEL + PLAY plays from there; playing, on at once from the beat, the drums' own loop moved as far. A
+# song by steps (stopped: the step shown, and SEL + PLAY from its start), SEL by beats over the steps. Not in a
+# count-in. 120 BPM: a beat is 500 ms.
+wait 600
+tap SEQ
+wait 30
+# part 00: LENGTH 8
+turn ALGO 1
+wait 30
+turn K1 8
+tap REC
+wait 30
+expect beats 8
+tap SEQ
+wait 30
+expect fn 0
+# stopped: two beats on, then SEL + SELECT four more: beat 7
+turn SELECT 2
+wait 30
+expect beat 3
+press SEL
+turn SELECT 1
+release SEL
+wait 30
+expect beat 7
+wait 1300
+shot locate.png
+# round its end (LOOP PARTS): two on is beat 1, one back beat 8
+turn SELECT 2
+wait 30
+expect beat 1
+turn SELECT -1
+wait 30
+expect beat 8
+expect drbeat 8
+# SEL + PLAY: on from beat 8, the drums (8 beats, as the part) with it
+press SEL
+tap PLAY
+release SEL
+wait 100
+expect seq 2
+expect beat 8
+expect drbeat 8
+# playing: four back (SEL), on at once, the drums with it
+press SEL
+turn SELECT -1
+release SEL
+wait 100
+expect seq 2
+expect beat 4
+expect drbeat 4
+tap PLAY
+wait 30
+expect seq 0
+# not in a count-in
+tap REC
+wait 30
+tap PLAY
+wait 100
+expect seq 1
+turn SELECT 1
+wait 30
+expect seq 1
+expect beat 0
+tap PLAY
+wait 30
+expect seq 0
+# a song: part 00 twice (at the END K3 appends the last part)
+tap SEQ
+wait 30
+expect songmode 1
+turn K3 1
+wait 30
+turn SELECT 1
+turn K3 1
+wait 30
+expect steps 2
+# stopped: SELECT the step shown, and where SEL + PLAY goes on from
+turn SELECT -1
+wait 30
+expect songstep 1
+expect seqstep 1
+turn SELECT 1
+wait 30
+expect songstep 2
+expect seqstep 2
+press SEL
+tap PLAY
+release SEL
+wait 100
+expect seq 2
+expect seqstep 2
+expect beat 1
+# playing: a step back at once, then SEL + SELECT a beat on
+turn SELECT -1
+wait 30
+expect seqstep 1
+expect beat 1
+press SEL
+turn SELECT 1
+release SEL
+wait 30
+expect beat 2
+# stopped: the step shown is where it stopped
+tap PLAY
+wait 30
+expect seq 0
+expect songstep 1

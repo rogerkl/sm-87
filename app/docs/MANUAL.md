@@ -107,7 +107,7 @@ sampler's dumps, as many as the file holds.
 |---|---|
 | Keys | Play the sampler on its channel (and out over USB); OCT- / OCT+ shift them |
 | SEQ | The sequencer's page; again (stopped): PART ↔ SONG |
-| PLAY | Play from the top / stop; SEL + PLAY continues from the beat |
+| PLAY | Play from the top / stop; SEL + PLAY continues from the beat (where it stopped, or where SELECT put it) |
 | REC | Arm recording on the part's lowest empty track (or the one chosen with REC + its key); again: disarm; while a take runs: punch out |
 | SEL + first 8 white keys | Track mutes (on the SEQ page; in a song: the step's mutes); the 9th: the drums on or muted |
 | REC + first 8 white keys | The record track |
@@ -115,7 +115,8 @@ sampler's dumps, as many as the file holds.
 | K1 / K2 (SEQ) | Tempo / the record track's channel (UNCHANGED, 1-16) |
 | K4 (SEQ) | The drum pattern that plays with the parts; in a song (stopped): the step's drum pattern, or none (the step's row shows it: `P05 12345678 D07`, `D--` none) |
 | ALGO (SEQ) | The MMT-8's functions, below; SEQ goes back to the part or song |
-| SELECT / K3 (SONG, stopped) | The step / its part (at the END: appends the last part; past 99: the song ends there) |
+| SELECT (SEQ) | The place, as the MMT-8's fast-forward and rewind (below): a part by beats (SEL: by four); a song by steps (SEL: by beats) |
+| SELECT / K3 (SONG, stopped) | The step, shown and edited, and where SEL + PLAY goes on from / its part (at the END: appends the last part; past 99: the song ends there) |
 | ARP | The drum machine's page (below); from one of its functions: back to the pattern |
 | EDIT | The sampler's pages round: POINTS (START, END), LOOP (LOOP, MODE), TUNE (ROOT, FINE, RATE), KEYS (LO, HI, TRANSPOSE, CONSTANT), CLEAR (REC empties the slot) |
 | ENV | OUT (FILTER, RELEASE, LEVEL), then the velocity amounts |
@@ -139,6 +140,21 @@ has the same for its patterns):
   LOOP is ALL).
 - **LOOP** beside the number playing: LOOP/CLICK's setting, `PARTS`, `ALL` or `OFF`. It's lit when what plays goes
   round (a part with `PARTS` or `ALL`; in a song, `ALL`), and dim when it doesn't (`OFF`; `PARTS` in a song).
+
+**SELECT moves the place**, as the MMT-8's fast-forward, rewind and auto-locate:
+- **In a part,** each detent is a beat, or with SEL held four. The LCD's `BT` shows where, and the bar along the foot
+  of the screen too. At the part's ends it goes round while LOOP lets parts go round (`PARTS`, `ALL`), and stops on
+  the first or last beat with LOOP `OFF`.
+- **Stopped,** SEL + PLAY plays from there; PLAY still plays from the top.
+- **Playing,** the part goes on at once from the start of the beat reached. Notes sounding stop, as on the MMT-8.
+- **The drums** beside the part move as far, so they stay with it.
+- **In a song,** SELECT goes by steps, to a step's start, and SEL + SELECT by beats across the steps. Stopped, the
+  step SELECT shows is the one K3, K4 and the track keys edit, and SEL + PLAY plays from its start. When a song
+  stops, the step shown is where it stopped. At the song's ends it goes round with LOOP `ALL`.
+- **Not while recording,** a count-in included (`RECORDING`, `STOP FIRST`), and not while following MIDI clock, whose
+  song position sets the place.
+- **MIDI clock out:** a jump while playing sends a stop, the song position and a continue, so whatever follows the
+  clock goes there too.
 
 ### MIDI modes (GLO)
 

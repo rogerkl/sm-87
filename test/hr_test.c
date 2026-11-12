@@ -657,6 +657,12 @@ static void test_program(void)
     sqp.state = SQP_STOPPED;
     sqp.song_mode = 0;
     hrp.pattern = 0;
+    /* the sequencer's part located: its own loop moved as far, round its ends (8 beats: 768 clocks) */
+    hrp.tick = 100;
+    hrp_shift(-200);
+    CHECK(hrp.tick == 668u, "moved back round its start: %u", hrp.tick);
+    hrp_shift(200);
+    CHECK(hrp.tick == 100u, "and on again: %u", hrp.tick);
 }
 
 int main(void)

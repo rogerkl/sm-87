@@ -159,6 +159,7 @@ typedef struct {
 extern volatile hrp_t hrp;
 void hrp_tick(void);              /* a tick of the clock (sqp_on_tick) */
 void hrp_resync(void);            /* the patterns changed (sq_unlock) */
+void hrp_shift(int32_t ticks);    /* its own loop moved that many clocks (the sequencer's part located: sqp_locate) */
 int hrp_recording(void);          /* hits played go in now */
 void hrp_record(uint32_t pad, uint32_t vel);   /* a pad played (on the drum channel): into the pattern, if recording */
 /* what the recording did, for the main loop to put in the pattern (hrp_take, then hr_add or hr_remove); in STEP

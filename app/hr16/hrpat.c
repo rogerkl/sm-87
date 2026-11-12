@@ -312,6 +312,13 @@ int hrp_take(hr_rec_t *r)
 
 void hrp_resync(void) { moved = 1; }
 
+void hrp_shift(int32_t ticks)
+{
+    int32_t len = (int32_t)(hr_beats(hrp.pattern) * SQ_PPQN), t = ((int32_t)hrp.tick + ticks) % len;
+    hrp.tick = (uint16_t)(t < 0 ? t + len : t);
+    moved = 1;
+}
+
 static int skipped(uint32_t pad)
 {
     uint32_t i = 0;
