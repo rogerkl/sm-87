@@ -170,6 +170,7 @@ void sqp_select_part(uint32_t p)
         return;
     if (sqp.state == SQP_STOPPED) {
         sqp.part = (uint8_t)p;
+        sqp.next_part = 0xFFu;
         sqp.tick = 0;
         sqp_resync();
     } else {
@@ -253,6 +254,7 @@ void sqp_stop(void)
     }
     if (sqp.state == SQP_STOPPED)
         return;
+    sqp.next_part = 0xFFu;        /* (a part queued goes with it: stopped, PRESET chooses at once) */
     if (sqp.take_state == SQP_TAKE_RUNNING) {
         uint32_t beats = sq.part[sqp.take_part].beats;
         if (!beats)               /* a first take: its length, to the nearest beat */
@@ -459,6 +461,8 @@ static void do_tick(void)
     ticks = sq_part_ticks(sqp.part);
     if (!ticks && sqp.song_mode)
         part_end();               /* an empty part in a song: nothing to play, on to the next step */
+    else if (!ticks && sqp.next_part != 0xFFu && sqp.take_state != SQP_TAKE_RUNNING && sqp.tick % SQ_PPQN == 0u)
+        part_end();               /* an empty part has no end: one chosen after it starts on the next beat */
     else if (!ticks && sqp.tick >= SQ_MAX_BEATS * SQ_PPQN)
         sqp_stop();               /* a first take as long as a part can be */
     else if (ticks && sqp.tick >= ticks)

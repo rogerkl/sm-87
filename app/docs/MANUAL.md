@@ -69,7 +69,9 @@ sampler's dumps, as many as the file holds.
     starts after a bar's count-in.
   - Track mutes, saved per song step.
   - A part chosen while playing starts at the end of the current one. The LCD shows it queued (`PART 00>01 B004`),
-    and under the strip the part playing and the next show large, with the beats to go until the change.
+    and under the strip the part playing and the next show large, with the beats to go until the change. An empty
+    part has no end: played, its beats count on, and a part chosen meanwhile starts on the next beat. STOP clears a
+    part queued.
   - Per-track MIDI channel, or UNCHANGED.
   - MIDI echo to the record track's channel.
   - MIDI clock and song position out, and MIDI clock in: the sequencer can follow another's clock and transport.
@@ -127,7 +129,8 @@ has the same for its patterns):
 
 - **PLAYING** (stopped: **PART**) and **NEXT**. Turning PRESET while a part plays queues the next part; NEXT shows it
   at once, lit, with the beats to go (`IN 3 BEATS`), and the bar along the foot fills up to the change. Turning
-  back to the part playing clears it. With none queued, NEXT is the same part, dim: it `PLAYS AGAIN`.
+  back to the part playing clears it. With none queued, NEXT is the same part, dim: it `PLAYS AGAIN`. An empty part
+  playing has no end, so NEXT says a part chosen `STARTS NEXT BEAT`, and counts down to that beat.
 - **In a song:** the step and its part, then the next step and its part (`THE SONG ENDS` after the last, unless the
   song loops).
 
@@ -288,8 +291,9 @@ pads. So an MMT-8 track on channel 10 plays them too.
    another; it stays chosen until you change part.
 3. PLAY: four clicks of count-in (`COUNT IN 4` .. `1`), then it records from beat 1. Notes in the count-in aren't
    recorded, except one played in its last sixteenth, which lands on beat 1.
-4. PLAY (or REC) to stop. On an empty part this sets its length, to the nearest beat. Later takes stop at the
-   part's end. The LCD says `RECORDED TRACK 1`, or `NOTHING RECORDED` when nothing was played after the count-in.
+4. PLAY (or REC) to stop. On an empty part this sets its length, to the nearest beat (until then PRESET waits: the
+   LCD says `FIRST TAKE`, `STOP SETS LENGTH`). Later takes stop at the part's end. The LCD says `RECORDED TRACK 1`,
+   or `NOTHING RECORDED` when nothing was played after the count-in.
 5. PLAY plays it back. Another REC arms the next empty track, so takes don't record over each other unless you
    choose a recorded track yourself (like tape, that replaces it).
 6. SAVE (lit while something isn't saved) keeps it in the flash. Without it, the part is gone after a power cycle

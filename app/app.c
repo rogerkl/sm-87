@@ -1239,8 +1239,10 @@ static void transport_button(uint32_t k, uint32_t btn)
     const char *say = 0;
     uint32_t f = plat_lock();
     if (k == B_PLAY) {
-        if (sqp.state != SQP_STOPPED || sqp.aux)
-            sqp_stop();
+        if (sqp.state != SQP_STOPPED || sqp.aux) {
+            sqp_stop();           /* (a part queued goes; a drum pattern queued too) */
+            hrp.next = 0xFFu;
+        }
         else if (ui.page == PG_DRUM) {      /* the drums alone (SEL: on from their beat); STEP EDIT left */
             if (dr.fn == DF_STEP)
                 dr.fn = DF_PLAY;
@@ -1308,6 +1310,11 @@ static void track_key(uint32_t t, uint32_t btn)
 static void seq_turn(uint32_t enc, int32_t e)
 {
     uint32_t f;
+    if (enc == EN_PRESET && !sqp.song_mode && sqp.state != SQP_STOPPED && !sq.part[sqp.part].beats &&
+        (sqp.take_state == SQP_TAKE_RUNNING || sqp.rec_armed)) {
+        app_say("FIRST TAKE", "STOP SETS LENGTH");   /* (an empty part's first take: open-ended until stopped) */
+        return;
+    }
     if (enc == EN_PRESET) {                  /* the part (queued while playing), or the song */
         int32_t v = (int32_t)(sqp.song_mode ? sqp.song : sqp.next_part != 0xFFu ? sqp.next_part : sqp.part) + e;
         v = v < 0 ? 0 : v > 99 ? 99 : v;

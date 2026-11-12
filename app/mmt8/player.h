@@ -56,8 +56,9 @@ void sqp_continue(void);
 void sqp_aux_play(int cont);      /* the clock for the drums alone, the sequencer stopped (MIDI start or continue out);
                                    * sqp_stop stops it */
 void sqp_punch(void);             /* REC while a take runs: it ends (a first take: with the transport, as stop) */
-void sqp_select_part(uint32_t p); /* at once when stopped, at the part's end while playing (the one playing: the
-                                   * queue cleared) */
+void sqp_select_part(uint32_t p); /* at once when stopped, at the part's end while playing (an empty part, with no
+                                   * end and no first take running: on the next beat; the one playing: the queue
+                                   * cleared). Stopping clears the queue */
 void sqp_select_song(uint32_t s);
 void sqp_resync(void);            /* the tracks changed: each track's place found again */
 void sqp_all_notes_off(void);

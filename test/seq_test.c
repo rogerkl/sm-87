@@ -395,6 +395,38 @@ static void test_record_edges(void)
           "nothing played into an empty part: nothing kept, said");
 }
 
+/* an empty part has no end: one chosen while it plays starts on the next beat (not at an end that never comes); a
+ * part queued goes when the sequencer stops */
+static void test_empty_part(void)
+{
+    sq_raw_t t[2];
+    sq_clear();
+    raw(&t[0], 0, 0x90, 60, 100);
+    raw(&t[1], 10, 0x80, 60, 0);
+    sq_commit(0, 0, t, 2, 1, scratch);     /* part 00: a beat; part 01 empty */
+    sqp_init(FS);
+    sqp.part = 1;
+    sqp_play();
+    run(frames_for_ticks(330.0f));
+    CHECK(sqp.state == SQP_PLAYING && sqp.part == 1u && sqp.tick >= 300u, "the empty part plays on: tick %u",
+          (unsigned)sqp.tick);
+    sqp_select_part(0);
+    CHECK(sqp.next_part == 0u, "part 00 queued");
+    run(frames_for_ticks(40.0f));       /* tick 370: before the beat at 384 */
+    CHECK(sqp.part == 1u, "not before the beat: part %u at tick %u", sqp.part, (unsigned)sqp.tick);
+    run(frames_for_ticks(20.0f));       /* past it */
+    CHECK(sqp.part == 0u && sqp.next_part == 0xFFu && sqp.tick < 20u, "on the next beat: part %u, tick %u", sqp.part,
+          (unsigned)sqp.tick);
+    sqp_select_part(1);                 /* back to the empty part: at part 00's end, then nothing more */
+    run(frames_for_ticks(120.0f));
+    CHECK(sqp.part == 1u && sqp.state == SQP_PLAYING, "into the empty part at part 00's end: part %u", sqp.part);
+    sqp_select_part(0);
+    sqp_stop();
+    CHECK(sqp.next_part == 0xFFu && sqp.part == 1u, "stopped: the queue gone, the part as it was (%u)", sqp.part);
+    sqp_select_part(0);
+    CHECK(sqp.part == 0u && sqp.next_part == 0xFFu, "stopped: chosen at once");
+}
+
 static void test_queue_and_song(void)
 {
     sq_raw_t t[2];
@@ -709,6 +741,7 @@ int main(void)
     test_play();
     test_record();
     test_record_edges();
+    test_empty_part();
     test_queue_and_song();
     test_song_offsets();
     test_image_versions();

@@ -1,0 +1,44 @@
+# An empty part has no end: played, its beats count on, and a part chosen meanwhile starts on the next beat. Stopping
+# clears a part queued. A first take on an empty part runs until stopped (that sets its length): PRESET waits.
+# 120 BPM: a beat is 500 ms.
+wait 600
+tap SEQ
+wait 30
+expect part 0
+expect beats 0
+# PLAY on the empty part 00 (not armed): on past where a part would end
+tap PLAY
+wait 2700
+expect seq 2
+expect part 0
+# PRESET to part 01 (empty too): queued, and on the next beat it plays
+turn PRESET 1
+expect nextpart 1
+wait 520
+expect part 1
+expect nextpart -1
+# again from the top: part 02 queued in the first beat, then stopped before the second: the queue goes
+tap PLAY
+tap PLAY
+wait 100
+turn PRESET 1
+expect nextpart 2
+tap PLAY
+wait 30
+expect seq 0
+expect nextpart -1
+expect part 1
+# a first take on the empty part 01: REC, PLAY, the count-in (4 beats), then PRESET: not queued, said
+tap REC
+expect armed 1
+tap PLAY
+wait 2500
+expect take 1
+turn PRESET 1
+expect nextpart -1
+expect part 1
+wait 400
+expect part 1
+tap PLAY
+wait 30
+expect seq 0

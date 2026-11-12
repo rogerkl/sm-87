@@ -367,6 +367,8 @@ static void seq_panel(void)
             next = sqp.next_part;
             next_c = C_HI;
             queued = 1;
+        } else if (playing && !sq.part[sqp.part].beats) {   /* an empty part: no end, beats counted */
+            next_under = "STARTS NEXT BEAT";
         } else if (playing) {             /* none: it goes round again */
             next = sqp.part;
             next_under = "PLAYS AGAIN";
@@ -376,7 +378,10 @@ static void seq_panel(void)
     }
     panel_col(8, a, now, C_HI, 0, now < SQ_PARTS ? part_name(na, now) : 0);
     panel_col(128, b, next, next_c, queued, next_under ? next_under : next < SQ_PARTS ? part_name(nb, next) : 0);
-    panel_progress(tick, now < SQ_PARTS ? sq_part_ticks(now) : 0u, playing && next < SQ_PARTS, queued);
+    if (!sqp.song_mode && playing && now < SQ_PARTS && !sq_part_ticks(now))   /* an empty part: to the next beat */
+        panel_progress(tick % SQ_PPQN, queued ? SQ_PPQN : 0u, queued, queued);
+    else
+        panel_progress(tick, now < SQ_PARTS ? sq_part_ticks(now) : 0u, playing && next < SQ_PARTS, queued);
     panel_end();
 }
 
