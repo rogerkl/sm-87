@@ -2,8 +2,8 @@
  * Copyright (C) 2026 Roger Klaveness */
 /* SM-87: the MMT-8's functions on the panel (its manual, 4-16: documentation/manuals.md). On the sequencer's page ALGO
  * turns from the part (or song) playing through them, as the MMT-8's buttons: LENGTH, ERASE, COPY, MERGE, QUANTIZE,
- * TRANSPOSE, MIDI CHANNEL, NAME and EDIT (in SONG: ERASE, COPY, QUANTIZE, NAME, EDIT), then CLOCK (its own or MIDI's)
- * and MIDI DUMP (the memory out, as an MMT-8's SysEx dump). The first eight white keys are the
+ * TRANSPOSE, MIDI CHANNEL, NAME and EDIT (in SONG: ERASE, COPY, QUANTIZE, NAME, EDIT), then CLOCK (its own or MIDI's),
+ * LOOP/CLICK (the MMT-8's LOOP button and CLICK pages) and MIDI DUMP (the memory out, as an MMT-8's SysEx dump). The first eight white keys are the
  * track buttons, K1..K4 the function's values (the MMT-8's +/- and page buttons), REC does it (RECORD, with the
  * function held). SEQ goes back to the part playing. Part of the unity build (app.c, after ui/pages_seq.c).
  *
@@ -11,18 +11,48 @@
  * away; COPY and MERGE take a track from (lit) and a track to (flashing); nothing happens until REC, and LENGTH,
  * ERASE, COPY, MERGE, QUANTIZE and TRANSPOSE wait for the sequencer to stop. */
 
-enum { F_PLAY, F_LENGTH, F_ERASE, F_COPY, F_MERGE, F_QUANT, F_TRANSP, F_CHAN, F_NAME, F_EDIT, F_CLOCK, F_DUMP, F_N };
+enum {
+    F_PLAY,
+    F_LENGTH,
+    F_ERASE,
+    F_COPY,
+    F_MERGE,
+    F_QUANT,
+    F_TRANSP,
+    F_CHAN,
+    F_NAME,
+    F_EDIT,
+    F_CLOCK,
+    F_LOOP,
+    F_DUMP,
+    F_N
+};
 #define F_IN_SONG                                                                                                     \
     (1u << F_PLAY | 1u << F_ERASE | 1u << F_COPY | 1u << F_QUANT | 1u << F_NAME | 1u << F_EDIT | 1u << F_CLOCK |      \
-     1u << F_DUMP)
+     1u << F_LOOP | 1u << F_DUMP)
 static const char *const F_TXT[F_N] = {"",          "LENGTH",       "ERASE", "COPY", "MERGE", "QUANTIZE", "TRANSPOSE",
-                                       "MIDI CHANNEL", "NAME",      "EDIT",  "CLOCK", "MIDI DUMP"};
+                                       "MIDI CHANNEL", "NAME",      "EDIT",  "CLOCK", "LOOP/CLICK", "MIDI DUMP"};
 
 static const char *const FILTER_TXT[SQ_F_CHAN] = {"ALL EVENTS",  "NOTES ONLY",      "PITCH BEND",
                                                   "CONTROLLERS", "PROGRAM CHANGES", "AFTER TOUCH"};
 static const uint8_t GRID[10] = {192, 96, 64, 48, 32, 24, 16, 12, 8, 6};   /* 1/2 .. 1/64, in clocks */
 static const char *const GRID_TXT[10] = {"1/2", "1/4", "1/6", "1/8", "1/12", "1/16", "1/24", "1/32", "1/48", "1/64"};
 static const char *const QMODE_TXT[4] = {"NOTE START", "START & END", "NOTE END", "KEEP DURATION"};
+static const char *const CLICK_WHEN_TXT[4] = {"OFF", "REC", "PLAY", "BOTH"};   /* (bit 0 recording, bit 1 playing) */
+static const char *const LOOP_TXT[LOOP_N] = {"LOOP OFF", "LOOP PARTS", "LOOP ALL"};
+
+/* the settings' LOOP and CLICK into the sequencer (the click's value: the quantize's grid, 1/2 .. 1/64) */
+static void loop_click_apply(void)
+{
+    uint32_t f = plat_lock();
+    sqp.loop_part = (uint8_t)(set.loop != LOOP_OFF);
+    sqp.loop_song = (uint8_t)(set.loop == LOOP_ALL);
+    sqp.countin_beats = set.countin;
+    sqp.click_grid = GRID[set.click_q % CLICK_QS];
+    sqp.click_rec = (uint8_t)(set.click_when & 1u);
+    sqp.click_play = (uint8_t)(set.click_when >> 1 & 1u);
+    plat_unlock(f);
+}
 static const char NAME_CHARS[] = " ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-+/&.#'!?";
 static const uint8_t ADD_ST[5] = {0x90, 0xC0, 0xB0, 0xE0, 0xD0};   /* EDIT: what REC adds at the end */
 static const char *const ADD_TXT[5] = {"NOTE", "PROG", "CTRL", "BEND", "TOUCH"};
@@ -347,6 +377,20 @@ static void ed_turn(uint32_t enc, int32_t d, uint32_t btn)
             ed_turn_step(enc, d);
         else
             ed_turn_event(enc, d, sel);
+        break;
+    case F_LOOP:                  /* K1 LOOP, K2 the count-in, K3 the click's value, K4 when it clicks; at once */
+        if (enc == EN_K1)
+            set.loop = (uint8_t)ed_clamp((int32_t)set.loop + d, LOOP_OFF, LOOP_ALL);
+        else if (enc == EN_K2)
+            set.countin = (uint8_t)ed_clamp((int32_t)set.countin + d, 0, 99);
+        else if (enc == EN_K3)
+            set.click_q = (uint8_t)ed_clamp((int32_t)set.click_q + d, 0, (int32_t)CLICK_QS - 1);
+        else if (enc == EN_K4)
+            set.click_when = (uint8_t)ed_clamp((int32_t)set.click_when + d, 0, 3);
+        else
+            break;
+        loop_click_apply();
+        set_dirty = 1;
         break;
     case F_CLOCK:                 /* K1 the clock in (its own, MIDI's), K2 the clock out; at once, kept with SAVE */
         if (enc == EN_K1 && (uint32_t)(d > 0) != sqp.clock_in) {
@@ -781,6 +825,14 @@ static void ed_draw(void)
         }
         ed_lr(a, "CLOCK", x);
         ed_lr(b, sqp.clock_in ? "IN MIDI" : "IN INTERNAL", sqp.clock_out ? "OUT ON" : "OUT OFF");
+        break;
+    case F_LOOP:                  /* "LOOP PARTS  IN 4" (OFF, ALL; the count-in) / "CLICK 1/4    REC" (PLAY, BOTH, OFF) */
+        ed_num(x, "IN ", set.countin, 1);
+        ed_lr(a, LOOP_TXT[set.loop % LOOP_N], x);
+        x[0] = 0;
+        str_cat(x, "CLICK ");
+        str_cat(x, GRID_TXT[set.click_q % CLICK_QS]);
+        ed_lr(b, x, CLICK_WHEN_TXT[set.click_when & 3u]);
         break;
     case F_DUMP:                  /* "MIDI DUMP  MMT-8" / "REC SENDS ALL" */
         ed_lr(a, "MIDI DUMP", "MMT-8");

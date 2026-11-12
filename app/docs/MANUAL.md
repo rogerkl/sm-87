@@ -66,7 +66,9 @@ sampler's dumps, as many as the file holds.
 - **The sequencer** works like the MMT-8:
   - 100 parts of 8 tracks and 100 songs of up to 255 steps, at 96 clocks a beat, in 64 KB of event memory.
   - Real-time recording replaces a track like tape. The first take on an empty part sets its length. Recording
-    starts after a bar's count-in.
+    starts after a count-in, 4 beats unless set otherwise.
+  - LOOP for parts only (as it starts), for parts and songs, or off; and the click: its value, when it sounds, and
+    the count-in's length (LOOP/CLICK).
   - Track mutes, saved per song step.
   - A part chosen while playing starts at the end of the current one. The LCD shows it queued (`PART 00>01 B004`),
     and under the strip the part playing and the next show large, with the beats to go until the change. An empty
@@ -126,14 +128,17 @@ sampler's dumps, as many as the file holds.
 **Under the strip on the SEQ page**, the part playing and the one after it, large, with their names (the drum page
 has the same for its patterns):
 
-![The SEQ page with part 01 queued while part 00 plays: PART 00>01 B004 on the LCD, and under the strip NEXT 01 lit, in 2 beats](img/seq.png "The next part queued")
+![The SEQ page with part 01 queued while part 00 plays: PART 00>01 B004 on the LCD, and under the strip LOOP PARTS beside part 00, and NEXT 01 lit, in 2 beats](img/seq.png "The next part queued")
 
 - **PLAYING** (stopped: **PART**) and **NEXT**. Turning PRESET while a part plays queues the next part; NEXT shows it
   at once, lit, with the beats to go (`IN 3 BEATS`), and the bar along the foot fills up to the change. Turning
-  back to the part playing clears it. With none queued, NEXT is the same part, dim: it `PLAYS AGAIN`. An empty part
-  playing has no end, so NEXT says a part chosen `STARTS NEXT BEAT`, and counts down to that beat.
-- **In a song:** the step and its part, then the next step and its part (`THE SONG ENDS` after the last, unless the
-  song loops).
+  back to the part playing clears it. With none queued, NEXT is the same part, dim: it `PLAYS AGAIN` (with LOOP
+  OFF, `THE PART ENDS`). An empty part playing has no end, so NEXT says a part chosen `STARTS NEXT BEAT`, and
+  counts down to that beat.
+- **In a song:** the step and its part, then the next step and its part (`THE SONG ENDS` after the last, unless
+  LOOP is ALL).
+- **LOOP** beside the number playing: LOOP/CLICK's setting, `PARTS`, `ALL` or `OFF`. It's lit when what plays goes
+  round (a part with `PARTS` or `ALL`; in a song, `ALL`), and dim when it doesn't (`OFF`; `PARTS` in a song).
 
 ### MIDI modes (GLO)
 
@@ -199,8 +204,9 @@ without). The drums muted beside a part show `MUTED`.
 | ALGO | The functions below; ARP goes back to the pattern |
 
 A new pattern is 8 beats long, as on the HR-16. A hit is placed on the nearest step of the quantize grid. It's heard
-as it's played, and played back from the next time round. Recording counts the beats with the click. It records
-when the drums play alone, or beside a part; it doesn't record in a song.
+as it's played, and played back from the next time round. Recording counts with the click (the SEQ page's
+LOOP/CLICK: its record click, at its value). It records when the drums play alone, or beside a part; it doesn't
+record in a song.
 
 | Function | K1 | K2 | K3 | K4 | REC |
 |---|---|---|---|---|---|
@@ -321,9 +327,11 @@ pads. So an MMT-8 track on channel 10 plays them too.
 2. REC: it lights, and the LCD shows `REC TRK 1`, the part's lowest empty track. REC + a track key chooses
    another; it stays chosen until you change part.
 3. PLAY: four clicks of count-in (`COUNT IN 4` .. `1`), then it records from beat 1. Notes in the count-in aren't
-   recorded, except one played in its last sixteenth, which lands on beat 1.
+   recorded, except one played in its last sixteenth, which lands on beat 1. LOOP/CLICK sets the count-in's length;
+   with none, recording starts at once.
 4. PLAY (or REC) to stop. On an empty part this sets its length, to the nearest beat (until then PRESET waits: the
-   LCD says `FIRST TAKE`, `STOP SETS LENGTH`). Later takes stop at the part's end. The LCD says `RECORDED TRACK 1`,
+   LCD says `FIRST TAKE`, `STOP SETS LENGTH`). Later takes stop at the part's end: the part plays on, or with LOOP
+   OFF it stops there. The LCD says `RECORDED TRACK 1`,
    or `NOTHING RECORDED` when nothing was played after the count-in.
 5. PLAY plays it back. Another REC arms the next empty track, so takes don't record over each other unless you
    choose a recorded track yourself (like tape, that replaces it).
@@ -351,6 +359,7 @@ track key chooses only its own, then the keys add and take away. COPY and MERGE 
 | NAME | The cursor | The character | Stores the 14-character name (a part once used) |
 | EDIT | The event's place (SEL: by beats) | Key, controller, program, bend (SEL: the channel) | Adds a C3 note where the event shown is; SEL + REC erases the event |
 | CLOCK | In: INTERNAL or MIDI | Out: ON or OFF | (at once; SAVE keeps it) |
+| LOOP/CLICK | LOOP PARTS, ALL or OFF | The count-in, 0-99 beats | (at once; SAVE keeps it) K3 the click's value, K4 when it clicks (below) |
 | MIDI DUMP | | | Sends the whole memory as an MMT-8's SysEx dump, over USB |
 
 **EDIT** shows one track's events (the track key chooses which), as the MMT-8: `1 001.05 E3  100` is track 1, beat
@@ -367,6 +376,20 @@ first), K1 moves it up to 48 clocks (half a beat) late (+) or early (-), to make
 The offsets are every song's, kept with the sequencer's memory, and take effect from the next PLAY. An early track
 reads into the next step's part; at the song's start its first clocks play at once (the MMT-8's first beat can't be
 advanced), and a late track's last clocks are cut when the song ends.
+
+**LOOP/CLICK** is the MMT-8's LOOP button and CLICK pages: `LOOP PARTS  IN 4` / `CLICK 1/4    REC`.
+- **K1, LOOP:** the MMT-8's LOOP is one switch for parts and songs; here it has three settings.
+  - `LOOP PARTS`, as it starts: a part goes round again at its end, and a song stops after its last step.
+  - `LOOP ALL`: a song starts again from its first step too.
+  - `LOOP OFF`: a part plays once and stops at its top. A part queued with PRESET still follows.
+
+  A take on a part with a length ends at the part's end; with LOOP OFF the sequencer stops there too.
+- **K2, the count-in (`IN`):** the beats it counts before a take, 0-99 (the MMT-8's default, 4). With 0 recording
+  starts on PLAY. The count-in always clicks.
+- **K3, the click's value:** 1/2, 1/4 (a beat), 1/6, 1/8, 1/12, 1/16, 1/24, 1/32, 1/48 or 1/64. The click on the
+  first beat of each four-beat bar is higher.
+- **K4, when it clicks:** `REC` while a take records (as the MMT-8 starts), `PLAY` while playing without
+  recording, `BOTH`, or `OFF`. The drums recording on their own click with the record click too.
 
 **MIDI clock in** (CLOCK, K1 to MIDI): the sequencer follows MIDI clock from USB or the TRS jack. F8 moves it on
 (each plays 4 of its 96 clocks a beat, spaced by the last beat's clocks); FA starts from the top at the next clock,

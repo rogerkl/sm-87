@@ -48,9 +48,18 @@ typedef struct {
     uint8_t dr_prog;              /* a program change on the drums' channel chooses their pattern (the HR-16's MIDI
                                    * PROGRAM CHANGE; off, as its default) */
     uint8_t rsv2[1];
+    /* the MMT-8's LOOP and CLICK (the SEQ page's LOOP/CLICK; an object saved before them: their defaults) */
+    uint8_t loop;                 /* LOOP_OFF, LOOP_PARTS (parts go round, songs stop at their end), LOOP_ALL */
+    uint8_t countin;              /* the count-in before a take, beats: 0 (none) .. 99 */
+    uint8_t click_q;              /* the click's value: 1/2 .. 1/64 (seq_edit.c GRID's index; 1: 1/4) */
+    uint8_t click_when;           /* the click: bit 0 while recording, bit 1 while playing (1: recording only) */
 } settings_t;
 #define SET_V1_LEN 12u            /* (to the drums') */
 #define SET_V2_LEN offsetof(settings_t, mix_level)   /* (to the mix) */
+#define SET_V3_LEN offsetof(settings_t, loop)        /* (to the loop and click) */
+enum { LOOP_OFF, LOOP_PARTS, LOOP_ALL, LOOP_N };
+#define CLICK_QS 10u
+static void loop_click_apply(void);   /* the settings' LOOP and CLICK into the sequencer (ui/seq_edit.c) */
 #define MIX_PAN_MAX 50
 static settings_t set;
 static uint8_t set_dirty;
@@ -77,6 +86,16 @@ static void mix_defaults(void)
     set.drum_level = 99;
 }
 
+/* LOOP PARTS (parts go round, as they always did; songs end), the MMT-8's click: 1/4, while recording, a count-in
+ * of 4 */
+static void loop_click_defaults(void)
+{
+    set.loop = LOOP_PARTS;
+    set.countin = 4;
+    set.click_q = 1;
+    set.click_when = 1;
+}
+
 static void settings_defaults(void)
 {
     set.magic = SET_MAGIC;
@@ -89,6 +108,7 @@ static void settings_defaults(void)
     set.s7_mode = S7_OMNI_OFF;
     set.s7_poly = S7_POLY_STD;
     set.dr_prog = 0;
+    loop_click_defaults();
     drums_defaults();
     mix_defaults();
 }
@@ -108,6 +128,9 @@ static void settings_load(void)
         set.s7_poly = S7_POLY_STD;
     if (set.dr_prog > 1u)
         set.dr_prog = 0;
+    if (n < (int)sizeof set || set.loop >= LOOP_N || set.countin > 99u || set.click_q >= CLICK_QS ||
+        set.click_when > 3u)
+        loop_click_defaults();
     if (n < (int)SET_V2_LEN || set.dr_channel > 15u || set.dr_quant >= HR_GRIDS || set.dr_swing < 50u ||
         set.dr_swing > HR_SWING_MAX) {
         drums_defaults();
@@ -128,7 +151,7 @@ static void settings_load(void)
     }
     for (i = 0; i < S7_SLOTS; i++)
         bad |= set.mix_level[i] > 99u || set.mix_pan[i] > MIX_PAN_MAX || set.mix_pan[i] < -MIX_PAN_MAX;
-    if (n < (int)sizeof set || bad || set.drum_level > 99u)
+    if (n < (int)SET_V3_LEN || bad || set.drum_level > 99u)
         mix_defaults();
 }
 
@@ -280,19 +303,23 @@ void hr_emit(uint32_t pad, uint32_t vel)
     sqp_off_after(HR_OFF_TICKS, 0x80u | ch, note);
 }
 
-/* each tick of the clock: the drums; recording on their own, a click on their beats (unless the sequencer's) */
+/* each tick of the clock: the drums; recording, the click (LOOP/CLICK's record click, at its value) on their own
+ * clocks, unless the sequencer clicks now (its record click in a take, else its play click) */
 void sqp_on_tick(void)
 {
+    uint32_t seq_clicks = sqp.state == SQP_PLAYING &&
+                          (sqp.take_state == SQP_TAKE_RUNNING ? sqp.click_rec : sqp.click_play);
     hrp_tick();
-    if (hrp_recording() && sqp.click_rec && hrp.at % SQ_PPQN == 0u &&
-        !(sqp.state == SQP_PLAYING && (sqp.take_state == SQP_TAKE_RUNNING || sqp.click_play)))
+    if (hrp_recording() && sqp.click_rec && sqp.click_grid && hrp.at % sqp.click_grid == 0u && !seq_clicks)
         sqp_click(hrp.at % (4u * SQ_PPQN) == 0u);
 }
 
 /* the click: a short blip, higher on the bar's first beat */
 static float click_env, click_ph, click_inc;
+static uint32_t click_count;     /* clicks so far (the host's checks) */
 void sqp_click(int accent)
 {
+    click_count++;
     click_env = 1.0f;
     click_ph = 0.0f;
     click_inc = (accent ? 2000.0f : 1400.0f) / SM_FS;
@@ -583,6 +610,7 @@ void app_init(void)
     sqp_init(SM_FS);
     sqp.clock_in = set.clock_in ? 1u : 0u;
     sqp.clock_out = set.clock_out_off ? 0u : 1u;
+    loop_click_apply();
     sqp_select_part(0);
 }
 
@@ -1821,6 +1849,20 @@ int app_expect(const char *what, int *got)
         *got = (int)s7_program_of((uint32_t)atoi(what + 6) - 1u) + 1;
     else if (!strcmp(what, "drpat"))        /* the drums: their own pattern */
         *got = hrp.pattern;
+    else if (!strcmp(what, "loop"))         /* LOOP: 0 off, 1 parts, 2 all */
+        *got = set.loop;
+    else if (!strcmp(what, "loopsong"))     /* a song goes round */
+        *got = sqp.loop_song;
+    else if (!strcmp(what, "looppart"))     /* a part goes round */
+        *got = sqp.loop_part;
+    else if (!strcmp(what, "countin"))      /* the count-in's beats */
+        *got = sqp.countin_beats;
+    else if (!strcmp(what, "clickgrid"))    /* the click's value, clocks (96: a beat) */
+        *got = sqp.click_grid;
+    else if (!strcmp(what, "clickwhen"))    /* 1 recording, 2 playing, 3 both, 0 never */
+        *got = sqp.click_rec | sqp.click_play << 1;
+    else if (!strcmp(what, "clicks"))       /* clicks so far */
+        *got = (int)click_count;
     else if (!strcmp(what, "drprog"))       /* program change chooses the drums' pattern: 1 on */
         *got = set.dr_prog;
     else if (!strcmp(what, "drnext"))       /* the one queued (-1 none) */

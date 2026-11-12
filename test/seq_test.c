@@ -732,6 +732,94 @@ static void test_clock_in(void)
     CHECK(sqp.state == SQP_STOPPED, "clock in off: FA does nothing");
 }
 
+/* LOOP and CLICK, as the MMT-8's: a part's LOOP off, it stops at its end (one queued still follows), a take on a
+ * part with a length stops there too; a song's on, after its last step its first again (off, as it starts: it stops,
+ * test_queue_and_song); the count-in's beats (0: none); the click at its value, while recording or playing */
+static void test_loop_click(void)
+{
+    sq_raw_t t[2];
+    uint32_t i, ons = 0;
+    sq_clear();
+    for (i = 0; i < 2u; i++) {
+        raw(&t[0], 0, 0x90, 60 + i, 100);
+        raw(&t[1], 10, 0x80, 60 + i, 0);
+        sq_commit(i, 0, t, 2, 1, scratch);   /* parts 00 and 01: a beat each */
+    }
+    sqp_init(FS);
+    CHECK(sqp.loop_part && !sqp.loop_song && sqp.countin_beats == 4u && sqp.click_grid == 96u && sqp.click_rec &&
+              !sqp.click_play,
+          "as it starts: parts go round, songs end; count-in 4, a click a beat while recording");
+    sqp.loop_part = 0;
+    n_out = frame_now = 0;
+    sqp.part = 0;
+    sqp_play();
+    run(frames_for_ticks(3.0f * 96.0f));
+    for (i = 0; i < n_out; i++)
+        ons += (out[i].st & 0xF0u) == 0x90u;
+    CHECK(sqp.state == SQP_STOPPED && sqp.tick == 0u && ons == 1u, "LOOP off: once, stopped at its top (state %u, "
+          "tick %u, %u notes)", sqp.state, (unsigned)sqp.tick, ons);
+    sqp_play();
+    run(frames_for_ticks(30.0f));
+    sqp_select_part(1);
+    run(frames_for_ticks(96.0f));
+    CHECK(sqp.state == SQP_PLAYING && sqp.part == 1u, "a part queued still follows (part %u)", sqp.part);
+    run(frames_for_ticks(96.0f));
+    CHECK(sqp.state == SQP_STOPPED && sqp.part == 1u, "then it stops (state %u)", sqp.state);
+    /* a take on part 00 (a beat long), no count-in: recording from the first clock, ended and stopped at the end */
+    sqp.part = 0;
+    sqp.countin_beats = 0;
+    sqp.rec_armed = 1;
+    sqp.rec_track = 1;
+    clicks = accents = 0;
+    sqp_play();
+    CHECK(sqp.state == SQP_PLAYING && sqp.take_state == SQP_TAKE_RUNNING, "no count-in: recording at once");
+    run(frames_for_ticks(96.0f + 20.0f));
+    CHECK(sqp.take_state == SQP_TAKE_DONE && sqp.state == SQP_STOPPED, "LOOP off: the take ends, stopped (take %u, "
+          "state %u)", sqp.take_state, sqp.state);
+    CHECK(clicks == 1u && accents == 1u, "its beat clicked: %u (%u)", clicks, accents);
+    sqp.take_state = SQP_TAKE_NONE;
+    /* a count-in of 2; the click at 1/8 while playing, not while recording */
+    sqp.loop_part = 1;
+    sqp.countin_beats = 2;
+    sqp.click_grid = 48;
+    sqp.click_rec = 0;
+    sqp.click_play = 1;
+    sqp.rec_armed = 1;
+    clicks = accents = 0;
+    sqp_play();
+    run(frames_for_ticks(2.0f * 96.0f - 10.0f));
+    CHECK(sqp.state == SQP_COUNTIN && clicks == 2u && accents == 1u, "count-in 2: two clicks (%u, %u)", clicks,
+          accents);
+    run(frames_for_ticks(90.0f));       /* into the take's beat */
+    CHECK(sqp.state == SQP_PLAYING && sqp.take_state == SQP_TAKE_RUNNING && clicks == 2u,
+          "recording: no click (%u)", clicks);
+    run(frames_for_ticks(20.0f));       /* punched out at the end: playing, the play click */
+    CHECK(sqp.take_state == SQP_TAKE_DONE && clicks == 3u, "punched out, playing: its click (%u)", clicks);
+    sqp_stop();
+    sqp.take_state = SQP_TAKE_NONE;
+    clicks = accents = 0;
+    sqp_play();
+    run(frames_for_ticks(2.0f * 96.0f - 10.0f));
+    CHECK(clicks == 4u && accents == 2u, "playing: 1/8, four in two beats (%u; %u accented, the one-beat part's top "
+          "each time)", clicks, accents);
+    sqp_stop();
+    /* a song with LOOP on: after its last step its first again */
+    sq_song_set(3, 0, 0, 0xFF, scratch);
+    sq_song_set(3, 1, 1, 0xFF, scratch);
+    sq.song[3].tempo = 120;
+    sqp.click_play = 0;
+    sqp.loop_song = 1;
+    sqp.song_mode = 1;
+    sqp_select_song(3);
+    sqp_play();
+    run(frames_for_ticks(2.0f * 96.0f + 30.0f));
+    CHECK(sqp.state == SQP_PLAYING && sqp.step == 0u, "LOOP on: the song again from its first step (step %u, state "
+          "%u)", sqp.step, sqp.state);
+    sqp_stop();
+    sqp.song_mode = 0;
+    sqp_init(FS);
+}
+
 int main(void)
 {
     test_arena();
@@ -744,6 +832,7 @@ int main(void)
     test_empty_part();
     test_queue_and_song();
     test_song_offsets();
+    test_loop_click();
     test_image_versions();
     test_clock_in();
     printf("seq: %d checks, %d failed\n", checks, fails);

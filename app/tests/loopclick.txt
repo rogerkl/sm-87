@@ -1,0 +1,77 @@
+# LOOP/CLICK (ALGO on the SEQ page, after CLOCK), the MMT-8's LOOP and CLICK: K1 LOOP (OFF, PARTS, ALL), K2 the
+# count-in, K3 the click's value, K4 when it clicks. As it starts: LOOP PARTS (parts go round, songs end), a count-in
+# of 4, 1/4 while recording. Here LOOP OFF: a part of 2 beats plays once and stops at its top, the click at 1/16 both
+# recording and playing; a take after a count-in of 2 stops at the part's end. Kept with SAVE. 120 BPM: a beat is
+# 500 ms.
+wait 600
+tap SEQ
+wait 30
+turn ALGO 11
+wait 30
+expect fn 11
+expect loop 1
+expect looppart 1
+expect loopsong 0
+expect countin 4
+expect clickgrid 96
+expect clickwhen 1
+shot loopclick.png
+# LOOP ALL: songs go round too; then OFF
+turn K1 1
+wait 30
+expect loop 2
+expect looppart 1
+expect loopsong 1
+turn K1 -2
+turn K2 -2
+turn K3 4
+turn K4 2
+wait 30
+expect loop 0
+expect looppart 0
+expect loopsong 0
+expect countin 2
+expect clickgrid 24
+expect clickwhen 3
+shot loopclick_set.png
+# part 00: LENGTH 2 beats
+turn ALGO -10
+wait 30
+expect fn 1
+turn K1 2
+tap REC
+wait 30
+expect beats 2
+tap SEQ
+wait 30
+expect fn 0
+# played: once, eight clicks (1/16 over two beats), then stopped; the panel says it ends
+expect clicks 0
+tap PLAY
+wait 500
+shot loopclick_panel.png
+wait 600
+expect seq 0
+expect clicks 8
+# a take: two beats of count-in, then the part's two, and it stops at the end
+tap REC
+wait 30
+expect armed 1
+tap PLAY
+wait 30
+expect seq 1
+wait 1020
+expect seq 2
+expect take 1
+wait 1000
+expect seq 0
+expect take 0
+# kept
+tap SAVE
+wait 300
+reboot
+wait 600
+expect loop 0
+expect countin 2
+expect clickgrid 24
+expect clickwhen 3

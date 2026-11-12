@@ -293,6 +293,16 @@ static void panel_progress(uint32_t tick, uint32_t ticks, int counting, int queu
     cv_rect(8, PANEL_H - 6, (int32_t)((tick < ticks ? tick : ticks) * 224u / ticks), 4, queued ? C_HI : C_DIM);
 }
 
+/* LOOP/CLICK's LOOP beside PLAYING's number, "LOOP" over "PARTS" (ALL, OFF): lit when what plays goes round (a part,
+ * or in SONG the song), dim when not (PARTS in a song, OFF) */
+static void panel_loop(void)
+{
+    static const char *const T[LOOP_N] = {"OFF", "PARTS", "ALL"};
+    int on = sqp.song_mode ? sqp.loop_song : sqp.loop_part;
+    cv_text(52, 18, &FONT_XS, "LOOP", C_GRAY);
+    cv_text(52, 32, &FONT_XS, T[set.loop % LOOP_N], on ? C_HI : C_DIM);
+}
+
 /* "STEP 012" */
 static void step_label(char *t, const char *what, uint32_t step)
 {
@@ -308,7 +318,7 @@ static void step_label(char *t, const char *what, uint32_t step)
 static int32_t song_next_step(uint32_t i)
 {
     uint32_t steps = sq_song_steps(sqp.song);
-    return i + 1u < steps ? (int32_t)(i + 1u) : sqp.loop && steps ? 0 : -1;
+    return i + 1u < steps ? (int32_t)(i + 1u) : sqp.loop_song && steps ? 0 : -1;
 }
 
 /* a part's name, its spaces at the end gone (EMPTY PART for one with nothing) */
@@ -369,6 +379,8 @@ static void seq_panel(void)
             queued = 1;
         } else if (playing && !sq.part[sqp.part].beats) {   /* an empty part: no end, beats counted */
             next_under = "STARTS NEXT BEAT";
+        } else if (playing && !sqp.loop_part) {   /* LOOP off: it stops at its end */
+            next_under = "THE PART ENDS";
         } else if (playing) {             /* none: it goes round again */
             next = sqp.part;
             next_under = "PLAYS AGAIN";
@@ -377,6 +389,7 @@ static void seq_panel(void)
         }
     }
     panel_col(8, a, now, C_HI, 0, now < SQ_PARTS ? part_name(na, now) : 0);
+    panel_loop();
     panel_col(128, b, next, next_c, queued, next_under ? next_under : next < SQ_PARTS ? part_name(nb, next) : 0);
     if (!sqp.song_mode && playing && now < SQ_PARTS && !sq_part_ticks(now))   /* an empty part: to the next beat */
         panel_progress(tick % SQ_PPQN, queued ? SQ_PPQN : 0u, queued, queued);

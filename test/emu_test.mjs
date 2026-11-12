@@ -135,7 +135,7 @@ out();
 // SEQ, ALGO to MIDI DUMP (the last function), REC
 const tap = (b) => { emu.send({ type: "buttons", mask: 1 << b }); emu.run(60); emu.send({ type: "buttons", mask: 0 }); emu.run(60); };
 tap(9);
-emu.send({ type: "enc", role: 1, n: 11 });
+emu.send({ type: "enc", role: 1, n: 99 });   // (ALGO stops at the last)
 emu.run(100);
 tap(11);
 let mback = [];

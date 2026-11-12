@@ -40,6 +40,11 @@ void sqp_init(float fs)
     sqp.next_part = 0xFFu;
     sqp.mask = 0xFFu;
     sqp.click_rec = 1;
+    sqp.click_play = 0;
+    sqp.click_grid = (uint8_t)SQ_PPQN;
+    sqp.countin_beats = 4;
+    sqp.loop_part = 1;            /* (SM-87's LOOP PARTS: parts go round, songs end) */
+    sqp.loop_song = 0;
     sqp.clock_out = 1;
     sqp.take_state = SQP_TAKE_NONE;
     sqp_set_tempo(120);
@@ -104,7 +109,7 @@ static void tp_settle(uint32_t t)
             break;
         tp[t].tick = (uint16_t)(tp[t].tick - ticks);
         tcur[t] = 0;
-        if (++guard > n + 1u || (tp[t].step + 1u >= n && !sqp.loop)) {
+        if (++guard > n + 1u || (tp[t].step + 1u >= n && !sqp.loop_song)) {
             tp[t].done = 1;      /* (a song of empty parts: done too) */
             break;
         }
@@ -220,8 +225,8 @@ void sqp_play(void)
         sqp.take_part = sqp.part;
         sqp.take_track = sqp.rec_track;
         sqp.take_state = SQP_TAKE_RUNNING;
-        sqp.countin = 4 * (int32_t)SQ_PPQN;   /* a bar of clicks (the MMT-8's default count-in, 4) */
-        sqp.state = SQP_COUNTIN;
+        sqp.countin = (int32_t)sqp.countin_beats * (int32_t)SQ_PPQN;   /* (the MMT-8's default: 4) */
+        sqp.state = sqp.countin ? SQP_COUNTIN : SQP_PLAYING;   /* (none: recording from the first clock) */
     } else {
         sqp.state = SQP_PLAYING;
     }
@@ -396,13 +401,13 @@ static void tracks_play_song(void)
 
 static void part_end(void)
 {
-    if (sqp.take_state == SQP_TAKE_RUNNING)   /* punch out at the part's end; the part plays on */
+    if (sqp.take_state == SQP_TAKE_RUNNING)   /* punch out at the part's end; it plays on (LOOP off: stops, below) */
         take_end(sq.part[sqp.take_part].beats);
     if (!sqp.song_mode)           /* (in a song the notes end as they are long: an early track's next ones sound) */
         sqp_all_notes_off();
     if (sqp.song_mode) {
         if (++sqp.step >= sq_song_steps(sqp.song)) {
-            if (!sqp.loop) {
+            if (!sqp.loop_song) {
                 sqp.step = 0;
                 sqp_stop();
                 load_step();
@@ -416,6 +421,11 @@ static void part_end(void)
     } else if (sqp.next_part != 0xFFu) {
         sqp.part = sqp.next_part;
         sqp.next_part = 0xFFu;
+    } else if (!sqp.loop_part) {  /* LOOP off: the part stops at its end, back at its top (the MMT-8's) */
+        sqp_stop();
+        sqp.tick = 0;
+        sqp_resync();
+        return;
     }
     sqp.tick = 0;
     sqp_resync();
@@ -425,8 +435,8 @@ static void do_tick(void)
 {
     uint32_t ticks;
     if (sqp.state == SQP_COUNTIN) {
-        if (sqp.countin % (int32_t)SQ_PPQN == 0)
-            sqp_click(sqp.countin == 4 * (int32_t)SQ_PPQN);
+        if (sqp.countin % (int32_t)SQ_PPQN == 0)   /* (the count-in clicks its beats whatever CLICK says) */
+            sqp_click(sqp.countin == (int32_t)sqp.countin_beats * (int32_t)SQ_PPQN);
         if (--sqp.countin > 0)
             return;
         sqp.state = SQP_PLAYING;
@@ -451,8 +461,8 @@ static void do_tick(void)
     else
         tracks_play();
     sqp_on_tick();
-    if (sqp.tick % SQ_PPQN == 0u &&
-        ((sqp.take_state == SQP_TAKE_RUNNING && sqp.click_rec) || sqp.click_play))
+    if (sqp.click_grid && sqp.tick % sqp.click_grid == 0u &&   /* recording: the record click; else the play click */
+        (sqp.take_state == SQP_TAKE_RUNNING ? sqp.click_rec : sqp.click_play))
         sqp_click(sqp.tick % (4u * SQ_PPQN) == 0u);
     if (sqp.clock_out && sqp.clock % 4u == 0u)
         sqp_midi_rt(0xF8);

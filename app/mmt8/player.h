@@ -20,11 +20,14 @@ typedef struct {
     uint8_t mask;                 /* the tracks that play: the mutes (in a song, the step's) */
     uint8_t rec_armed, rec_track; /* record ready: the track a take goes to */
     uint8_t take_state;
-    uint8_t click_rec, click_play;
+    uint8_t click_rec, click_play;   /* the MMT-8's CLICK: while recording, while playing */
+    uint8_t click_grid;           /* its value in clocks: 192 (1/2) .. 6 (1/64); 96 a beat */
+    uint8_t countin_beats;        /* the count-in before a take, 0 (none) .. 99 (the MMT-8's, 4) */
     uint8_t clock_out;            /* MIDI clock (F8, FA, FB, FC) out */
     uint8_t clock_in;             /* the clock: 0 its own (the tempo), 1 MIDI's (F8 in; FA, FB, FC, F2 the transport) */
     uint16_t ext_tempo;           /* MIDI clock in: the tempo it comes at, BPM (0: none yet) */
-    uint8_t loop;                 /* a song plays again from its first step */
+    uint8_t loop_part, loop_song; /* the MMT-8's LOOP, a part's and a song's: again from its top (its first step);
+                                   * off, it stops at its end (a part queued still follows) */
     uint16_t tempo;               /* BPM */
     uint32_t tick;                /* in the part */
     uint32_t clock;               /* ticks since start: the notes' offs */
