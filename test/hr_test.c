@@ -665,6 +665,32 @@ static void test_program(void)
     CHECK(hrp.tick == 100u, "and on again: %u", hrp.tick);
 }
 
+/* COPY a pad's hits onto another pad (the HR-16's): merged, the destination's length kept, a hit there taking the
+ * copied velocity; within one pattern too; none to copy: said */
+static void test_copy_pad(void)
+{
+    sq_clear();
+    hr_add(1, 0, 0, 100, scratch);
+    hr_add(1, 96, 0, 90, scratch);
+    hr_add(1, 200, 0, 80, scratch);   /* (past pattern 2's end) */
+    hr_add(1, 96, 2, 70, scratch);
+    sq.pattern[1].beats = 4;
+    hr_add(2, 96, 3, 50, scratch);    /* pattern 2, 2 beats: pad 4 at 96, pad 6 at 96 */
+    hr_add(2, 96, 5, 60, scratch);
+    sq.pattern[2].beats = 2;
+    CHECK(hr_copy_pad(1, 0, 2, 3, scratch) == 0 && hr_hits(2) == 3u && hr_beats(2) == 2u,
+          "pad 1 of 01 onto pad 4 of 02: %u hits, %u beats", hr_hits(2), hr_beats(2));
+    CHECK(hr_hit_tick(hr_hit_at(2, 0)) == 0u && hr_hit_at(2, 0)[2] == 3u && hr_hit_at(2, 0)[3] == 100u &&
+              hr_hit_tick(hr_hit_at(2, 1)) == 96u && hr_hit_at(2, 1)[2] == 3u && hr_hit_at(2, 1)[3] == 90u &&
+              hr_hit_at(2, 2)[2] == 5u,
+          "in order: 0 pad 4 (100), 96 pad 4 (90, its own replaced), 96 pad 6");
+    CHECK(hr_copy_pad(1, 0, 1, 1, scratch) == 0 && hr_hits(1) == 7u && hr_hit_at(1, 1)[2] == 1u,
+          "within 01, pad 1 onto pad 2: %u hits", hr_hits(1));
+    CHECK(hr_copy_pad(1, 9, 2, 3, scratch) == SQ_E_NONE, "a pad without hits: nothing to copy");
+    CHECK(hr_copy_pad(1, 0, 7, 0, scratch) == 0 && hr_beats(7) == 8u && hr_hits(7) == 3u,
+          "onto an empty pattern: its 8 beats now its own, %u hits", hr_hits(7));
+}
+
 int main(void)
 {
     test_patterns();
@@ -673,6 +699,7 @@ int main(void)
     test_step();
     test_offset_fill();
     test_program();
+    test_copy_pad();
     test_voices();
     test_sounds();
     test_bank_kit();

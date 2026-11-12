@@ -6,11 +6,12 @@
  * SEL + a pad held erases that pad's hits as they come by); OCT+ held is the HR-16's FILL (a pad held repeats at the
  * quantize rate, recorded too); PLAY plays the drums alone, SEL + PLAY continues.
  * ALGO turns to its functions: STEP EDIT (below), LENGTH, ERASE (a pad's hits, or the pattern), COPY (appended to
- * another), OFFSET (a pad's hits or all moved by clocks, -99..99, round at the ends), PAD SOUND, PAD MIDI (its note,
- * group, voices; the drums' channel; REC: the pad as the kit has it, SEL: all of them), PROGRAM CHANGE (K1: a program
- * change on the drums' channel chooses the pattern, or not; hr16/hr.h hrp_program), MIDI DUMP (the patterns out as an
- * HR-16's SysEx dump, hr16/hrdump.h; one coming in is taken any time), each done with REC. A pad key on a pad's
- * function chooses it. Part of the unity build (app.c, after ui/pages_seq.c).
+ * another; or a pad's hits onto another pad, of this pattern or another: a pad's key, then the other's), OFFSET (a
+ * pad's hits or all moved by clocks, -99..99, round at the ends), PAD SOUND, PAD MIDI (its note, group, voices; the
+ * drums' channel; REC: the pad as the kit has it, SEL: all of them), PROGRAM CHANGE (K1: a program change on the drums'
+ * channel chooses the pattern, or not; hr16/hr.h hrp_program), MIDI DUMP (the patterns out as an HR-16's SysEx dump,
+ * hr16/hrdump.h; one coming in is taken any time), each done with REC. A pad key on a pad's function chooses it. Part
+ * of the unity build (app.c, after ui/pages_seq.c).
  *
  * PAD SOUND: a pad's sound, tuning, level, pan, as the pattern playing (stopped: chosen) has them, the HR-16's VOICE,
  * TUNE and MIX: "01 KICK   GLOBAL" while it has none of its own (an edit is the global set-up's, every such
@@ -31,7 +32,9 @@ static const char *const DF_TXT[DF_N] = {"",          "STEP EDIT", "LENGTH",    
 
 static struct {
     uint8_t fn;
-    uint8_t pad;                  /* the pad's functions, ERASE and OFFSET (HR_PADS: every pad) */
+    uint8_t pad;                  /* the pad's functions, ERASE and OFFSET (HR_PADS: every pad); COPY's from (HR_PADS:
+                                   * the whole pattern) */
+    uint8_t pad_to;               /* COPY: the pad its hits go to (HR_PADS: none chosen yet) */
     int8_t off;                   /* OFFSET: clocks, -99..99 */
     uint8_t to;                   /* COPY: the pattern to */
     uint16_t beats;               /* LENGTH: what REC sets */
@@ -67,7 +70,8 @@ static void dr_enter(uint32_t fn)
     dr.fn = (uint8_t)fn;
     dr.beats = (uint16_t)hr_beats(hrp.pattern);
     dr.to = hrp.pattern;
-    if (fn == DF_ERASE || fn == DF_OFFSET)
+    dr.pad_to = HR_PADS;
+    if (fn == DF_ERASE || fn == DF_OFFSET || fn == DF_COPY)
         dr.pad = HR_PADS;         /* (the whole pattern, until a pad is chosen) */
     else if (dr.pad >= HR_PADS)
         dr.pad = 0;
@@ -231,7 +235,9 @@ static void dr_algo(int32_t d)
 /* a pad's key on the page: on a pad's function it chooses the pad (and plays) */
 static void dr_pad_key(uint32_t pad)
 {
-    if (DF_HAS_PAD(dr.fn))
+    if (dr.fn == DF_COPY && dr.pad < HR_PADS)
+        dr.pad_to = (uint8_t)pad; /* COPY: the first pad its hits, the next where they go (the HR-16's) */
+    else if (DF_HAS_PAD(dr.fn) || dr.fn == DF_COPY)
         dr.pad = (uint8_t)pad;
 }
 
@@ -300,9 +306,16 @@ static void dr_turn(uint32_t enc, int32_t e, uint32_t btn)
         if (enc == EN_K1)         /* the pads, then the whole pattern */
             dr.pad = (uint8_t)clamp((int32_t)dr.pad + e, 0, HR_PADS);
         break;
-    case DF_COPY:
-        if (enc == EN_K1)
+    case DF_COPY:                 /* K1 the pattern to; K2 the pad from (or the whole pattern), K3 the pad to */
+        if (enc == EN_K1) {
             dr.to = (uint8_t)clamp((int32_t)dr.to + e, 0, SQ_PATTERNS - 1);
+        } else if (enc == EN_K2) {
+            dr.pad = (uint8_t)clamp((int32_t)dr.pad + e, 0, HR_PADS);
+            if (dr.pad >= HR_PADS)
+                dr.pad_to = HR_PADS;
+        } else if (enc == EN_K3 && dr.pad < HR_PADS) {
+            dr.pad_to = (uint8_t)(dr.pad_to >= HR_PADS ? 0 : clamp((int32_t)dr.pad_to + e, 0, HR_PADS - 1));
+        }
         break;
     case DF_OFFSET:
         if (enc == EN_K1)         /* SEL held: ten at a time */
@@ -400,7 +413,11 @@ static void dr_rec(uint32_t btn)
             app_say("STOP FIRST", "");
             return;
         }
-        r = hr_copy(p, dr.to, sq_scratch);
+        if (dr.pad < HR_PADS && dr.pad_to >= HR_PADS) {
+            app_say("A PAD TO COPY TO", "ITS KEY, OR K3");   /* (the HR-16's RECORD: nothing yet) */
+            return;
+        }
+        r = dr.pad < HR_PADS ? hr_copy_pad(p, dr.pad, dr.to, dr.pad_to, sq_scratch) : hr_copy(p, dr.to, sq_scratch);
         dr_say(r, "COPY COMPLETE");
         break;
     case DF_OFFSET:               /* (again: as much again) */
@@ -614,7 +631,15 @@ static void dr_draw(int sel_held)
         fmt_uint(n, dr.to, 2, '0');
         str_cat(t, n);
         lcd_row(0, t);
-        lcd_row(1, hr_hits(dr.to) ? "REC: APPENDED" : "REC: COPIED");
+        if (dr.pad < HR_PADS) {   /* a pad's hits: "KICK > TOM1", "KICK > ?" (the HR-16's "CLS HAT > ?") */
+            t[0] = 0;
+            str_cat(t, hr_pad_name(dr.pad));
+            str_cat(t, " > ");
+            str_cat(t, dr.pad_to < HR_PADS ? hr_pad_name(dr.pad_to) : "?");
+            lcd_row(1, t);
+        } else {
+            lcd_row(1, hr_hits(dr.to) ? "REC: APPENDED" : "REC: COPIED");
+        }
         return;
     case DF_OFFSET:               /* "OFFSET  PATT 05" / "KICK     +03/384" */
         str_cat(t, "OFFSET  PATT ");
@@ -701,6 +726,8 @@ static uint32_t dr_chosen(void)
 {
     if (dr.fn == DF_STEP)
         return dr_step_pads();
+    if (dr.fn == DF_COPY && dr.pad < HR_PADS)
+        return 1u << dr.pad | (dr.pad_to < HR_PADS ? 1u << dr.pad_to : 0u);
     if (DF_HAS_PAD(dr.fn) && dr.pad < HR_PADS)
         return 1u << dr.pad;
     return 0;

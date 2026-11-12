@@ -97,6 +97,42 @@ int hr_set_length(uint32_t p, uint32_t beats, uint8_t *scratch)
     return r;
 }
 
+int hr_copy_pad(uint32_t a, uint32_t pa, uint32_t b, uint32_t pb, uint8_t *scratch)
+{
+    const uint8_t *da = sq_data(SQ_PAT(a)), *db = sq_data(SQ_PAT(b));
+    uint32_t na = sq_len(SQ_PAT(a)), nb = sq_len(SQ_PAT(b)), ticks = hr_beats(b) * SQ_PPQN;
+    uint32_t i = 0, j = 0, n = 0, got = 0;
+    if (a >= SQ_PATTERNS || b >= SQ_PATTERNS || pa >= HR_PADS || pb >= HR_PADS)
+        return -1;
+    for (;;) {                    /* the two in order, by clock then pad: b's, and a's pad's as pb's */
+        uint32_t ka, kb;
+        while (i < na && (da[i + 2u] != pa || hr_hit_tick(da + i) >= ticks))
+            i += SQ_HIT_LEN;      /* (a's other pads, and past b's end: not) */
+        if (i >= na && j >= nb)
+            break;
+        if (n + SQ_HIT_LEN > SQ_SCRATCH)
+            return SQ_E_ROOM;
+        ka = i < na ? hr_hit_tick(da + i) << 8 | pb : 0xFFFFFFFFu;
+        kb = j < nb ? hr_hit_tick(db + j) << 8 | db[j + 2u] : 0xFFFFFFFFu;
+        if (ka <= kb) {
+            copy(scratch + n, da + i, SQ_HIT_LEN);
+            scratch[n + 2u] = (uint8_t)pb;
+            i += SQ_HIT_LEN;
+            j += ka == kb ? SQ_HIT_LEN : 0u;   /* (pb's own there: the copied hit's velocity, as one played) */
+            got++;
+        } else {
+            copy(scratch + n, db + j, SQ_HIT_LEN);
+            j += SQ_HIT_LEN;
+        }
+        n += SQ_HIT_LEN;
+    }
+    if (!got)
+        return SQ_E_NONE;
+    if (!sq.pattern[b].beats)     /* (its length now its own: the default it played at) */
+        sq.pattern[b].beats = HR_DEFAULT_BEATS;
+    return sq_replace(SQ_PAT(b), scratch, n) != 0 ? SQ_E_ROOM : 0;
+}
+
 int hr_copy(uint32_t a, uint32_t b, uint8_t *scratch)
 {
     uint32_t na = sq_len(SQ_PAT(a)), nb = sq_len(SQ_PAT(b)), off, k, beats;

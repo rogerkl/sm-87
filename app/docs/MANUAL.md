@@ -231,7 +231,7 @@ record in a song.
 | STEP EDIT | The hit's place, a clock (SEL: a step) | Its velocity | Its pad | The grid | Erases the hit shown |
 | LENGTH | Beats, 1-682 (SEL: tens) | | | | Sets the pattern's length (stopped): hits past the end go |
 | ERASE | A pad, or all (a pad's key chooses it) | | | | Erases that pad's hits, or the whole pattern |
-| COPY | The pattern to | | | | Appends the pattern to the other (an empty one gets a copy; itself: twice as long) |
+| COPY | The pattern to | The pad from, or ALL (a pad's key chooses it) | The pad to (the next pad key) | | ALL: appends the pattern to the other (an empty one gets a copy; itself: twice as long). A pad: merges its hits onto the pad to (below) |
 | OFFSET | Clocks, -99..99 (384ths; SEL: tens) | A pad, or all (a pad's key chooses it) | | | Moves the hits that much later (+) or earlier; past the end round to the start, and back. Again: as much again |
 | PAD SOUND | The sound: the kit's, then SLOT01-16 | Tuning, ±24 | Level | Pan, <3 .. 3> | Keeps the pads' sounds with the pattern; SEL + REC: lets them go (the global set-up again) |
 | PAD MIDI | Its note | Its group (pads that cut each other) | Voices, 1 or 2 | The drums' channel | The pad as the kit sets it (sound and MIDI); SEL + REC: all of them |
@@ -239,6 +239,12 @@ record in a song.
 | MIDI DUMP | | | | | Sends the drum patterns as an HR-16's SysEx dump, over USB (below) |
 
 On a pad's function, a pad's key chooses it (and plays it); so does SELECT.
+
+**COPY a pad's hits**, as on the HR-16: on COPY, a pad's key chooses the pad to copy from (`KICK > ?`), and the next
+pad key the pad to copy to (`KICK > TOM1`); K2 and K3 choose them too. K1 is the pattern to copy to, this one or
+another. REC merges the hits onto that pad: the pattern keeps its length (hits past its end aren't copied), and a hit
+the pad already has at the same clock takes the copied one's velocity. The pad to keeps its own sound. Until a pad to
+is chosen REC does nothing (`A PAD TO COPY TO`). K2 turned past the last pad goes back to ALL, the whole pattern.
 
 **A pattern's own sounds** are the HR-16's VOICE, TUNE and MIX stored with a pattern: each pad's sound, tuning,
 level and pan. PAD SOUND's top line says whose the pads have:

@@ -1,0 +1,35 @@
+# COPY a pad's hits onto another pad (the HR-16's): on the drum page's COPY, a pad's key chooses the pad from, the
+# next the pad to (or K2, K3); REC merges them, the pattern's length kept. Without a pad to, REC does nothing (and
+# says so). K2 back to ALL: the whole pattern again. Pattern 00: the kick on beats 1 and 2 (STEP EDIT), then onto
+# pad 4.
+wait 600
+tap ARP
+wait 30
+turn ALGO 1
+wait 30
+expect drfn 1
+midi 99 24 64
+wait 30
+turn SELECT 4
+wait 30
+expect drstep 96
+midi 99 24 64
+wait 30
+expect drhits 2
+# COPY: KICK, then REC with no pad to: nothing
+turn ALGO 3
+wait 30
+expect drfn 4
+tapkey w0
+wait 30
+tap REC
+wait 30
+expect drhits 2
+# its next key: pad 4; REC
+tapkey w3
+wait 1300
+shot drumcopy.png
+tap REC
+wait 30
+expect drhits 4
+expect drbeats 8

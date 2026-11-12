@@ -126,6 +126,10 @@ int hr_set_length(uint32_t p, uint32_t beats, uint8_t *scratch);   /* 1..682: hi
 /* COPY: a's hits after b's, b as long as both (b without hits: a copy of a, its sounds too; a = b: twice as long).
  * SQ_E_* */
 int hr_copy(uint32_t a, uint32_t b, uint8_t *scratch);
+/* COPY a pad's hits (the HR-16's): pad pa's in pattern a merged onto pad pb of pattern b (a may be b), b's length
+ * kept (a's hits past its end not copied), a hit pb has at a clock taking the copied one's velocity; pb keeps its
+ * sound. 0, SQ_E_NONE (pa has no hits there), SQ_E_ROOM */
+int hr_copy_pad(uint32_t a, uint32_t pa, uint32_t b, uint32_t pb, uint8_t *scratch);
 /* where a hit played at tick goes: the nearest place on the grid (clocks), every second one swung (50..75%) */
 uint32_t hr_quantize(uint32_t tick, uint32_t grid, uint32_t swing);
 /* STEP EDIT (the HR-16's): the places it stops at, each step of the grid (swung) and each hit; after the pattern's
