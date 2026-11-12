@@ -1,0 +1,28 @@
+# MIDI FILTER (ALGO on the SEQ page, after LOOP/CLICK), the MMT-8's: what a take records besides notes. K1-K4 bend,
+# controllers, programs, aftertouch on (right) or off (left); SELECT the channel, ALL or 1-16. As it starts: all but
+# aftertouch, every channel. Kept with SAVE.
+wait 600
+tap SEQ
+wait 30
+turn ALGO 12
+wait 30
+expect fn 12
+expect recfilter 7
+expect recch 0
+shot filter.png
+turn K4 1
+wait 30
+expect recfilter 15
+turn K1 -1
+wait 30
+expect recfilter 14
+turn SELECT 2
+wait 30
+expect recch 2
+shot filter_set.png
+tap SAVE
+wait 300
+reboot
+wait 600
+expect recfilter 14
+expect recch 2

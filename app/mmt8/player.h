@@ -23,6 +23,8 @@ typedef struct {
     uint8_t click_rec, click_play;   /* the MMT-8's CLICK: while recording, while playing */
     uint8_t click_grid;           /* its value in clocks: 192 (1/2) .. 6 (1/64); 96 a beat */
     uint8_t countin_beats;        /* the count-in before a take, 0 (none) .. 99 (the MMT-8's, 4) */
+    uint8_t rec_filter;           /* the MMT-8's MIDI FILTER: what a take records besides notes (SQP_REC_*) */
+    uint8_t rec_ch;               /* and from which channel: 0 all, 1..16 */
     uint8_t clock_out;            /* MIDI clock (F8, FA, FB, FC) out */
     uint8_t clock_in;             /* the clock: 0 its own (the tempo), 1 MIDI's (F8 in; FA, FB, FC, F2 the transport) */
     uint16_t ext_tempo;           /* MIDI clock in: the tempo it comes at, BPM (0: none yet) */
@@ -40,6 +42,7 @@ typedef struct {
 } sqp_t;
 
 extern volatile sqp_t sqp;
+enum { SQP_REC_BEND = 1, SQP_REC_CTRL = 2, SQP_REC_PROG = 4, SQP_REC_TOUCH = 8 };   /* (channel aftertouch) */
 extern sq_raw_t sqp_take[SQP_TAKE_MAX];
 
 /* the app's: where the events go (the sampler by channel, USB MIDI out), the click, a take done */

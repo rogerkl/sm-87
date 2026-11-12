@@ -69,6 +69,8 @@ sampler's dumps, as many as the file holds.
     starts after a count-in, 4 beats unless set otherwise.
   - LOOP for parts only (as it starts), for parts and songs, or off; and the click: its value, when it sounds, and
     the count-in's length (LOOP/CLICK).
+  - MIDI FILTER: what a take records besides notes (bend, controllers, programs, aftertouch), and from which
+    channel.
   - Track mutes, saved per song step.
   - A part chosen while playing starts at the end of the current one. The LCD shows it queued (`PART 00>01 B004`),
     and under the strip the part playing and the next show large, with the beats to go until the change. An empty
@@ -378,6 +380,7 @@ track key chooses only its own, then the keys add and take away. COPY and MERGE 
 | EDIT | The event's place (SEL: by beats) | Key, controller, program, bend (SEL: the channel) | Adds a C3 note where the event shown is; SEL + REC erases the event |
 | CLOCK | In: INTERNAL or MIDI | Out: ON or OFF | (at once; SAVE keeps it) |
 | LOOP/CLICK | LOOP PARTS, ALL or OFF | The count-in, 0-99 beats | (at once; SAVE keeps it) K3 the click's value, K4 when it clicks (below) |
+| MIDI FILTER | Bend recorded or not | Controllers | (at once; SAVE keeps it) K3 programs, K4 aftertouch, SELECT the channel (below) |
 | MIDI DUMP | | | Sends the whole memory as an MMT-8's SysEx dump, over USB |
 
 **EDIT** shows one track's events (the track key chooses which), as the MMT-8: `1 001.05 E3  100` is track 1, beat
@@ -408,6 +411,15 @@ advanced), and a late track's last clocks are cut when the song ends.
   first beat of each four-beat bar is higher.
 - **K4, when it clicks:** `REC` while a take records (as the MMT-8 starts), `PLAY` while playing without
   recording, `BOTH`, or `OFF`. The drums recording on their own click with the record click too.
+
+**MIDI FILTER** is the MMT-8's: what a take records besides notes. `FILTER    CH ALL` / `BEND CC PROG ---`.
+- **K1-K4:** pitch bend, controllers, program changes and aftertouch, each recorded (turned right, its name shown)
+  or not (left, dashes). As on the MMT-8, all are on except aftertouch. Poly aftertouch is never recorded, and nor
+  is SysEx.
+- **SELECT:** the channel a take records from, `CH ALL` or 1-16. Notes on other channels aren't recorded either.
+- **Recording only:** on the MMT-8 the filter also kept what it left out from going on through MIDI ECHO. Here it
+  all still plays the sampler and goes out, so an external keyboard's aftertouch still reaches the sampler's
+  vibrato.
 
 **MIDI clock in** (CLOCK, K1 to MIDI): the sequencer follows MIDI clock from USB or the TRS jack. F8 moves it on
 (each plays 4 of its 96 clocks a beat, spaced by the last beat's clocks); FA starts from the top at the next clock,

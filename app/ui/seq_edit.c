@@ -3,9 +3,10 @@
 /* SM-87: the MMT-8's functions on the panel (its manual, 4-16: documentation/manuals.md). On the sequencer's page ALGO
  * turns from the part (or song) playing through them, as the MMT-8's buttons: LENGTH, ERASE, COPY, MERGE, QUANTIZE,
  * TRANSPOSE, MIDI CHANNEL, NAME and EDIT (in SONG: ERASE, COPY, QUANTIZE, NAME, EDIT), then CLOCK (its own or MIDI's),
- * LOOP/CLICK (the MMT-8's LOOP button and CLICK pages) and MIDI DUMP (the memory out, as an MMT-8's SysEx dump). The first eight white keys are the
- * track buttons, K1..K4 the function's values (the MMT-8's +/- and page buttons), REC does it (RECORD, with the
- * function held). SEQ goes back to the part playing. Part of the unity build (app.c, after ui/pages_seq.c).
+ * LOOP/CLICK (the MMT-8's LOOP button and CLICK pages), MIDI FILTER (what a take records) and MIDI DUMP (the memory
+ * out, as an MMT-8's SysEx dump). The first eight white keys are the track buttons, K1..K4 the function's values (the
+ * MMT-8's +/- and page buttons), REC does it (RECORD, with the function held). SEQ goes back to the part playing. Part
+ * of the unity build (app.c, after ui/pages_seq.c).
  *
  * As the MMT-8's: a function chooses all eight tracks until a track key chooses one, then the keys add and take
  * away; COPY and MERGE take a track from (lit) and a track to (flashing); nothing happens until REC, and LENGTH,
@@ -24,14 +25,16 @@ enum {
     F_EDIT,
     F_CLOCK,
     F_LOOP,
+    F_FILTER,
     F_DUMP,
     F_N
 };
 #define F_IN_SONG                                                                                                     \
     (1u << F_PLAY | 1u << F_ERASE | 1u << F_COPY | 1u << F_QUANT | 1u << F_NAME | 1u << F_EDIT | 1u << F_CLOCK |      \
-     1u << F_LOOP | 1u << F_DUMP)
-static const char *const F_TXT[F_N] = {"",          "LENGTH",       "ERASE", "COPY", "MERGE", "QUANTIZE", "TRANSPOSE",
-                                       "MIDI CHANNEL", "NAME",      "EDIT",  "CLOCK", "LOOP/CLICK", "MIDI DUMP"};
+     1u << F_LOOP | 1u << F_FILTER | 1u << F_DUMP)
+static const char *const F_TXT[F_N] = {"",          "LENGTH",     "ERASE",       "COPY",     "MERGE",
+                                       "QUANTIZE",  "TRANSPOSE",  "MIDI CHANNEL", "NAME",     "EDIT",
+                                       "CLOCK",     "LOOP/CLICK", "MIDI FILTER", "MIDI DUMP"};
 
 static const char *const FILTER_TXT[SQ_F_CHAN] = {"ALL EVENTS",  "NOTES ONLY",      "PITCH BEND",
                                                   "CONTROLLERS", "PROGRAM CHANGES", "AFTER TOUCH"};
@@ -41,10 +44,13 @@ static const char *const QMODE_TXT[4] = {"NOTE START", "START & END", "NOTE END"
 static const char *const CLICK_WHEN_TXT[4] = {"OFF", "REC", "PLAY", "BOTH"};   /* (bit 0 recording, bit 1 playing) */
 static const char *const LOOP_TXT[LOOP_N] = {"LOOP OFF", "LOOP PARTS", "LOOP ALL"};
 
-/* the settings' LOOP and CLICK into the sequencer (the click's value: the quantize's grid, 1/2 .. 1/64) */
-static void loop_click_apply(void)
+/* the settings' LOOP, CLICK and MIDI FILTER into the sequencer (the click's value: the quantize's grid, 1/2 ..
+ * 1/64) */
+static void seq_settings_apply(void)
 {
     uint32_t f = plat_lock();
+    sqp.rec_filter = set.rec_filter;
+    sqp.rec_ch = set.rec_ch;
     sqp.loop_part = (uint8_t)(set.loop != LOOP_OFF);
     sqp.loop_song = (uint8_t)(set.loop == LOOP_ALL);
     sqp.countin_beats = set.countin;
@@ -389,7 +395,19 @@ static void ed_turn(uint32_t enc, int32_t d, uint32_t btn)
             set.click_when = (uint8_t)ed_clamp((int32_t)set.click_when + d, 0, 3);
         else
             break;
-        loop_click_apply();
+        seq_settings_apply();
+        set_dirty = 1;
+        break;
+    case F_FILTER:                /* K1-K4: bend, controllers, programs, aftertouch recorded or not; SELECT channel */
+        if (enc == EN_SELECT) {
+            set.rec_ch = (uint8_t)ed_clamp((int32_t)set.rec_ch + d, 0, 16);
+        } else if (enc >= EN_K1 && enc <= EN_K4) {
+            uint32_t bit = 1u << (enc - EN_K1);
+            set.rec_filter = (uint8_t)(d > 0 ? set.rec_filter | bit : set.rec_filter & ~bit);
+        } else {
+            break;
+        }
+        seq_settings_apply();
         set_dirty = 1;
         break;
     case F_CLOCK:                 /* K1 the clock in (its own, MIDI's), K2 the clock out; at once, kept with SAVE */
@@ -834,6 +852,24 @@ static void ed_draw(void)
         str_cat(x, GRID_TXT[set.click_q % CLICK_QS]);
         ed_lr(b, x, CLICK_WHEN_TXT[set.click_when & 3u]);
         break;
+    case F_FILTER: {              /* "FILTER    CH ALL" / "BEND CC PROG ---": what a take records, dashes not */
+        static const char *const KIND[4] = {"BEND", "CC", "PROG", "AFT"};
+        if (set.rec_ch)
+            ed_num(x, "CH ", set.rec_ch, 2);
+        else
+            x[0] = 0, str_cat(x, "CH ALL");
+        ed_lr(a, "FILTER", x);
+        for (i = 0; i < 4u; i++) {
+            uint32_t k;
+            if (i)
+                str_cat(b, " ");
+            for (k = 0; KIND[i][k]; k++) {
+                char c[2] = {set.rec_filter >> i & 1u ? KIND[i][k] : '-', 0};
+                str_cat(b, c);
+            }
+        }
+        break;
+    }
     case F_DUMP:                  /* "MIDI DUMP  MMT-8" / "REC SENDS ALL" */
         ed_lr(a, "MIDI DUMP", "MMT-8");
         str_cat(b, "REC SENDS ALL");

@@ -968,6 +968,37 @@ static void test_punch_first(void)
     sqp_init(FS);
 }
 
+/* MIDI FILTER (the MMT-8's): a take records notes, and bend, controllers and programs but not aftertouch as it
+ * starts; each can be on or off, and the channel all or one */
+static void test_filter(void)
+{
+    sq_clear();
+    sqp_init(FS);
+    CHECK(sqp.rec_filter == (SQP_REC_BEND | SQP_REC_CTRL | SQP_REC_PROG) && !sqp.rec_ch,
+          "as the MMT-8 starts: all but aftertouch, every channel");
+    sqp.countin_beats = 0;
+    sqp_select_part(7);
+    sqp.rec_armed = 1;
+    sqp.rec_track = 0;
+    sqp_play();
+    run(frames_for_ticks(10.0f));
+    sqp_input(0xD0, 50, 0);       /* aftertouch: not */
+    sqp_input(0xE0, 0, 70);       /* bend: in */
+    sqp_input(0x91, 60, 100);     /* a note on channel 2: in */
+    CHECK(sqp.take_n == 2u, "aftertouch left out: %u events", (unsigned)sqp.take_n);
+    sqp.rec_ch = 1;
+    sqp.rec_filter = SQP_REC_BEND | SQP_REC_CTRL | SQP_REC_PROG | SQP_REC_TOUCH;
+    sqp_input(0x91, 62, 100);     /* channel 2: not */
+    sqp_input(0xD0, 50, 0);       /* channel 1's aftertouch, on now: in */
+    sqp.rec_filter = 0;
+    sqp_input(0xB0, 1, 64);       /* controllers off: not */
+    sqp_input(0x90, 64, 100);     /* notes always */
+    CHECK(sqp.take_n == 4u, "channel 1 only, then notes only: %u events", (unsigned)sqp.take_n);
+    sqp_stop();
+    sqp.take_state = SQP_TAKE_NONE;
+    sqp_init(FS);
+}
+
 int main(void)
 {
     test_arena();
@@ -983,6 +1014,7 @@ int main(void)
     test_loop_click();
     test_locate();
     test_punch_first();
+    test_filter();
     test_image_versions();
     test_clock_in();
     printf("seq: %d checks, %d failed\n", checks, fails);

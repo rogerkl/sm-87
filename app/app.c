@@ -53,13 +53,18 @@ typedef struct {
     uint8_t countin;              /* the count-in before a take, beats: 0 (none) .. 99 */
     uint8_t click_q;              /* the click's value: 1/2 .. 1/64 (seq_edit.c GRID's index; 1: 1/4) */
     uint8_t click_when;           /* the click: bit 0 while recording, bit 1 while playing (1: recording only) */
+    /* the MMT-8's MIDI FILTER (an object saved before it: its defaults) */
+    uint8_t rec_filter;           /* what a take records besides notes: SQP_REC_* (all but aftertouch) */
+    uint8_t rec_ch;               /* from which channel: 0 all, 1..16 */
+    uint8_t rsv3[2];
 } settings_t;
 #define SET_V1_LEN 12u            /* (to the drums') */
 #define SET_V2_LEN offsetof(settings_t, mix_level)   /* (to the mix) */
 #define SET_V3_LEN offsetof(settings_t, loop)        /* (to the loop and click) */
+#define SET_V4_LEN offsetof(settings_t, rec_filter)  /* (to the MIDI filter) */
 enum { LOOP_OFF, LOOP_PARTS, LOOP_ALL, LOOP_N };
 #define CLICK_QS 10u
-static void loop_click_apply(void);   /* the settings' LOOP and CLICK into the sequencer (ui/seq_edit.c) */
+static void seq_settings_apply(void);   /* LOOP, CLICK and MIDI FILTER into the sequencer (ui/seq_edit.c) */
 #define MIX_PAN_MAX 50
 static settings_t set;
 static uint8_t set_dirty;
@@ -96,6 +101,13 @@ static void loop_click_defaults(void)
     set.click_when = 1;
 }
 
+/* the MMT-8's MIDI FILTER: all but aftertouch, every channel */
+static void filter_defaults(void)
+{
+    set.rec_filter = SQP_REC_BEND | SQP_REC_CTRL | SQP_REC_PROG;
+    set.rec_ch = 0;
+}
+
 static void settings_defaults(void)
 {
     set.magic = SET_MAGIC;
@@ -109,6 +121,7 @@ static void settings_defaults(void)
     set.s7_poly = S7_POLY_STD;
     set.dr_prog = 0;
     loop_click_defaults();
+    filter_defaults();
     drums_defaults();
     mix_defaults();
 }
@@ -128,9 +141,11 @@ static void settings_load(void)
         set.s7_poly = S7_POLY_STD;
     if (set.dr_prog > 1u)
         set.dr_prog = 0;
-    if (n < (int)sizeof set || set.loop >= LOOP_N || set.countin > 99u || set.click_q >= CLICK_QS ||
+    if (n < (int)SET_V4_LEN || set.loop >= LOOP_N || set.countin > 99u || set.click_q >= CLICK_QS ||
         set.click_when > 3u)
         loop_click_defaults();
+    if (n < (int)sizeof set || set.rec_filter > 15u || set.rec_ch > 16u)
+        filter_defaults();
     if (n < (int)SET_V2_LEN || set.dr_channel > 15u || set.dr_quant >= HR_GRIDS || set.dr_swing < 50u ||
         set.dr_swing > HR_SWING_MAX) {
         drums_defaults();
@@ -610,7 +625,7 @@ void app_init(void)
     sqp_init(SM_FS);
     sqp.clock_in = set.clock_in ? 1u : 0u;
     sqp.clock_out = set.clock_out_off ? 0u : 1u;
-    loop_click_apply();
+    seq_settings_apply();
     sqp_select_part(0);
 }
 
@@ -1908,6 +1923,10 @@ int app_expect(const char *what, int *got)
         *got = sqp.step + 1;
     else if (!strcmp(what, "drpat"))        /* the drums: their own pattern */
         *got = hrp.pattern;
+    else if (!strcmp(what, "recfilter"))    /* MIDI FILTER: what a take records besides notes (SQP_REC_*) */
+        *got = sqp.rec_filter;
+    else if (!strcmp(what, "recch"))        /* and its channel: 0 all */
+        *got = sqp.rec_ch;
     else if (!strcmp(what, "loop"))         /* LOOP: 0 off, 1 parts, 2 all */
         *got = set.loop;
     else if (!strcmp(what, "loopsong"))     /* a song goes round */

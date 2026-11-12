@@ -43,6 +43,8 @@ void sqp_init(float fs)
     sqp.click_play = 0;
     sqp.click_grid = (uint8_t)SQ_PPQN;
     sqp.countin_beats = 4;
+    sqp.rec_filter = SQP_REC_BEND | SQP_REC_CTRL | SQP_REC_PROG;   /* (the MMT-8's: all but aftertouch) */
+    sqp.rec_ch = 0;
     sqp.loop_part = 1;            /* (SM-87's LOOP PARTS: parts go round, songs end) */
     sqp.loop_song = 0;
     sqp.clock_out = 1;
@@ -685,11 +687,24 @@ void sqp_rt_in(uint32_t st, uint32_t d, uint32_t frame)
     }
 }
 
+/* MIDI FILTER (the MMT-8's): a take records notes, and what the filter lets in, from its channel or all */
+static int recorded(uint32_t st)
+{
+    uint32_t k = st & 0xF0u, bit = k == 0xE0u   ? SQP_REC_BEND
+                                   : k == 0xB0u ? SQP_REC_CTRL
+                                   : k == 0xC0u ? SQP_REC_PROG
+                                   : k == 0xD0u ? SQP_REC_TOUCH
+                                                : 0u;
+    if (bit && !(sqp.rec_filter & bit))
+        return 0;
+    return !sqp.rec_ch || (st & 0x0Fu) == sqp.rec_ch - 1u;
+}
+
 void sqp_input(uint32_t st, uint32_t d1, uint32_t d2)
 {
     sq_raw_t *r;
     uint32_t kind = st & 0xF0u, tick;
-    if (sqp.take_state != SQP_TAKE_RUNNING || st >= 0xF0u || kind == 0xA0u)
+    if (sqp.take_state != SQP_TAKE_RUNNING || st >= 0xF0u || kind == 0xA0u || !recorded(st))
         return;                   /* (poly pressure: the MMT-8 does not record it) */
     if (sqp.state == SQP_COUNTIN && sqp.countin <= (int32_t)(SQ_PPQN / 4u))
         tick = 0;                 /* in the count-in's last sixteenth: a little early, on the one */

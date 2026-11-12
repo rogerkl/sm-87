@@ -28,9 +28,9 @@ wait 30
 expect songmode 0
 # MIDI DUMP (the last function): REC sends the memory back, byte for byte the dump that came
 usb plug
-turn ALGO 12
+turn ALGO 13
 wait 30
-expect fn 12
+expect fn 13
 shot mmt8_dump.png
 sysex_out
 tap REC
