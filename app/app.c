@@ -43,7 +43,9 @@ typedef struct {
     uint8_t mix_level[S7_SLOTS];  /* each slot's, 0..99 (99: as it is) */
     int8_t mix_pan[S7_SLOTS];     /* -50 (left) .. 50 */
     uint8_t drum_level;           /* the drums' bus, 0..99 */
-    uint8_t rsv2[3];
+    uint8_t s7_poly;              /* the sampler's voices, S7_POLY_STD (6, the S700's) .. S7_VOICES (0, before it was
+                                   * kept: 6) */
+    uint8_t rsv2[2];
 } settings_t;
 #define SET_V1_LEN 12u            /* (to the drums') */
 #define SET_V2_LEN offsetof(settings_t, mix_level)   /* (to the mix) */
@@ -83,6 +85,7 @@ static void settings_defaults(void)
     set.clock_in = 0;
     set.clock_out_off = 0;
     set.s7_mode = S7_OMNI_OFF;
+    set.s7_poly = S7_POLY_STD;
     drums_defaults();
     mix_defaults();
 }
@@ -98,6 +101,8 @@ static void settings_load(void)
         settings_defaults();
         return;
     }
+    if (set.s7_poly < S7_POLY_STD || set.s7_poly > S7_VOICES)
+        set.s7_poly = S7_POLY_STD;
     if (n < (int)SET_V2_LEN || set.dr_channel > 15u || set.dr_quant >= HR_GRIDS || set.dr_swing < 50u ||
         set.dr_swing > HR_SWING_MAX) {
         drums_defaults();
@@ -558,6 +563,7 @@ void app_init(void)
     s7_init(SM_FS);
     s7_bend_range(set.bend_range);
     s7_midi_mode(set.s7_mode);
+    s7_poly(set.s7_poly);
     {
         uint32_t i;
         for (i = 0; i < S7_SLOTS; i++)
@@ -956,6 +962,39 @@ static void page_midi(void)
 }
 
 #define PG_MIX (PG_N + 3u)        /* GLO again: the mix, each slot's level and pan, the drums' bus */
+
+#define PG_VOICES (PG_N + 4u)     /* GLO a third time: the sampler's voices */
+
+/* "VOICES (S700)  6" (the S700's six) or "VOICES        10", and "PLAYING        3": the voices sounding now (one
+ * note may take several, a sample each). K1 sets it */
+static void page_voices(void)
+{
+    char t[LCD_COLS + 1], n[4];
+    uint32_t p = s7_poly_now();
+    fmt_uint(n, p, 2, ' ');
+    ed_lr(t, p == S7_POLY_STD ? "VOICES (S700)" : "VOICES", n);
+    lcd_row(0, t);
+    fmt_uint(n, s7_voices_active(), 2, ' ');
+    ed_lr(t, "PLAYING", n);
+    lcd_row(1, t);
+}
+
+/* K1: the voices a note may take, 6 (as the S700) to 16. More cost the audio interrupt more: the strip's CPU says
+ * what is left */
+static void voices_turn(uint32_t k, int32_t e)
+{
+    uint32_t f, v;
+    if (k != EN_K1)
+        return;
+    v = (uint32_t)clamp((int32_t)set.s7_poly + e, (int32_t)S7_POLY_STD, (int32_t)S7_VOICES);
+    if (v == set.s7_poly)
+        return;
+    set.s7_poly = (uint8_t)v;
+    f = plat_lock();
+    s7_poly(v);
+    plat_unlock(f);
+    set_dirty = 1;
+}
 
 /* CLEAR (EDIT's last page): "CLEAR    SLOT 05" / what it holds, "BUILT-IN SAMPLE", "SAMPLE       48K" (the flash it
  * takes) or "TEST TONE" (nothing to clear). Its name is on the strip under */
@@ -1483,8 +1522,8 @@ static void input(void)
         } else if (k == B_LFO) {
             ui.page = PG_LFO;
             ui.redraw = 1;
-        } else if (k == B_GLO) {             /* GLO: MIDI, again the MIX, round */
-            ui.page = ui.page == PG_MIDI ? PG_MIX : PG_MIDI;
+        } else if (k == B_GLO) {             /* GLO: MIDI, again the MIX, the VOICES, round */
+            ui.page = ui.page == PG_MIDI ? PG_MIX : ui.page == PG_MIX ? PG_VOICES : PG_MIDI;
             ui.redraw = 1;
         } else if (k == B_HOME) {
             ui.page = PG_HOME;
@@ -1528,6 +1567,9 @@ static void input(void)
         } else if (ui.page == PG_MIX && k != EN_SELECT) {   /* (SELECT: the slot, as on the sampler's pages) */
             mix_turn(k, e, &ui.slot);
             ui.redraw = 1;
+        } else if (ui.page == PG_VOICES && k != EN_SELECT) {
+            voices_turn(k, e);
+            ui.redraw = 1;
         } else if (k == EN_SELECT) {         /* SELECT: the slot the sampler's pages edit */
             int32_t sl = (int32_t)ui.slot + e;
             ui.slot = (uint8_t)(sl < 0 ? 0 : sl > 15 ? 15 : sl);
@@ -1541,7 +1583,7 @@ static void input(void)
     ui.btn = btn;
     /* the lights: the held, SAVE while something is not saved, the transport, the page's button */
     lit_btn = btn | (unsaved() ? 1u << B_SAVE : 0u) | (sqp.rec_armed || hrp.rec ? 1u << B_REC : 0u);
-    lit_btn |= ui.page == PG_SEQ ? 1u << B_SEQ : ui.page == PG_DRUM ? 1u << B_ARP : ui.page == PG_MIDI || ui.page == PG_MIX ? 1u << B_GLO : 0u;
+    lit_btn |= ui.page == PG_SEQ ? 1u << B_SEQ : ui.page == PG_DRUM ? 1u << B_ARP : ui.page == PG_MIDI || ui.page == PG_MIX || ui.page == PG_VOICES ? 1u << B_GLO : 0u;
     if (sqp.state != SQP_STOPPED || sqp.aux)
         lit_btn |= LED_PLAY_GREEN;
     lit_keys = keys;
@@ -1710,6 +1752,8 @@ void app_frame(void)
         page_midi();
     } else if (ui.page == PG_MIX) {
         page_mix(ui.slot);
+    } else if (ui.page == PG_VOICES) {
+        page_voices();
     } else if (ui.page == PG_HOME) {
         page_home();
     } else if (ui.page == PG_CLEAR) {
@@ -1747,6 +1791,8 @@ int app_expect(const char *what, int *got)
         *got = (int)s7_current_program() + 1;
     else if (!strcmp(what, "voices"))
         *got = (int)s7_voices_active();
+    else if (!strcmp(what, "poly"))         /* the voices a note may take (the GLO page's VOICES) */
+        *got = (int)s7_poly_now();
     else if (!strncmp(what, "mixlev", 6))   /* mixlevN: slot N's level in the mix */
         *got = set.mix_level[(atoi(what + 6) - 1) & 15];
     else if (!strncmp(what, "mixpan", 6))   /* mixpanN: its pan, -50..50 */

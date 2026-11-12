@@ -56,7 +56,10 @@ peakreset
 midi 99 24 7F
 wait 200
 expect peak_db_min -50
-# GLO again: back to MIDI
+# GLO again: the voices, then round to MIDI
+tap GLO
+wait 30
+expect page 13
 tap GLO
 wait 30
 expect page 11

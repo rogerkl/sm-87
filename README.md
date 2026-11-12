@@ -277,7 +277,8 @@ For recovery if an install goes wrong:
 - MvaveFM1Unbricker.
 
 The first things to measure on a device, before more is built on these assumptions:
-- `plat_cpu_pct()` with 6 voices playing from the flash, and the 8 drum voices (the status strip shows CPU).
+- `plat_cpu_pct()` with 6 voices playing from the flash, and the 8 drum voices (the status strip shows CPU). Then
+  with the sampler raised to 16 voices (GLO, VOICES), to find how many the FM-1 plays without breaking up.
 - `plat_xruns()`.
 - A full 66 KB dump from Axs7 over USB, checked bit for bit with RSD.
 

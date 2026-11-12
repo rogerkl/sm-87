@@ -415,6 +415,38 @@ static void test_mix(void)
     s7_kill();
 }
 
+/* the voices: six as the S700's unless raised (to 16 at most); a seventh note takes one of them. Lowered while more
+ * play: those over it fade as a note let go, and new notes take the rest */
+static void test_poly(void)
+{
+    uint32_t k;
+    (void)make_sine(1000.0f, 32000, 1800.0f);
+    slot_setup(32000);
+    CHECK(s7_poly_now() == 6u, "as the S700: 6 voices (%u)", s7_poly_now());
+    for (k = 0; k < 7u; k++)
+        s7_note_on(0, 60u + k, 100);
+    render(441);
+    CHECK(s7_voices_active() == 6u, "7 notes on 6 voices: 6 play (%u)", s7_voices_active());
+    s7_poly(10);
+    for (k = 7; k < 12u; k++)
+        s7_note_on(0, 60u + k, 100);
+    render(441);
+    CHECK(s7_poly_now() == 10u && s7_voices_active() == 10u, "raised to 10: 10 play (%u)", s7_voices_active());
+    s7_poly(30);
+    CHECK(s7_poly_now() == S7_VOICES, "30: 16 at most (%u)", s7_poly_now());
+    s7_poly(2);
+    CHECK(s7_poly_now() == 6u, "2: 6 at least (%u)", s7_poly_now());
+    render(441);
+    CHECK(s7_voices_active() == 10u, "lowered: those over it fading, still on (%u)", s7_voices_active());
+    render(44100 * 3);
+    CHECK(s7_voices_active() == 6u, "lowered: those over it gone, 6 held (%u)", s7_voices_active());
+    s7_note_on(0, 80, 100);
+    render(441);
+    CHECK(s7_voices_active() == 6u, "lowered: a new note takes one of the 6 (%u)", s7_voices_active());
+    s7_poly(S7_POLY_STD);
+    s7_kill();
+}
+
 int main(void)
 {
     s7_init(FS);
@@ -428,6 +460,7 @@ int main(void)
     test_vibrato();
     test_multi();
     test_mix();
+    test_poly();
     printf("engine: %d checks, %d failed\n", checks, fails);
     return fails != 0;
 }

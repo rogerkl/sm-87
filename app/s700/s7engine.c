@@ -140,6 +140,7 @@ typedef struct {
 } voice_t;
 
 static voice_t vc[S7_VOICES];
+static uint32_t poly = S7_POLY_STD;   /* the voices a note may take: vc[0..poly) */
 static voice_t dv[S7_DRUM_VOICES];   /* the drum machine's */
 static uint32_t prog_now, note_count, bend_range = 2u, midi_mode = S7_OMNI_OFF;
 static uint8_t wheel[S7_CHANNELS], press[S7_CHANNELS];   /* each channel's (MULTI), else [0] */
@@ -385,16 +386,16 @@ static voice_t *voice_free(void)
 {
     voice_t *best = 0;
     uint32_t i;
-    for (i = 0; i < S7_VOICES; i++)
+    for (i = 0; i < poly; i++)
         if (vc[i].stage == ENV_OFF)
             return &vc[i];
-    for (i = 0; i < S7_VOICES; i++)
+    for (i = 0; i < poly; i++)
         if (vc[i].stage == ENV_RELEASE && (!best || vc[i].env < best->env))
             best = &vc[i];
     if (best)
         return best;
     best = &vc[0];
-    for (i = 1; i < S7_VOICES; i++)
+    for (i = 1; i < poly; i++)
         if (vc[i].started - best->started > 0x80000000u)   /* older (wraps) */
             best = &vc[i];
     return best;
@@ -471,6 +472,15 @@ void s7_kill_slot(uint32_t slot)
         if (dv[i].slot == slot)
             dv[i].stage = ENV_OFF;
 }
+
+void s7_poly(uint32_t n)
+{
+    uint32_t i;
+    poly = n < S7_POLY_STD ? S7_POLY_STD : n > S7_VOICES ? S7_VOICES : n;
+    for (i = poly; i < S7_VOICES; i++)   /* (the render plays them all: those over it fade out) */
+        voice_release(&vc[i], 64u);
+}
+uint32_t s7_poly_now(void) { return poly; }
 
 uint32_t s7_voices_active(void)
 {

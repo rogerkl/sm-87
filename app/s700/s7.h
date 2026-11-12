@@ -15,7 +15,8 @@
 
 #define S7_SLOTS 16u              /* the X7000 with its memory board */
 #define S7_PROGRAMS 32u
-#define S7_VOICES 6u              /* as the S700 */
+#define S7_VOICES 16u             /* the most it may play at once (s7_poly), as an S1000 */
+#define S7_POLY_STD 6u            /* as the S700: what it plays unless told otherwise */
 #define S7_NPARAM 155u            /* SPRM's values */
 #define S7_MAXWORDS 32752u        /* a sample dump's limit */
 #define S7_CHANNELS 16u
@@ -97,7 +98,7 @@ void s7_default_params(uint8_t *p);
  * The S700's MIDI modes (its manual, 33-37; OVS's OMNION): OMNI OFF hears its basic channel, OMNI ON every channel,
  * both playing the program chosen; MULTI PROGRAM (its mode 7) hears every channel, channel 1..16 playing program
  * P1..P16, or P17..P32 while one of those is the program chosen (the manual says "or P17-32", not how: here, the
- * program chosen's bank). The six voices go to whichever channel needs one. The app sends the engine only what its
+ * program chosen's bank). The voices (six, as the S700's: s7_poly) go to whichever channel needs one. The app sends the engine only what its
  * mode hears; the channel (0..15) is the message's */
 enum { S7_OMNI_OFF, S7_OMNI_ON, S7_MULTI };
 void s7_init(float fs);           /* the tables, at the output rate */
@@ -120,6 +121,10 @@ void s7_kill_slot(uint32_t slot); /* the voices playing a slot silent now (befor
 void s7_mix(uint32_t slot, float gl, float gr);
 void s7_render(float *l, float *r, uint32_t n);   /* adds n samples, each voice at its slot's mix */
 uint32_t s7_voices_active(void);
+/* the voices a note may take, S7_POLY_STD..S7_VOICES (S7_POLY_STD: as the S700). Fewer than playing: those over it
+ * released (they fade as a note let go), a new note takes one of the rest */
+void s7_poly(uint32_t n);
+uint32_t s7_poly_now(void);
 
 /* ---- the drum machine's voices (hr16/): the sampler's, from any sound in its format (a slot, or one of the drum
  * kit's built in), played once from START to END without the filter, bend or vibrato, and panned. Audio interrupt.

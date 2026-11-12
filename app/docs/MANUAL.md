@@ -47,7 +47,7 @@ sampler's dumps, as many as the file holds.
 - **The sampler** plays samples the way an X7000 does. Every formula comes from the measurements in
   [04-playback.md](https://github.com/rogerkl/sm-87/blob/HEAD/documentation/akai-s700-x7000/04-playback.md), ported
   from [Axs7](https://github.com/rogerkl/Axs7)'s engine:
-  - 6 voices.
+  - 6 voices, as the S700, or up to 16 if you raise it (VOICES, below).
   - 12-bit words, packed two to three bytes.
   - 4-point Hermite interpolation.
   - A 6-pole Butterworth lowpass whose cutoff follows velocity.
@@ -119,7 +119,7 @@ sampler's dumps, as many as the file holds.
 | LFO | SPEED, DEPTH, DELAY, PRESSURE |
 | SELECT / K1-K4 (sampler pages) | The slot / the page's values. The strip under the LCD shows the slot, its sample and the program |
 | HOME | The sampler's overview |
-| GLO | MIDI: K1 the sampler's channel, K2 its mode (OMNI OFF, ON, MULTI), K3 the pitch bend's range, K4 the drums' channel. GLO again: the MIX (below) |
+| GLO | MIDI: K1 the sampler's channel, K2 its mode (OMNI OFF, ON, MULTI), K3 the pitch bend's range, K4 the drums' channel. GLO again: the MIX, and again the VOICES (below) |
 | SAVE | Lit when something isn't saved: settings, the sample parameters, the sequencer (stopped) |
 
 **Under the strip on the SEQ page**, the part playing and the one after it, large, with their names (the drum page
@@ -140,7 +140,7 @@ The S700's MIDI modes, from its manual (33-37), set with K2 on the GLO page:
 - **OMNI OFF** (as before): the sampler hears its channel (K1) and plays the program shown (PRESET).
 - **OMNI ON:** every channel plays the program shown.
 - **MULTI** (the S700's MULTI PROGRAM / POLYPHONIC): channel 1 plays program 1, channel 2 program 2, up to 16. The
-  6 voices go to whichever channel needs one. While a program of 17-32 is shown, channels 1-16 play programs 17-32
+  voices go to whichever channel needs one. While a program of 17-32 is shown, channels 1-16 play programs 17-32
   instead (the manual says "or P17-32" without saying how; this is a guess). A program change on the sampler's
   own channel chooses the program shown; one on another channel is ignored, since that channel's program is fixed.
   Pitch bend, the mod wheel and aftertouch are each channel's own.
@@ -163,6 +163,18 @@ OVS (Akai's overall settings) carries the mode both ways.
 The S700 is mono, so by default every slot is at full level in the middle, and sounds as before. The level and pan
 belong to the slot, like a mixer's channel strip, so a sample sent to the slot keeps them. They act at once, on notes
 already sounding too, and are kept in the settings (SAVE).
+
+### Voices (GLO a third time)
+
+`VOICES (S700)  6` / `PLAYING        2`: K1 sets the number of voices the sampler may play at once, from 6 (as the
+S700, shown `(S700)`) up to 16. A seventh note on six voices takes over a voice that is fading, or else the oldest,
+as on the S700; with more voices that happens later. PLAYING counts the voices sounding now. A key whose note is in
+several samples (keygroups that overlap) takes a voice for each.
+
+Every voice costs the audio interrupt time: the strip under the LCD shows CPU while notes play. The FM-1's limit isn't
+measured yet; if the sound breaks up with many notes held, lower it. Lowered while more play, the voices over the
+new number fade as if their notes were let go. The drums have their own 8 voices and aren't counted. It's kept in
+the settings (SAVE).
 
 ### The drum machine (ARP)
 
