@@ -1256,6 +1256,7 @@ static struct {
     uint8_t slot;                 /* the slot the sampler's pages edit, 0..15 */
     uint8_t rec_used;             /* REC held: a track key chose the track (its release does not arm) */
     uint8_t rec_manual;           /* the record track chosen (REC + its key): kept until another part */
+    uint8_t rec_none;             /* none chosen: REC + the armed track's key again (the MMT-8's), until REC + a key */
 } ui;
 
 void app_say(const char *a, const char *b)
@@ -1346,7 +1347,9 @@ static void transport_button(uint32_t k, uint32_t btn)
                 if (t < SQ_TRACKS)
                     sqp.rec_track = (uint8_t)t;
             }
-            if (t < SQ_TRACKS)
+            if (ui.rec_manual && ui.rec_none)
+                say = "NO TRACK CHOSEN";  /* (the MMT-8's RECORD stays dark) */
+            else if (t < SQ_TRACKS)
                 sqp.rec_armed = 1;
             else
                 say = "NO EMPTY TRACK";
@@ -1358,14 +1361,21 @@ static void transport_button(uint32_t k, uint32_t btn)
     ui.redraw = 1;
 }
 
-/* a track key on the sequencer's page: SEL held, its mute (and the song step's); REC held, the record track */
+/* a track key on the sequencer's page: SEL held, its mute (and the song step's); REC held, the record track (the
+ * armed one again: none, as the MMT-8's, until REC + a key chooses one) */
 static void track_key(uint32_t t, uint32_t btn)
 {
     uint32_t f;
     if (btn >> B_REC & 1u) {
         f = plat_lock();
-        sqp.rec_track = (uint8_t)t;
-        sqp.rec_armed = 1;
+        if (sqp.rec_armed && sqp.rec_track == t && sqp.take_state != SQP_TAKE_RUNNING) {
+            sqp.rec_armed = 0;
+            ui.rec_none = 1;
+        } else {
+            sqp.rec_track = (uint8_t)t;
+            sqp.rec_armed = 1;
+            ui.rec_none = 0;
+        }
         plat_unlock(f);
         ui.rec_used = 1;
         ui.rec_manual = 1;
@@ -1429,7 +1439,7 @@ static void seq_turn(uint32_t enc, int32_t e, uint32_t btn)
     uint32_t f;
     if (enc == EN_PRESET && !sqp.song_mode && sqp.state != SQP_STOPPED && !sq.part[sqp.part].beats &&
         (sqp.take_state == SQP_TAKE_RUNNING || sqp.rec_armed)) {
-        app_say("FIRST TAKE", "STOP SETS LENGTH");   /* (an empty part's first take: open-ended until stopped) */
+        app_say("FIRST TAKE", "REC SETS LENGTH");   /* (an empty part's first take: open-ended until stopped) */
         return;
     }
     if (enc == EN_PRESET) {                  /* the part (queued while playing), or the song */
@@ -1443,7 +1453,7 @@ static void seq_turn(uint32_t enc, int32_t e, uint32_t btn)
         plat_unlock(f);
         if (!sqp.song_mode) {
             seq_last_part = (uint8_t)v;
-            ui.rec_manual = 0;               /* another part: its lowest empty track again */
+            ui.rec_manual = ui.rec_none = 0;   /* another part: its lowest empty track again */
         }
         seq_song_step = 0;
     } else if (enc == EN_K1) {               /* the tempo (a song keeps its own) */

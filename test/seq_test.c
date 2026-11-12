@@ -926,6 +926,48 @@ static void test_locate(void)
     sqp_init(FS);
 }
 
+/* REC on a first take, as the MMT-8's punch out: its length to the nearest beat, and the part plays on; made the
+ * part's a moment later (the main loop's), it goes on from as far into its next round, in time. Nothing played: as
+ * a stop */
+static void test_punch_first(void)
+{
+    sq_clear();
+    sqp_init(FS);
+    sqp.countin_beats = 0;
+    sqp_select_part(5);
+    sqp.rec_armed = 1;
+    sqp.rec_track = 0;
+    sqp_play();
+    run(frames_for_ticks(10.0f));
+    sqp_input(0x90, 60, 100);
+    run(frames_for_ticks(20.0f));
+    sqp_input(0x80, 60, 0);
+    run(frames_for_ticks(4.3f * 96.0f - 30.0f));
+    sqp_punch();
+    CHECK(sqp.state == SQP_PLAYING && sqp.take_state == SQP_TAKE_DONE && sqp.take_beats == 4u,
+          "punched out at 4.3 beats: 4, playing on (state %u, take %u, %u beats)", sqp.state, sqp.take_state,
+          sqp.take_beats);
+    run(frames_for_ticks(3.0f));   /* (the main loop's moment: no length yet, it counts on) */
+    CHECK(sq_commit(sqp.take_part, sqp.take_track, sqp_take, sqp.take_n, sqp.take_beats, scratch) == 0 &&
+              sq.part[5].beats == 4u,
+          "the take made a track, the part 4 beats");
+    sqp.take_state = SQP_TAKE_NONE;
+    run(frames_for_ticks(2.0f));
+    CHECK(sqp.state == SQP_PLAYING && sqp.tick >= 30u && sqp.tick <= 40u,
+          "round its new end, in time: tick %u (about 4.3 beats + 5 - 4)", (unsigned)sqp.tick);
+    sqp_stop();
+    sqp.take_state = SQP_TAKE_NONE;
+    sqp_select_part(6);
+    sqp.rec_armed = 1;
+    sqp_play();
+    run(frames_for_ticks(150.0f));
+    sqp_punch();
+    CHECK(sqp.state == SQP_STOPPED && sqp.take_state == SQP_TAKE_NONE && sqp.take_nothing,
+          "nothing played: stopped, nothing kept");
+    sqp.take_nothing = 0;
+    sqp_init(FS);
+}
+
 int main(void)
 {
     test_arena();
@@ -940,6 +982,7 @@ int main(void)
     test_song_offsets();
     test_loop_click();
     test_locate();
+    test_punch_first();
     test_image_versions();
     test_clock_in();
     printf("seq: %d checks, %d failed\n", checks, fails);

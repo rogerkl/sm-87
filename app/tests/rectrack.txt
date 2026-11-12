@@ -1,0 +1,51 @@
+# The record track as the MMT-8's: REC arms the part's lowest empty track; REC + the armed track's key again leaves
+# none chosen (REC then says so) until REC + a key chooses one; another part, the lowest empty again. REC in a first
+# take sets its length, to the nearest beat, and the part plays on. 120 BPM: a beat is 500 ms.
+wait 600
+tap SEQ
+wait 30
+tap REC
+wait 30
+expect armed 1
+expect rectrack 1
+# REC + track 1, the armed one: none
+press REC
+tapkey w0
+release REC
+wait 30
+expect armed 0
+tap REC
+wait 30
+expect armed 0
+# REC + track 3: it, armed
+press REC
+tapkey w2
+release REC
+wait 30
+expect armed 1
+expect rectrack 3
+# a first take: the count-in (4 beats), a note, REC at about 4.2 beats: 4 beats long, still playing
+tap PLAY
+wait 2100
+midi 90 3C 64
+wait 100
+midi 80 3C 40
+wait 1820
+tap REC
+wait 30
+expect seq 2
+expect take 0
+expect beats 4
+expect tracks 4
+wait 1000
+expect seq 2
+tap PLAY
+wait 30
+expect seq 0
+# another part: its lowest empty track again
+turn PRESET 1
+wait 30
+tap REC
+wait 30
+expect armed 1
+expect rectrack 1

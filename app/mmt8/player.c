@@ -274,12 +274,22 @@ void sqp_stop(void)
 
 void sqp_punch(void)
 {
+    uint32_t beats;
     if (sqp.take_state != SQP_TAKE_RUNNING)
         return;
-    if (!sq.part[sqp.take_part].beats || sqp.state != SQP_PLAYING)
+    if (sqp.state != SQP_PLAYING) {   /* in the count-in: as a stop */
         sqp_stop();
-    else
-        take_end(sq.part[sqp.take_part].beats);
+        return;
+    }
+    beats = sq.part[sqp.take_part].beats;
+    if (!beats) {                 /* a first take: its length, to the nearest beat, and the part plays on (MMT-8) */
+        beats = (sqp.tick + SQ_PPQN / 2u) / SQ_PPQN;
+        if (!beats || !sqp.take_n) {   /* under half a beat, or nothing played: nothing to keep, as a stop */
+            sqp_stop();
+            return;
+        }
+    }
+    take_end(beats);
 }
 
 void sqp_continue(void)
@@ -480,6 +490,9 @@ static void tracks_play_song(void)
 
 static void part_end(void)
 {
+    /* past the end already (a first take punched out on a length rounded down, made the part's a moment later): on
+     * from as far into the next round, in time */
+    uint32_t len = sq_part_ticks(sqp.part), over = !sqp.song_mode && len && sqp.tick > len ? sqp.tick - len : 0u;
     if (sqp.take_state == SQP_TAKE_RUNNING)   /* punch out at the part's end; it plays on (LOOP off: stops, below) */
         take_end(sq.part[sqp.take_part].beats);
     if (!sqp.song_mode)           /* (in a song the notes end as they are long: an early track's next ones sound) */
@@ -506,7 +519,7 @@ static void part_end(void)
         sqp_resync();
         return;
     }
-    sqp.tick = 0;
+    sqp.tick = over;
     sqp_resync();
 }
 

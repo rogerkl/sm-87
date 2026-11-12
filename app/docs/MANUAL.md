@@ -108,9 +108,9 @@ sampler's dumps, as many as the file holds.
 | Keys | Play the sampler on its channel (and out over USB); OCT- / OCT+ shift them |
 | SEQ | The sequencer's page; again (stopped): PART ↔ SONG |
 | PLAY | Play from the top / stop; SEL + PLAY continues from the beat (where it stopped, or where SELECT put it) |
-| REC | Arm recording on the part's lowest empty track (or the one chosen with REC + its key); again: disarm; while a take runs: punch out |
+| REC | Arm recording on the part's lowest empty track (or the one chosen with REC + its key); again: disarm; while a take runs: punch out (the part plays on) |
 | SEL + first 8 white keys | Track mutes (on the SEQ page; in a song: the step's mutes); the 9th: the drums on or muted |
-| REC + first 8 white keys | The record track |
+| REC + first 8 white keys | The record track; the armed track's key again: none (until REC + a key chooses one) |
 | PRESET | The part or song (SEQ page; while a part plays, the next, queued for its end), else the sampler's program |
 | K1 / K2 (SEQ) | Tempo / the record track's channel (UNCHANGED, 1-16) |
 | K4 (SEQ) | The drum pattern that plays with the parts; in a song (stopped): the step's drum pattern, or none (the step's row shows it: `P05 12345678 D07`, `D--` none) |
@@ -341,14 +341,16 @@ pads. So an MMT-8 track on channel 10 plays them too.
 1. SEQ, and PRESET to the part. The LCD's top left says PART (SEQ again switches to SONG, which plays parts but
    doesn't record).
 2. REC: it lights, and the LCD shows `REC TRK 1`, the part's lowest empty track. REC + a track key chooses
-   another; it stays chosen until you change part.
+   another; it stays chosen until you change part. REC + the armed track's key again leaves none chosen, as on the
+   MMT-8: REC then says `NO TRACK CHOSEN` until REC + a key chooses one, or you change part.
 3. PLAY: four clicks of count-in (`COUNT IN 4` .. `1`), then it records from beat 1. Notes in the count-in aren't
    recorded, except one played in its last sixteenth, which lands on beat 1. LOOP/CLICK sets the count-in's length;
    with none, recording starts at once.
-4. PLAY (or REC) to stop. On an empty part this sets its length, to the nearest beat (until then PRESET waits: the
-   LCD says `FIRST TAKE`, `STOP SETS LENGTH`). Later takes stop at the part's end: the part plays on, or with LOOP
-   OFF it stops there. The LCD says `RECORDED TRACK 1`,
-   or `NOTHING RECORDED` when nothing was played after the count-in.
+4. REC punches out: the take ends and the part plays on, as on the MMT-8. On an empty part this sets its length, to
+   the nearest beat, and the part goes round at it (until then PRESET waits: the LCD says `FIRST TAKE`,
+   `REC SETS LENGTH`). PLAY stops instead, setting the length the same way. Later takes end at the part's end: the
+   part plays on, or with LOOP OFF it stops there. The LCD says `RECORDED TRACK 1`, or `NOTHING RECORDED` when
+   nothing was played after the count-in (then it stops).
 5. PLAY plays it back. Another REC arms the next empty track, so takes don't record over each other unless you
    choose a recorded track yourself (like tape, that replaces it).
 6. SAVE (lit while something isn't saved) keeps it in the flash. Without it, the part is gone after a power cycle

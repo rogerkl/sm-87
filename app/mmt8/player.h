@@ -65,7 +65,8 @@ void sqp_aux_play(int cont);      /* the clock for the drums alone, the sequence
  * moved in time (round its end, on: for the drums' own loop to move as much); a song: 0 */
 int32_t sqp_locate(int32_t steps, int32_t beats);
 void sqp_to_step(uint32_t step);  /* a song stopped: at the start of its step (CONTINUE plays from there) */
-void sqp_punch(void);             /* REC while a take runs: it ends (a first take: with the transport, as stop) */
+void sqp_punch(void);             /* REC while a take runs: it ends and the part plays on (a first take: its length
+                                   * to the nearest beat; in the count-in, or nothing played on an empty part: stop) */
 void sqp_select_part(uint32_t p); /* at once when stopped, at the part's end while playing (an empty part, with no
                                    * end and no first take running: on the next beat; the one playing: the queue
                                    * cleared). Stopping clears the queue */
