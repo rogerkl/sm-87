@@ -3,7 +3,8 @@ name = "SM87"
 id_prefix = "FM-1_87"          # package identity: dev FM-1_8700, releases FM-1_87XXYYZZ
 usb_manufacturer = "SM-87"
 usb_product = "SM-87 FM-1"
-o2 = ["s700/*.c", "mmt8/*.c", "hr16/*.c"]   # the sampler, its memory, the sequencer, the drums: -O2
+o2 = ["s700/*.c", "mmt8/*.c", "hr16/*.c", "fx/*.c"]   # the sampler, its memory, the sequencer, the drums, the
+                                                     # effect (config.h SM87_FX): -O2
 gen = ["../tools/mkkit.py --quiet --out {gen}/hr_kit.h"]   # the drum kit (resources/kit), built in
 words = "words.tsv"
 ble = false                    # no radio: the RAM goes to sequences and samples
@@ -19,4 +20,4 @@ install = "https://rogerkl.github.io/sm-87/install/"
 site = "https://rogerkl.github.io/sm-87/"
 repo = "https://github.com/rogerkl/sm-87"
 screenshot = "app/docs/img/screen.png"
-credits = "Built on fm1-base and felucca-bsp, from Felucca by Leo Kuroshita (Hügelton Instruments); the sampler follows Axs7's engine."
+credits = "Built on fm1-base and felucca-bsp, from Felucca by Leo Kuroshita (Hügelton Instruments); the sampler follows Axs7's engine; the effect runs the Alesis MIDIVerb's programs as Eric Brombaugh compiled them (MIDIVerb_RE, g081_audio)."

@@ -100,6 +100,10 @@ sampler's dumps, as many as the file holds.
   - With the MMT-8: one clock and tempo. A song step chooses the drum pattern that plays with it (or none). Playing
     a part, the drums loop their own pattern beside it; with PROGRAM CHANGE on, a program change in the part
     chooses it. On their own page they play alone.
+- **The effect** is an Alesis MIDIVerb (1986) on an aux send: its 63 programs (rooms and halls, gated and
+  reverse reverbs), as Eric Brombaugh compiled them from its ROM, run at its own rate between its own input and
+  output filters. Each sampler slot and each drum pad has a send; a program change on a channel of its own chooses
+  the program, as on the MIDIVerb.
 - **The screen** is a 2 × 16 character LCD, drawn dot by dot, with a status strip under it and, between them, a
   light for each MIDI channel.
 
@@ -128,6 +132,7 @@ sampler's dumps, as many as the file holds.
 | SELECT / K1-K4 (sampler pages) | The slot / the page's values. The strip under the LCD shows the slot, its sample and the program |
 | HOME | The sampler's overview |
 | GLO | MIDI: K1 the sampler's channel, K2 its mode (OMNI OFF, ON, MULTI), K3 the pitch bend's range, K4 the drums' channel. GLO again: the MIX, and again the VOICES (below) |
+| FX | The effect, the MIDIVerb: K1 its program, K2 its return, K3 the channel whose program changes choose it, K4 on or off. FX again: each slot's send; again: each pad's (below) |
 | SAVE | Lit when something isn't saved: settings, the sample parameters, the sequencer (stopped) |
 
 **The channel lights**, the row of 16 between the LCD and the strip, flash as a message on their MIDI channel comes
@@ -212,6 +217,35 @@ Every voice costs the audio interrupt time: the strip under the LCD shows CPU wh
 measured yet; if the sound breaks up with many notes held, lower it. Lowered while more play, the voices over the
 new number fade as if their notes were let go. The drums have their own 8 voices and aren't counted. It's kept in
 the settings (SAVE).
+
+### The effect (FX)
+
+The effect is an Alesis MIDIVerb, the 1986 reverb, on an aux send, as it would have been on the mixer's send in a
+1987 studio. Its 63 programs come from Eric Brombaugh's reverse engineering of the MIDIVerb
+([MIDIVerb_RE](https://github.com/emeb/MIDIVerb_RE)): his compiler turned its program ROM into C, which his
+[g081_audio](https://github.com/emeb/g081_audio) module runs. SM-87 runs that code as it is, at the MIDIVerb's own
+rate (23.4 kHz, so delays and decays are its own), between models of its input and output filters, and returns its
+stereo output into the mix. Its mono input is the sum of the sends.
+
+`FX 29   2.0 M Wm` / `RET 99 CH --  ON`:
+- K1: the program, 1-63, with its name from the MIDIVerb's program chart: the decay time in seconds, the room
+  (S, M, L, X: small to extra large) and the tone (Br bright, Wm warm, Dk dark), or `Gate` and `Revs` with their
+  length in milliseconds. A change fades it out, clears its memory and fades the new one in (as g081_audio does it).
+- K2: the return, 0-99, a fader's curve, into the mix (before MASTER).
+- K3: the channel whose program changes choose the program, as the MIDIVerb's MIDI channel: `--` (none) or 1-16.
+  Program 0 chooses 1, 62 chooses 63; higher ones are ignored. A sequencer track on that channel can change it in a
+  part. A program chosen over MIDI plays until the next; the one K1 chose is kept in the settings.
+- K4: on or off. Off, with the return at 0, or with every send at 0, it isn't run at all, and takes no time (its
+  memory is cleared as it starts again).
+
+FX again, `SND     SLOT` / `40       01`: K1 sets a sampler slot's send, 0-99, after its level (a mixer's
+post-fader send, without the pan); K3 or SELECT chooses the slot. FX a third time, `SND    PAD` / `60     01 KICK`:
+the same for each drum pad, after its level and the drums' bus. A pad's send is the pads' global set-up's: a pattern
+with its own sounds keeps none of its own. Every send starts at 0, so nothing goes to the effect until one is turned
+up. All of it is kept in the settings (SAVE).
+
+The effect costs the audio interrupt time, a few per cent of the CPU at a guess; the strip shows CPU. If the sound
+breaks up, turn it off (K4) and see if CPU drops. A build can leave it out altogether: `SM87_FX` in `app/config.h`.
 
 ### The drum machine (ARP)
 
@@ -536,7 +570,8 @@ than it sends, so a dump may end a little before its header's count; it always c
 sample's end.)
 
 Samples sent go into the sample pool, about 292 KB, and the strip shows how much is FREE. Samples and a drum kit can
-also be built into the firmware, about 370 KB more: from Axs7 (its wiki's
+also be built into the firmware, about 270 KB more (the effect's code takes about 95 KB of the same room: a build
+without it, `SM87_FX` 0 in `app/config.h`, leaves about 365 KB): from Axs7 (its wiki's
 [SM-87](https://github.com/rogerkl/Axs7/wiki/SM-87) page), or with `tools/mkrom.py` (the
 [README](https://github.com/rogerkl/sm-87#samples-built-in)).
 

@@ -1,0 +1,109 @@
+# The effect (FX; config.h SM87_FX): the Alesis MIDIVerb on sends. FX: its program (K1), its return (K2), the channel
+# whose program changes choose it (K3), on or off (K4); FX again: each slot's send (K1; K3 or SELECT the slot); a third
+# time: each pad's (K1; K3 or SELECT the pad). A note's reverb rings on after it: none without a send or with the
+# effect off. All of it kept.
+wait 600
+tap FX
+wait 30
+expect page 14
+expect fxprog 29
+expect fxret 99
+expect fxch 0
+expect fxon 1
+shot fx.png
+# no send: the test tone (slot 1, in P1) let go, then nothing
+midi 90 3C 7F
+wait 300
+midi 80 3C 40
+wait 1000
+peakreset
+wait 300
+expect peak_db_max -100
+# FX again: slot 1's send to 40, and the tone's reverb on after it
+tap FX
+wait 30
+expect page 15
+spin K1 40
+wait 30
+expect fxsend1 40
+shot fx_slots.png
+midi 90 3C 7F
+wait 300
+midi 80 3C 40
+wait 1000
+peakreset
+wait 300
+expect peak_db_min -80
+# K3, as SELECT: the slot
+spin K3 1
+wait 30
+expect slot 2
+expect fxsend2 0
+spin SELECT -1
+wait 30
+expect slot 1
+# a third time: pad 1's send to 60, the kick's reverb on after it
+tap FX
+wait 30
+expect page 16
+spin K1 60
+wait 30
+expect padsend1 60
+shot fx_pads.png
+peakreset
+midi 99 24 7F
+wait 1000
+peakreset
+wait 300
+expect peak_db_min -80
+spin SELECT 1
+wait 30
+spin K1 5
+wait 30
+expect padsend2 5
+expect padsend1 60
+# the effect off (FX, K4): no reverb, as without a send
+tap FX
+wait 30
+expect page 14
+spin K4 -1
+wait 30
+expect fxon 0
+midi 90 3C 7F
+wait 300
+midi 80 3C 40
+wait 1000
+peakreset
+wait 300
+expect peak_db_max -100
+spin K4 1
+wait 30
+expect fxon 1
+# K1 the program; K3 the channel whose program changes choose it (as the MIDIVerb's: 0 its 1, 62 its 63), others not
+spin K1 21
+wait 30
+expect fxprog 50
+spin K3 16
+wait 30
+expect fxch 16
+midi CF 04
+wait 30
+expect fxprog 5
+midi C0 07
+wait 30
+expect fxprog 5
+midi CF 7E
+wait 30
+expect fxprog 5
+# kept (the program K1 chose; one chosen over MIDI plays till the next)
+tap SAVE
+wait 300
+reboot
+wait 600
+expect fxsend1 40
+expect fxsend2 0
+expect padsend1 60
+expect padsend2 5
+expect fxprog 50
+expect fxch 16
+expect fxon 1
