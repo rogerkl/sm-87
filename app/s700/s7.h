@@ -119,7 +119,9 @@ void s7_kill(void);               /* every voice silent now */
 void s7_kill_slot(uint32_t slot); /* the voices playing a slot silent now (before its sample changes) */
 /* the mix (the MIX page): a slot's voices' gains, left and right (1, 1: as the S700 is, mono, at its level) */
 void s7_mix(uint32_t slot, float gl, float gr);
-void s7_render(float *l, float *r, uint32_t n);   /* adds n samples, each voice at its slot's mix */
+void s7_send(uint32_t slot, float gs);   /* a slot's voices' gain to the effect's send (0: none, as at the start) */
+/* adds n samples, each voice at its slot's mix; and into s (0: none) at its slot's send */
+void s7_render(float *l, float *r, float *s, uint32_t n);
 uint32_t s7_voices_active(void);
 /* the voices a note may take, S7_POLY_STD..S7_VOICES (S7_POLY_STD: as the S700). Fewer than playing: those over it
  * released (they fade as a note let go), a new note takes one of the rest */
@@ -132,13 +134,13 @@ uint32_t s7_poly_now(void);
 #define S7_DRUM_VOICES 8u
 /* voice v starts sound s (slot: its slot, for s7_kill_slot; 0xFF none of them) semis from its own pitch, its gains
  * left and right (level and pan) */
-void s7_drum_start(uint32_t v, const s7_slot_t *s, uint32_t slot, float semis, float gl, float gr);
+void s7_drum_start(uint32_t v, const s7_slot_t *s, uint32_t slot, float semis, float gl, float gr, float gs);
 void s7_drum_choke(uint32_t v);   /* gone in about 20 ms (a closed hat over an open one) */
 int s7_drum_active(uint32_t v);
 int s7_drum_released(uint32_t v);   /* choked, fading */
 uint32_t s7_drum_age(uint32_t v); /* notes started since it was (the oldest: the largest) */
 void s7_drum_kill(void);
-void s7_drum_render(float *l, float *r, uint32_t n);   /* adds n samples, left and right */
+void s7_drum_render(float *l, float *r, float *s, uint32_t n);   /* adds n samples, left and right, and the send */
 
 /* for tests: a voice's index mapping (voice.rs index()) and the level and release the engine computes */
 typedef struct {

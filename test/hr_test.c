@@ -501,25 +501,25 @@ static void test_voices(void)
     }
     hr_hit(2, 127);                       /* the open hat, then the closed: one voice left playing */
     hr_hit(1, 127);
-    hr_render(bl, br, 2048);
+    hr_render(bl, br, 0, 2048);
     CHECK(hr_voices_active() == 1u, "a closed hat cuts the open one: %u playing", hr_voices_active());
     hr_kill();
     hr_hit(0, 100);
     hr_hit(0, 100);
-    hr_render(bl, br, 2048);
+    hr_render(bl, br, 0, 2048);
     CHECK(hr_voices_active() == 1u, "a pad again: its last cut (%u)", hr_voices_active());
     hr_kill();
     hr_hit(3, 100);
     hr_hit(3, 100);
     hr_hit(3, 100);
-    hr_render(bl, br, 2048);
+    hr_render(bl, br, 0, 2048);
     CHECK(hr_voices_active() == 2u, "the crash: two at once (%u)", hr_voices_active());
     hr_kill();
     /* the pan: hard left, hard right */
     memset(bl, 0, sizeof bl);
     memset(br, 0, sizeof br);
     hr_hit(1, 127);
-    hr_render(bl, br, 1000);
+    hr_render(bl, br, 0, 1000);
     for (i = 0, l = r = 0.0f; i < 1000u; i++)
         l += fabsf(bl[i]), r += fabsf(br[i]);
     CHECK(l > 1000.0f && r == 0.0f, "pan -3: left only (%.0f, %.0f)", l, r);
@@ -527,7 +527,7 @@ static void test_voices(void)
     /* the pitch: -3 semitones (the crash pad's) plays the sine 3 semitones down: its zero crossings */
     memset(bl, 0, sizeof bl);
     hr_hit(3, 127);
-    hr_render(bl, br, 8192);
+    hr_render(bl, br, 0, 8192);
     {
         uint32_t z = 0;
         float want, got;
@@ -547,7 +547,7 @@ static void test_voices(void)
                 hr_pad[0].sound = (uint8_t)(s ? 2 : 0);
                 memset(bl, 0, sizeof bl);
                 hr_hit(0, v ? 127u : 20u);
-                hr_render(bl, br, 1000);
+                hr_render(bl, br, 0, 1000);
                 hr_kill();
                 for (i = 0, l = 0.0f; i < 1000u; i++)
                     l = fmaxf(l, fabsf(bl[i]));

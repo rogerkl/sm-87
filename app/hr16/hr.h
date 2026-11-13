@@ -34,7 +34,8 @@ typedef struct {
     uint8_t note;                 /* its MIDI note, in and out on the drum channel */
     uint8_t group;                /* 0, or a group: a hit cuts the others of its group (the hats) */
     uint8_t poly;                 /* its voices at once: 1 (a hit cuts the last), 2 (the HR-16's crash) */
-    uint8_t rsv;
+    uint8_t send;                 /* to the effect, 0..99 (SM87_FX; the global set-up's: a pattern's own sounds keep
+                                   * none of their own) */
 } hr_pad_t;
 
 /* ---- the kit and the pads (hrkit.c) ---- */
@@ -107,7 +108,8 @@ void hr_hit(uint32_t pad, uint32_t vel);    /* a pad sounds */
 void hr_note(uint32_t note, uint32_t vel);  /* a note on the drum channel: every pad on it sounds */
 int32_t hr_pad_of(uint32_t note);           /* the first pad on a note, -1 none */
 void hr_kill(void);
-void hr_render(float *l, float *r, uint32_t n);   /* adds the drums, left and right */
+void hr_render(float *l, float *r, float *s, uint32_t n);   /* adds the drums, left and right, and the send (s: 0
+                                                             * none) */
 uint32_t hr_voices_active(void);
 
 /* ---- the patterns (hrpat.c): in the sequencer's memory, changed from the main loop ---- */

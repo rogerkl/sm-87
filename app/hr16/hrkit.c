@@ -66,7 +66,7 @@ void hr_kit_bank(const s7_bank_t *b)
         p->note = q->note;
         p->group = q->group;
         p->poly = q->poly;
-        p->rsv = 0;
+        p->send = 0;
     }
     hr_kit_use(bank_sound, b->kit_sounds, bank_pad, b->kit_pads);
     kit_tag = (uint16_t)(b->kit_id ^ b->kit_id >> 16);
@@ -134,7 +134,7 @@ void hr_pad_default(uint32_t pad)
     p->pan = 0;
     p->group = 0;
     p->poly = 1;
-    p->rsv = 0;
+    p->send = 0;
     p->note = 35;
     for (k = 0; k < sizeof GM_NOTES; k++) {
         for (i = 0; i < pad && hr_pad[i].note != GM_NOTES[k]; i++)
@@ -165,6 +165,8 @@ void hr_pads_rekit(uint32_t was)
             p->pan = 0;
         if (p->poly < 1u || p->poly > 2u)
             p->poly = 1;
+        if (p->send > 99u)
+            p->send = 0;
         p->note &= 0x7Fu;
     }
 }
@@ -385,7 +387,7 @@ void hr_hit(uint32_t pad, uint32_t vel)
     const hr_pad_t *pd;
     const s7_slot_t *s;
     uint32_t v, same = 0, oldest = S7_DRUM_VOICES, slot, amt, poly;
-    float g, gl, gr;
+    float g, gl, gr, send;
     if (pad >= HR_PADS || !vel)
         return;
     pd = &hr_pad[pad];
@@ -412,7 +414,8 @@ void hr_hit(uint32_t pad, uint32_t vel)
     g = fm_db2lin(s7_level_db(pd->level, amt, vel));
     gl = pd->pan > 0 ? g * (float)(HR_PAN_MAX - pd->pan) / (float)HR_PAN_MAX : g;
     gr = pd->pan < 0 ? g * (float)(HR_PAN_MAX + pd->pan) / (float)HR_PAN_MAX : g;
-    s7_drum_start(v, s, slot, (float)pd->tune, gl, gr);
+    send = (float)pd->send / 99.0f;
+    s7_drum_start(v, s, slot, (float)pd->tune, gl, gr, g * send * send);   /* (the send a fader's, as the level) */
     vpad[v] = (uint8_t)pad;
 }
 
@@ -434,7 +437,7 @@ int32_t hr_pad_of(uint32_t note)
 }
 
 void hr_kill(void) { s7_drum_kill(); }
-void hr_render(float *l, float *r, uint32_t n) { s7_drum_render(l, r, n); }
+void hr_render(float *l, float *r, float *s, uint32_t n) { s7_drum_render(l, r, s, n); }
 
 uint32_t hr_voices_active(void)
 {

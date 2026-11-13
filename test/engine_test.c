@@ -150,7 +150,7 @@ static void render(uint32_t n)        /* the left channel in out (the right in o
     memset(out, 0, n * sizeof out[0]);
     memset(out_r, 0, n * sizeof out_r[0]);
     for (i = 0; i < n; i += 128u)
-        s7_render(out + i, out_r + i, n - i < 128u ? n - i : 128u);
+        s7_render(out + i, out_r + i, 0, n - i < 128u ? n - i : 128u);
 }
 
 static float rms_db(const float *x, uint32_t n)
