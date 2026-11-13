@@ -436,8 +436,8 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
         if (seg > n - done)
             seg = n - done;
         if (seg) {
-            s7_render(mixl + done, mixr + done, seg);
-            hr_render(drl + done, drr + done, seg);
+            s7_render(mixl + done, mixr + done, 0, seg);
+            hr_render(drl + done, drr + done, 0, seg);
             click_render(mixl + done, mixr + done, seg);
         }
         done += seg;

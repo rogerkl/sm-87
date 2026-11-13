@@ -128,7 +128,7 @@ typedef struct {
     uint32_t step_i, step_f;      /* the step now, with bend and vibrato */
     float base_step;              /* the step at no bend nor vibrato */
     float level, env, rel;
-    float gl, gr;                 /* a drum voice's gains, left and right */
+    float gl, gr, gs;             /* a drum voice's gains, left and right, and to the effect's send */
     const float (*fc)[3];         /* the filter's sections, for this note's cutoff */
     float ic1[3], ic2[3];
     float lfo_phase, lfo_inc;     /* in turns */
@@ -508,14 +508,23 @@ void s7_mix(uint32_t slot, float gl, float gr)
     }
 }
 
-/* the voices, each as its slot's level and pan put it (a voice a stretch of 64 at a time, then into the two) */
-void s7_render(float *l, float *r, uint32_t n)
+static float mix_s[S7_SLOTS];     /* each slot's send (s7_send) */
+
+void s7_send(uint32_t slot, float gs)
+{
+    if (slot < S7_SLOTS)
+        mix_s[slot] = gs;
+}
+
+/* the voices, each as its slot's level and pan put it (a voice a stretch of 64 at a time, then into the two), and
+ * its send */
+void s7_render(float *l, float *r, float *s, uint32_t n)
 {
     float tmp[64];
     uint32_t i, k, at, m;
     for (i = 0; i < S7_VOICES; i++) {
         voice_t *x = &vc[i];
-        float gl = mix_l[x->slot % S7_SLOTS], gr = mix_r[x->slot % S7_SLOTS];
+        float gl = mix_l[x->slot % S7_SLOTS], gr = mix_r[x->slot % S7_SLOTS], gs = s ? mix_s[x->slot % S7_SLOTS] : 0.0f;
         for (at = 0; at < n && x->stage != ENV_OFF; at += m) {
             m = n - at < 64u ? n - at : 64u;
             for (k = 0; k < m; k++)
@@ -525,6 +534,9 @@ void s7_render(float *l, float *r, uint32_t n)
                 l[at + k] += tmp[k] * gl;
                 r[at + k] += tmp[k] * gr;
             }
+            if (gs != 0.0f)
+                for (k = 0; k < m; k++)
+                    s[at + k] += tmp[k] * gs;
         }
     }
 }
@@ -532,7 +544,7 @@ void s7_render(float *l, float *r, uint32_t n)
 /* ------------------------------------------------------------------------------------- the drum machine --- */
 /* The HR-16's voices (hr16/): the sampler's, reading a sound in the same format, played once from START to END at
  * its own pitch moved by semis, without the filter, the bend or vibrato, and panned. Level and pan: the caller's */
-void s7_drum_start(uint32_t v, const s7_slot_t *s, uint32_t slot, float semis, float gl, float gr)
+void s7_drum_start(uint32_t v, const s7_slot_t *s, uint32_t slot, float semis, float gl, float gr, float gs)
 {
     voice_t *x;
     if (v >= S7_DRUM_VOICES || !s || !s->data || !s->words)
@@ -549,6 +561,7 @@ void s7_drum_start(uint32_t v, const s7_slot_t *s, uint32_t slot, float semis, f
     x->level = 1.0f;
     x->gl = gl;
     x->gr = gr;
+    x->gs = gs;
     x->lfo_inc = 0.0f;
     x->lfo_full = 0;
     x->lfo_delay = 0;
@@ -576,7 +589,7 @@ void s7_drum_kill(void)
         dv[i].stage = ENV_OFF;
 }
 
-void s7_drum_render(float *l, float *r, uint32_t n)
+void s7_drum_render(float *l, float *r, float *s, uint32_t n)
 {
     float tmp[64];
     uint32_t i, k, at, m;
@@ -591,6 +604,9 @@ void s7_drum_render(float *l, float *r, uint32_t n)
                 l[at + k] += tmp[k] * x->gl;
                 r[at + k] += tmp[k] * x->gr;
             }
+            if (s && x->gs != 0.0f)
+                for (k = 0; k < m; k++)
+                    s[at + k] += tmp[k] * x->gs;
         }
     }
 }
