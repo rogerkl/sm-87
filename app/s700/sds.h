@@ -52,6 +52,10 @@ uint32_t sds_rx_progress(void);   /* words of the dump coming in now (0: none) *
 const sds_dump_t *sds_rx_dump(void);   /* the dump coming in now: its slot, words so far and total (0: none) */
 /* the length a received dump plays: to its loop end (the sampler takes it as the end), within what came */
 uint32_t sds_length(const sds_dump_t *d);
+/* the words a dump has to bring: up to its loop end, the sample's end. A sender announces up to 200 words more than
+ * it sends (01-sample-dump.md), but sends that far; one whose loop end isn't within its total: the total less 200
+ * and a block. Fewer came: it was cut short on the way (a long SysEx through a virtual MIDI cable can lose bytes) */
+uint32_t sds_expected(const sds_dump_t *d);
 /* a slot's parameters after a dump, as the sampler leaves them: START 0, END at the loop end, the loop and its mode,
  * root C3, the rate from the period (when it is one), the rest as they were */
 void sds_apply(const sds_dump_t *d, uint8_t *p);

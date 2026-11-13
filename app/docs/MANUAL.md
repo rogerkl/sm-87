@@ -518,6 +518,13 @@ While a sample comes in or goes out, the LCD shows its slot and the words so far
 settings Axs7 reads or changes (`MIDI SETTINGS`) show for a moment as they come and go. In the browser emulator a
 dump arrives all at once, as the browser passes a SysEx on only when it is whole, so only what came of it shows.
 
+A dump that stops before its sample's end lost bytes on the way: a long SysEx through a virtual MIDI cable can. The
+LCD then says `DUMP CUT SHORT` with the words that came of those the sample has (`S10 21000/28752`), and again when
+its parameters come after it. SM-87 keeps what came, so the sample stops early and its loop turns at the last word
+that came, though START, END and LOOP show the sample's own. Send it again. (A sender announces up to 200 words more
+than it sends, so a dump may end a little before its header's count; it always comes up to its loop end, the
+sample's end.)
+
 Samples sent go into the sample pool, about 292 KB, and the strip shows how much is FREE. Samples and a drum kit can
 also be built into the firmware, about 370 KB more: from Axs7 (its wiki's
 [SM-87](https://github.com/rogerkl/Axs7/wiki/SM-87) page), or with `tools/mkrom.py` (the

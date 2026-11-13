@@ -78,6 +78,7 @@ static void test_x7000(void)
     CHECK(d->total == 32652u && d->blocks == 545u && d->bad_blocks == 0u && d->words == 32652u,
           "x7000: total %u blocks %u bad %u words %u", d->total, d->blocks, d->bad_blocks, d->words);
     CHECK(d->period_ns == 1815780u && sds_rate_code(d->period_ns) == 0u, "x7000: its garbage period %u", d->period_ns);
+    CHECK(sds_expected(d) <= d->words, "x7000: all of it came (%u of %u)", d->words, sds_expected(d));
     for (i = 0; i < d->words; i++)
         bad += (uint32_t)(s7_w12(d->data, i) + 2048) != word_in_dump(b, i);
     CHECK(bad == 0, "x7000: %u words differ", bad);
@@ -146,7 +147,8 @@ static void test_java(void)
     if (d) {
         s7_default_params(p);
         sds_apply(d, p);
-        /* 200 more announced than sent, and the loop end is the end */
+        /* 200 more announced than sent, and the loop end is the end: not cut short */
+        CHECK(sds_expected(d) == 5900u && d->words >= sds_expected(d), "java forward: expected %u", sds_expected(d));
         CHECK(sds_length(d) == 5900u && s7_word(p, S7_P_SEND) == 5900u && p[S7_P_RECBW] == 76u,
               "java forward: length %u END %u rate %u", sds_length(d), s7_word(p, S7_P_SEND), p[S7_P_RECBW]);
         d->state = SDS_FREE;
@@ -155,7 +157,8 @@ static void test_java(void)
     b = load("java-sine-alternating.syx", &n);
     if (b) {
         d = feed(b, n);
-        CHECK(d && d->alternating && d->loop_start == 1000u && d->loop_end == 31000u, "java alternating");
+        CHECK(d && d->alternating && d->loop_start == 1000u && d->loop_end == 31000u && d->words >= sds_expected(d),
+              "java alternating");
         if (d) {
             s7_default_params(p);
             sds_apply(d, p);
@@ -278,12 +281,61 @@ static void test_sprm(void)
     }
 }
 
+/* a dump cut short on the way (the bytes lost, an F7 early): fewer words than its loop end, the sample's end. As Axs7
+ * sends one: 300 words, 500 announced, the loop 100 to the end; 2 of its 5 blocks come. And whole: not cut */
+static void cut_dump(uint32_t blocks, uint32_t loop_end, uint32_t total)
+{
+    uint32_t b, i;
+    const uint8_t h[] = {0xF0, 0x7E, 0x01, 0x04, 0x00, 0x0C, 0x41, 0x45, 0x01, (uint8_t)(total & 0x7F),
+                         (uint8_t)(total >> 7 & 0x7F), 0, 100, 0, 0, (uint8_t)(loop_end & 0x7F),
+                         (uint8_t)(loop_end >> 7 & 0x7F), 0, 1};
+    for (i = 0; i < sizeof h; i++)
+        sds_rx_byte(h[i]);
+    for (b = 0; b < blocks; b++) {
+        uint8_t chk = 0;
+        sds_rx_byte((uint8_t)b);
+        for (i = 0; i < 120u; i++) {
+            uint8_t v = (uint8_t)(i & 0x7Cu);
+            chk ^= v;
+            sds_rx_byte(v);
+        }
+        sds_rx_byte(chk);
+    }
+    sds_rx_byte(0xF7);
+}
+
+static void test_cut(void)
+{
+    sds_dump_t *d;
+    sds_init(mem0, mem1);
+    cut_dump(2, 300, 500);
+    d = feed(0, 0);
+    CHECK(d && d->words == 120u && sds_expected(d) == 300u && sds_length(d) == 120u,
+          "cut short: %u words of %u", d ? d->words : 0, d ? sds_expected(d) : 0);
+    if (d)
+        d->state = SDS_FREE;
+    cut_dump(5, 300, 500);
+    d = feed(0, 0);
+    CHECK(d && d->words == 300u && sds_expected(d) == 300u, "whole, 200 more announced: %u of %u",
+          d ? d->words : 0, d ? sds_expected(d) : 0);
+    if (d)
+        d->state = SDS_FREE;
+    /* a loop end past the total (a one shot's, or garbage): the total, less the 200 and a block */
+    cut_dump(5, 600, 500);
+    d = feed(0, 0);
+    CHECK(d && sds_expected(d) == 240u && d->words >= sds_expected(d), "loop end past the total: %u",
+          d ? sds_expected(d) : 0);
+    if (d)
+        d->state = SDS_FREE;
+}
+
 int main(int argc, char **argv)
 {
     fixtures = argc > 1 ? argv[1] : "../Axs7SdsW/web/test/fixtures";
     test_x7000();
     test_java();
     test_buffers();
+    test_cut();
     test_sprm();
     printf("sds: %d checks, %d failed\n", checks, fails);
     return fails != 0;

@@ -666,6 +666,12 @@ void app_sysex_byte(uint8_t b)
 
 /* the slot a dump was last said RECEIVED for, and when: its parameters just after (as Axs7 sends them) said with it */
 static uint32_t rx_said_slot = 0xFFu, rx_said_ms;
+/* a slot's last dump cut short on the way (sds_expected): the words that came and those it should have brought (0:
+ * not cut), said again when the slot's parameters come after it (Axs7 sends them once the dump has gone out at MIDI's
+ * speed, seconds later) */
+static uint16_t cut_got[S7_SLOTS], cut_want[S7_SLOTS];
+static uint32_t dump_cuts;        /* (the host's checks) */
+static void say_cut(uint32_t slot);
 
 /* the dumps received, into the flash, in the order they came (before any SPRM after them is taken) */
 static void dumps_flush(void)
@@ -685,13 +691,21 @@ static void dumps_flush(void)
         } else if ((r = s7mem_write(d->slot, d->data, len)) != 0) {
             say_slot(r == -1 ? "MEMORY FULL" : "WRITE FAILED", "SLOT ", d->slot);
         } else {
-            uint32_t f = plat_lock();
+            uint32_t f = plat_lock(), want = sds_expected(d);
             sds_apply(d, s7_slot[d->slot].p);
             plat_unlock(f);
             sx_autosave = 1;
-            say_slot("RECEIVED", "SLOT ", d->slot);
-            rx_said_slot = d->slot;
-            rx_said_ms = plat_ms();
+            cut_got[d->slot] = (uint16_t)d->words;
+            cut_want[d->slot] = (uint16_t)(d->words < want ? want : 0u);
+            if (cut_want[d->slot]) {   /* bytes lost on the way: what came is kept (its loop turns early), and said */
+                dump_cuts++;
+                rx_said_slot = 0xFFu;
+                say_cut(d->slot);
+            } else {
+                say_slot("RECEIVED", "SLOT ", d->slot);
+                rx_said_slot = d->slot;
+                rx_said_ms = plat_ms();
+            }
         }
         d->state = SDS_FREE;
         sx_last_ms = plat_ms();
@@ -813,7 +827,10 @@ int app_sysex(const uint8_t *p, uint32_t n)
             plat_unlock(f);
             s7mem_touch();
             sx_autosave = 1;
-            if ((uint32_t)slot == rx_said_slot && plat_ms() - rx_said_ms < 1300u) {   /* its dump's, just said */
+            if (cut_want[slot]) {   /* after a dump cut short: that again, not "PARAMETERS IN" */
+                say_cut((uint32_t)slot);
+                cut_want[slot] = 0;
+            } else if ((uint32_t)slot == rx_said_slot && plat_ms() - rx_said_ms < 1300u) {   /* its dump's, just said */
                 char t[LCD_COLS + 1] = "SLOT ", k[4];
                 fmt_uint(k, (uint32_t)slot + 1u, 2, '0');
                 str_cat(t, k);
@@ -1097,6 +1114,7 @@ static void slot_clear(uint32_t slot)
         return;
     }
     s7mem_clear(slot);
+    cut_want[slot] = 0;
     say_slot("CLEARED", "SLOT ", slot);
 }
 
@@ -1728,6 +1746,23 @@ static void say_slot(const char *a, const char *b, uint32_t slot)
     app_say(a, t);
 }
 
+/* a sample dump cut short: "DUMP CUT SHORT" / "S10 21000/28752", the words that came of those it should have brought;
+ * longer than a message, as it means sending it again */
+static void say_cut(uint32_t slot)
+{
+    char t[LCD_COLS + 1] = "S", n[8];
+    fmt_uint(n, slot + 1u, 2, '0');
+    str_cat(t, n);
+    str_cat(t, " ");
+    fmt_uint(n, cut_got[slot], 0, ' ');
+    str_cat(t, n);
+    str_cat(t, "/");
+    fmt_uint(n, cut_want[slot], 0, ' ');
+    str_cat(t, n);
+    app_say("DUMP CUT SHORT", t);
+    ui.msg_until = plat_ms() + 4000u;
+}
+
 /* the page under the panel: what the sampler holds */
 static void draw_status(void)
 {
@@ -1972,6 +2007,8 @@ int app_expect(const char *what, int *got)
         *got = sqp.step + 1;
     else if (!strcmp(what, "drpat"))        /* the drums: their own pattern */
         *got = hrp.pattern;
+    else if (!strcmp(what, "dumpcut"))      /* sample dumps cut short on the way (DUMP CUT SHORT) */
+        *got = (int)dump_cuts;
     else if (!strcmp(what, "chlights"))     /* the channel lights lit: bit 0 channel 1 */
         *got = ch_shown;
     else if (!strcmp(what, "recfilter"))    /* MIDI FILTER: what a take records besides notes (SQP_REC_*) */

@@ -168,6 +168,14 @@ uint32_t sds_length(const sds_dump_t *d)
     return len;
 }
 
+uint32_t sds_expected(const sds_dump_t *d)
+{
+    uint32_t total = d->total < S7_MAXWORDS ? d->total : S7_MAXWORDS;
+    if (d->loop_end && d->loop_end <= d->total)
+        return d->loop_end < total ? d->loop_end : total;
+    return total > 200u + SDS_WORDS_PER_BLOCK ? total - 200u - SDS_WORDS_PER_BLOCK : 0u;
+}
+
 uint32_t sds_rate_code(uint32_t period_ns)
 {
     uint32_t c, best = 0;

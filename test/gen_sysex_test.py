@@ -103,6 +103,7 @@ def main():
         f"expect end3 {n}",
         "expect mode3 2",
         "expect root3 60",
+        "expect dumpcut 0",
         "# the parameters: slot 3 in P1, keys 60-72",
         "sysex " + hx(sprm(0, 2, v)),
         "wait 30",
@@ -148,6 +149,21 @@ def main():
     for x in o[7:]:
         chk ^= x
     lines.append("expect_sysex " + hx(o + [chk, 0xF7]))
+    # a dump cut short on the way, as a virtual MIDI cable can: 2 of its 5 blocks, then F7. What came is kept and
+    # said (DUMP CUT SHORT, S04 120/300), and said again when its parameters come
+    cut = dump(3, words, 100, n, announce=n + 200)
+    cut = cut[:19 + 2 * 122] + [0xF7]
+    lines += [
+        "# a dump cut short on the way (2 of 5 blocks, then F7): what came kept and said, again with its parameters",
+        "sysex " + hx(cut),
+        "wait 100",
+        "expect words4 120",
+        "expect dumpcut 1",
+        "sysex " + hx(sprm(0, 3, v)),
+        "wait 30",
+        "expect end4 300",
+        "shot dump_cut.png",
+    ]
     (ROOT / "app" / "tests" / "sysex.txt").write_text("\n".join(lines) + "\n")
     mmt8_test()
     clock_test()
