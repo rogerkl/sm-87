@@ -1,11 +1,13 @@
 # The sampler's MIDI modes (GLO): OMNI OFF hears its basic channel, OMNI ON every channel, both playing the program
-# shown; MULTI PROGRAM (the S700's mode 7) plays the program shown on channel 1 and the next ones on the channels
-# after it (P1 shown: program n on channel n; P2: P2-17), and the keys play channel 1. Slot 1 (the test tone, in
-# program 1 from the start) put into program 5 too.
+# shown; MULTI PROGRAM (the S700's mode 7) plays 16 programs in a row on channels 1-16, from the first K2 sets (1-16:
+# program n on channel n; 2-17: P2-17), and the keys play the program shown (PRESET), any of the 32, on the channel
+# that plays it (none does: on channel 1, the first's). Neither moves the other. Slot 1 (the test tone, in program 1 from
+# the start) put into program 5 too.
 wait 600
 expect s7mode 0
 expect s7ch 1
 expect keych 1
+expect multibase 1
 # slot 1 into program 5: PRESET to P5, EDIT round to KEYS, K1 one detent
 turn PRESET 4
 wait 30
@@ -28,7 +30,7 @@ expect voices 1
 midi 80 3C 40
 wait 500
 expect voices 0
-# P1 shown again; GLO: MIDI; K2 to MULTI
+# P1 shown again; GLO: MIDI; K2 to MULTI, from P1 (1-16)
 turn PRESET -4
 wait 30
 expect program 1
@@ -38,6 +40,7 @@ expect page 11
 turn K2 2 20
 wait 30
 expect s7mode 2
+expect multibase 1
 expect progof1 1
 expect progof5 5
 expect progof16 16
@@ -66,29 +69,113 @@ tapkey w0
 expect voices 1
 wait 500
 expect voices 0
-# a program change on the basic channel (1) to P2: channels 1-16 play P2-17, so channel 4 plays P5
+# PRESET to P5: the keys on the channel that plays it, 5; the channels' programs as they were
+turn PRESET 4
+wait 30
+expect program 5
+expect keych 5
+expect progof1 1
+expect progof5 5
+tapkey w0
+expect voices 1
+wait 500
+expect voices 0
+# a program change on the basic channel (1): the program the keys play, P2 (channel 2); nothing else moves. On
+# another channel: not taken
 midi C0 01
 wait 30
 expect program 2
-expect progof1 2
-expect progof4 5
-midi 93 3C 64
+expect keych 2
+expect progof1 1
+expect progof2 2
+tapkey w0
+expect voices 0
+midi C3 02
 wait 30
+expect program 2
+# K2 on to 3-18: the channels' programs move, the keys' doesn't (P2: none of the 16, so channel 1)
+turn K2 2
+wait 30
+expect multibase 3
+expect progof1 3
+expect progof4 6
+expect program 2
+expect keych 1
+shot midi_multi.png
+# P6: channel 4 (6 - 3 + 1), so a take from the keys plays back as P6
+turn PRESET 4
+wait 30
+expect program 6
+expect keych 4
+# 6-21 and P5: none of the 16 plays it, yet the keys do, on channel 1, which itself plays P6 (empty); channel 1
+# whatever the sampler's own (K1)
+turn K2 3
+wait 30
+expect multibase 6
+turn PRESET -1
+wait 30
+expect program 5
+expect keych 1
+turn K1 2
+wait 30
+expect s7ch 3
+expect keych 1
+turn K1 -2
+wait 30
+expect s7ch 1
+tapkey w0
 expect voices 1
-midi 83 3C 40
 wait 500
 expect voices 0
-# to P21: channels 1-12 play P21-32, 13-16 round to P1-4; on another channel: not taken
-midi C0 14
+midi 90 3C 64
 wait 30
-expect program 21
+expect voices 0
+midi 80 3C 40
+# MIDI ECHO before it: REC armed on track 1, its channel 2 (SEQ, K2): the keys play channel 2's program, P7 (empty);
+# the track UNCHANGED, P5 again
+tap SEQ
+wait 30
+tap REC
+wait 30
+expect armed 1
+turn K2 2
+wait 30
+tapkey w0
+expect voices 0
+turn K2 -2
+wait 30
+tapkey w0
+expect voices 1
+wait 500
+expect voices 0
+tap REC
+wait 30
+expect armed 0
+tap GLO
+wait 30
+expect page 11
+# from P21 (21-4): channels 1-12 play P21-32, 13-16 round to P1-4, so P1 is channel 13's
+turn K2 15 20
+wait 30
+expect multibase 21
 expect progof1 21
 expect progof12 32
 expect progof13 1
+expect program 5
 expect keych 1
-midi C3 02
+turn PRESET -4 20
 wait 30
-expect program 21
+expect program 1
+expect keych 13
+# K2 goes no further than from P32 (32-15)
+turn K2 20 20
+wait 30
+expect multibase 32
+expect progof2 1
+expect s7mode 2
+turn K2 -11 20
+wait 30
+expect multibase 21
 # K3 the bend's range, K4 the drums' channel
 turn K3 2 20
 wait 30
@@ -104,16 +191,26 @@ wait 300
 reboot
 wait 600
 expect s7mode 2
+expect multibase 21
+expect progof1 21
 expect bendrange 4
-# OMNI ON: every channel plays the program shown (kept: P21). (HOME first: GLO on the MIDI page goes to the MIX)
+# OMNI ON, back past MULTI from P1: every channel plays the program shown (P1), the keys on the basic channel.
+# (HOME first: GLO on the MIDI page goes to the MIX)
 tap HOME
 wait 30
 tap GLO
 wait 30
 expect page 11
-turn K2 -1
+turn K2 -21 20
 wait 30
 expect s7mode 1
-expect program 21
-expect progof9 21
+expect program 1
+expect progof9 1
+expect keych 1
+# MULTI again: from P1 (1-16), the program shown as it was
+turn K2 1
+wait 30
+expect s7mode 2
+expect multibase 1
+expect program 1
 expect keych 1
