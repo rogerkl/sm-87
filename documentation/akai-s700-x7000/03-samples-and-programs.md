@@ -96,6 +96,11 @@ every program playing it sounds the same.
 
 **MIDI program change n** selects program n + 1 (verified: 31 selects P32).
 
+**MULTI** (MIDI mode multi-program; OVS OMNION 64): channel 1 plays the program chosen and each channel after it the
+next one, so channel n plays program (chosen + n - 1). With P1 chosen, channels 1-16 play P1-16; with P2 chosen,
+P2-17. The manual's "P1-16 (17-32)" is this with P1 or P17 chosen (from the sampler itself). What channels past P32
+play wasn't checked (SM-87 goes round to P1).
+
 ## What an empty slot holds
 
 A slot nothing was loaded into holds the X7000's **test tone**: START 0, END 360, LOOP 0, looping, rate code 48,

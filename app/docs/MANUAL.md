@@ -56,8 +56,8 @@ sampler's dumps, as many as the file holds.
   - Vibrato: a stepped sine, plus the mod wheel and aftertouch.
   - One shot, loop, alternating and drum trigger.
   - 32 programs of key ranges.
-  - The S700's MIDI modes: OMNI OFF (its channel), OMNI ON (every channel), and MULTI PROGRAM, where channel 1-16
-    plays program 1-16 (or 17-32), so each MMT-8 track can play its own program.
+  - The S700's MIDI modes: OMNI OFF (its channel), OMNI ON (every channel), and MULTI PROGRAM, where channels 1-16
+    play 16 programs from the one chosen (P1: programs 1-16), so each MMT-8 track can play its own program.
 - **Sample memory** is 292 KB of flash (FREE on the strip): 6 full-length samples, as many as a stock S700 holds,
   or all 16 slots with shorter ones. Samples play in place from the flash. An empty slot holds the X7000's test tone.
 - **Samples over MIDI.** The FM-1 answers as an X7000 with 16 slots: the sample dump in and out, SPRM/RSPRM and
@@ -170,17 +170,19 @@ has the same for its patterns):
 The S700's MIDI modes, from its manual (33-37), set with K2 on the GLO page:
 - **OMNI OFF** (as before): the sampler hears its channel (K1) and plays the program shown (PRESET).
 - **OMNI ON:** every channel plays the program shown.
-- **MULTI** (the S700's MULTI PROGRAM / POLYPHONIC): channel 1 plays program 1, channel 2 program 2, up to 16. The
-  voices go to whichever channel needs one. While a program of 17-32 is shown, channels 1-16 play programs 17-32
-  instead (the manual says "or P17-32" without saying how; this is a guess). A program change on the sampler's
-  own channel chooses the program shown; one on another channel is ignored, since that channel's program is fixed.
-  Pitch bend, the mod wheel and aftertouch are each channel's own.
+- **MULTI** (the S700's MULTI PROGRAM / POLYPHONIC): channel 1 plays the program shown, and each channel after it
+  the next program, as on the S700. With P1 shown, channel 1 plays program 1, channel 2 program 2, up to 16; with
+  P2 shown, channels 1-16 play programs 2-17. (That's what the S700's manual means by "P1-16 (17-32)": P17 shown
+  gives programs 17-32.) Past P32 they go round to P1: with P20 shown, channel 14 plays P1. That part is a guess.
+  The voices go to whichever channel needs one. A program change on the sampler's own channel chooses the program
+  shown, which moves all 16. One on another channel is ignored. Pitch bend, the mod wheel and aftertouch are each
+  channel's own.
 
-In MULTI the keys play the program shown on its own channel: with P5 shown they play channel 5. A track you record
-from the keys then plays P5 when its channel is UNCHANGED. To give an existing track a program, set its channel
-(K2 on the SEQ page, or MIDI CHANNEL) to that program's number.
+In MULTI the keys play channel 1, the program shown. A track you record from the keys plays channel 1 when its
+channel is UNCHANGED, so it plays whatever program is shown then. To give a track a program of its own, set its
+channel (K2 on the SEQ page, or MIDI CHANNEL): with P1 shown, channel n plays program n.
 
-Channel 10 is the drums' too. In MULTI it also plays program 10.
+Channel 10 is the drums' too. In MULTI it also plays a program: program 10 with P1 shown.
 
 OVS (Akai's overall settings) carries the mode both ways.
 

@@ -1,7 +1,7 @@
 # The sampler's MIDI modes (GLO): OMNI OFF hears its basic channel, OMNI ON every channel, both playing the program
-# shown; MULTI PROGRAM (the S700's mode 7) plays program n on channel n (P17-32 while one of those is shown), and the
-# keys play the program shown on its channel. Slot 1 (the test tone, in program 1 from the start) put into program
-# 5 too.
+# shown; MULTI PROGRAM (the S700's mode 7) plays the program shown on channel 1 and the next ones on the channels
+# after it (P1 shown: program n on channel n; P2: P2-17), and the keys play channel 1. Slot 1 (the test tone, in
+# program 1 from the start) put into program 5 too.
 wait 600
 expect s7mode 0
 expect s7ch 1
@@ -28,7 +28,10 @@ expect voices 1
 midi 80 3C 40
 wait 500
 expect voices 0
-# GLO: MIDI; K2 to MULTI
+# P1 shown again; GLO: MIDI; K2 to MULTI
+turn PRESET -4
+wait 30
+expect program 1
 tap GLO
 wait 30
 expect page 11
@@ -38,7 +41,7 @@ expect s7mode 2
 expect progof1 1
 expect progof5 5
 expect progof16 16
-expect keych 5
+expect keych 1
 shot midi_page.png
 # channel 2: P2, nothing in it; channel 5: P5; channel 1: P1
 midi 91 3C 64
@@ -58,17 +61,31 @@ expect voices 1
 midi 84 3C 40
 wait 500
 expect voices 0
-# the keys: the program shown's channel, 5
+# the keys: channel 1, the program shown (P1)
 tapkey w0
 expect voices 1
 wait 500
-# a program change on the basic channel (1) to P21: the channels play P17-32; on another channel: not taken
+expect voices 0
+# a program change on the basic channel (1) to P2: channels 1-16 play P2-17, so channel 4 plays P5
+midi C0 01
+wait 30
+expect program 2
+expect progof1 2
+expect progof4 5
+midi 93 3C 64
+wait 30
+expect voices 1
+midi 83 3C 40
+wait 500
+expect voices 0
+# to P21: channels 1-12 play P21-32, 13-16 round to P1-4; on another channel: not taken
 midi C0 14
 wait 30
 expect program 21
-expect progof1 17
-expect progof5 21
-expect keych 5
+expect progof1 21
+expect progof12 32
+expect progof13 1
+expect keych 1
 midi C3 02
 wait 30
 expect program 21

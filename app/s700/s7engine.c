@@ -156,9 +156,11 @@ static uint32_t chan_of(uint32_t ch) { return midi_mode == S7_MULTI ? ch % S7_CH
 void s7_program(uint32_t prog) { prog_now = prog % S7_PROGRAMS; }
 uint32_t s7_current_program(void) { return prog_now; }
 void s7_midi_mode(uint32_t mode) { midi_mode = mode <= S7_MULTI ? mode : S7_OMNI_OFF; }
+/* MULTI: channel 1 plays the program chosen, each channel after it the next, as the S700 does (P2 chosen: channels
+ * 1-16 play P2-17); past P32 round to P1 (a guess) */
 uint32_t s7_program_of(uint32_t ch)
 {
-    return midi_mode == S7_MULTI ? (prog_now & 16u) + ch % S7_CHANNELS : prog_now;   /* (P1-16, or P17-32) */
+    return midi_mode == S7_MULTI ? (prog_now + ch % S7_CHANNELS) % S7_PROGRAMS : prog_now;
 }
 static void bend_set(uint32_t c)
 {

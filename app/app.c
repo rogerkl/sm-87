@@ -272,10 +272,10 @@ static void s7_chan_text(char *t)
     }
 }
 
-/* the channel the keys play the sampler on: its basic channel; in MULTI the program shown's (P5: channel 5) */
+/* the channel the keys play the sampler on: its basic channel; in MULTI channel 1, the program shown's */
 static uint32_t s7_keys_channel(void)
 {
-    return set.s7_mode == S7_MULTI ? s7_current_program() % S7_CHANNELS : set.s7_channel;
+    return set.s7_mode == S7_MULTI ? 0u : set.s7_channel;
 }
 
 static volatile uint32_t midi_in_count, midi_in_last;
