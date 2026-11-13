@@ -171,6 +171,24 @@ static void load_step(void)
     sqp.mask = mask;
 }
 
+/* the song's place off a step whose part is empty, onto the next with some length, in no time: as its tracks pass
+ * one (tp_settle), so the song's place (the drums', the click's) and theirs stay on the same clock. Round with LOOP;
+ * at the song's end without it, or a song of empty parts only: where it is (the first tick ends it, part_end) */
+static void step_settle(void)
+{
+    uint32_t n = sq_song_steps(sqp.song), s = sqp.step, k;
+    for (k = 0; k < n && !sq_part_ticks(step_part(s, 0)); k++) {
+        if (s + 1u >= n && !sqp.loop_song)
+            return;
+        s = s + 1u >= n ? 0u : s + 1u;
+    }
+    if (k && k < n) {
+        sqp.step = (uint8_t)s;
+        load_step();
+        sqp.tick = 0;
+    }
+}
+
 void sqp_select_part(uint32_t p)
 {
     if (p >= SQ_PARTS)
@@ -211,6 +229,7 @@ void sqp_play(void)
         sqp.step = 0;
         sqp_set_tempo(sq.song[sqp.song].tempo);
         load_step();
+        step_settle();            /* (its first steps' parts empty: from the first with something) */
     }
     sqp.tick = 0;
     sqp.clock = 0;
@@ -302,8 +321,10 @@ void sqp_continue(void)
     sqp.tick = sqp.tick / SQ_PPQN * SQ_PPQN;   /* from the start of the beat */
     ext_budget = 0;
     sqp.started = 2;
-    if (sqp.song_mode)
+    if (sqp.song_mode) {
+        step_settle();            /* (stopped on a step whose part is empty: on from the next) */
         tp_place();
+    }
     sqp_resync();
     to_next = 0.0f;
     sqp.state = SQP_PLAYING;
@@ -356,8 +377,10 @@ int32_t sqp_locate(int32_t steps, int32_t beats)
         sqp.step = (uint8_t)step;
         load_step();
         sqp.tick = (uint32_t)b * SQ_PPQN;
-        if (playing)
+        if (playing) {
+            step_settle();        /* (onto a step whose part is empty: the next) */
             tp_place();           /* (stopped: CONTINUE places them) */
+        }
     } else {
         int32_t at = (int32_t)(sqp.tick / SQ_PPQN), want = at + beats, to;
         n = sq.part[sqp.part].beats;
@@ -509,16 +532,23 @@ static void part_end(void)
     if (!sqp.song_mode)           /* (in a song the notes end as they are long: an early track's next ones sound) */
         sqp_all_notes_off();
     if (sqp.song_mode) {
-        if (++sqp.step >= sq_song_steps(sqp.song)) {
-            if (!sqp.loop_song) {
+        /* the next step whose part has some length: an empty one is passed in no time, as the tracks pass it
+         * (tp_settle), not in a clock of its own (the tracks were a clock ahead of the song then, each time round) */
+        uint32_t n = sq_song_steps(sqp.song), k;
+        for (k = 0; k <= n; k++) {
+            if (++sqp.step >= n) {
+                if (!sqp.loop_song) {
+                    sqp.step = 0;
+                    sqp_stop();
+                    load_step();
+                    sqp.tick = 0;
+                    sqp_resync();
+                    return;
+                }
                 sqp.step = 0;
-                sqp_stop();
-                load_step();
-                sqp.tick = 0;
-                sqp_resync();
-                return;
             }
-            sqp.step = 0;
+            if (sq_part_ticks(step_part(sqp.step, 0)))
+                break;
         }
         load_step();
     } else if (sqp.next_part != 0xFFu) {
