@@ -171,6 +171,21 @@ static void test_edits(void)
     d = sq_data(SQ_TRK(0, 0));
     CHECK(sq.part[0].beats == 1u && sq_len(SQ_TRK(0, 0)) == 14u && sq_ev_dur(d) == 48u,
           "a beat: the third note gone, %u bytes", sq_len(SQ_TRK(0, 0)));
+    {                             /* a take's events sorted: in order they stay, one later than 16 after it goes back
+                                   * among them from the start, after those on its own clock (stable) */
+        sq_raw_t u[32];
+        uint32_t k, ok = 1;
+        for (k = 0; k < 31u; k++)
+            raw(&u[k], 10u + k, 0xB0, 1, k);
+        raw(&u[31], 12, 0xB0, 2, 99);
+        sq_commit(4, 0, u, 32, 1, scratch);
+        for (k = 0; k < 32u; k++) {
+            const uint8_t *e = sq_event(4, 0, k);
+            uint32_t want = k < 3u ? 10u + k : k == 3u ? 12u : 10u + k - 1u;
+            ok &= e && sq_ev_tick(e) == want && e[3] == (k == 3u ? 2u : 1u);
+        }
+        CHECK(ok && sq_events(4, 0) == 32u, "sorted: the late one at 12 after the first 12");
+    }
     sq.part[0].chan[1] = 5;
     sq_replace(SQ_TRK(0, 1), sq_data(SQ_TRK(0, 0)), 7);
     sq_merge(0, 0, 1, scratch);

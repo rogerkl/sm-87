@@ -248,30 +248,58 @@ static void put_ev(uint8_t *e, uint32_t tick, uint32_t st, uint32_t d1, uint32_t
     e[4] = (uint8_t)d2;
 }
 
-/* events of a track sorted by tick, stable (insertion sort over offsets: a track is short, and mostly in order) */
+/* events of a track sorted by tick, stable: an insertion sort, as a track is mostly in order. The starts of the last
+ * SORT_RECENT events placed are kept, so an event in order costs nothing, and one a little out of place (a note
+ * quantized back past a controller) goes in without a walk from the track's start (only one earlier than all of them
+ * walks: QUANTIZE never moves one so far; a MERGE is merged instead) */
+#define SORT_RECENT 16u
 static uint32_t sort_events(uint8_t *buf, uint32_t len, uint8_t *tmp)
 {
-    uint32_t a, n = 0;
-    /* in place: walk, and move each event back past the later ones before it */
+    uint32_t a, n = 0, rec[SORT_RECENT], k = 0;   /* rec: the starts of the last k events placed, in order */
     for (a = 0; a < len;) {
-        uint32_t l = sq_ev_len(buf + a), t = sq_ev_tick(buf + a), b = a, prev = 0, p;
-        /* find where it belongs: after the last event with tick <= t */
-        for (p = 0; p < a;) {
-            uint32_t pl = sq_ev_len(buf + p);
-            if (sq_ev_tick(buf + p) > t) {
-                b = p;
-                break;
+        uint32_t l = sq_ev_len(buf + a), t = sq_ev_tick(buf + a), b = a, j = k, i;
+        /* where it belongs: before the first event later than it */
+        while (j > 0u && sq_ev_tick(buf + rec[j - 1u]) > t)
+            j--;
+        if (j < k) {
+            b = rec[j];
+            if (j == 0u && k == SORT_RECENT) {   /* earlier than all the recent: from the start */
+                uint32_t q;
+                for (q = 0; q < rec[0]; q += sq_ev_len(buf + q))
+                    if (sq_ev_tick(buf + q) > t) {
+                        b = q;
+                        break;
+                    }
             }
-            p += pl;
         }
-        (void)prev;
         if (b != a) {
-            uint32_t i;
+            int among = k < SORT_RECENT || b > rec[0];   /* (one of the last SORT_RECENT placed now) */
             for (i = 0; i < l; i++)
                 tmp[i] = buf[a + i];
             copy(buf + b + l, buf + b, a - b);
             for (i = 0; i < l; i++)
                 buf[b + i] = tmp[i];
+            for (i = 0; i < k; i++)   /* (those after it moved on) */
+                if (rec[i] >= b)
+                    rec[i] += l;
+            if (among) {
+                if (k == SORT_RECENT) {
+                    for (i = 1; i < k; i++)
+                        rec[i - 1u] = rec[i];
+                    k--;
+                }
+                for (i = k; i > 0u && rec[i - 1u] > b; i--)
+                    rec[i] = rec[i - 1u];
+                rec[i] = b;
+                k++;
+            }
+        } else {
+            if (k == SORT_RECENT) {
+                for (i = 1; i < k; i++)
+                    rec[i - 1u] = rec[i];
+                k--;
+            }
+            rec[k++] = a;
         }
         a += l;
         n++;
@@ -495,29 +523,28 @@ int sq_erase(uint32_t p, uint32_t mask)
 
 int sq_merge(uint32_t p, uint32_t a, uint32_t b, uint8_t *scratch)
 {
-    uint32_t la = sq_len(SQ_TRK(p, a)), lb = sq_len(SQ_TRK(p, b)), i;
+    uint32_t la = sq_len(SQ_TRK(p, a)), lb = sq_len(SQ_TRK(p, b)), ia = 0, ib = 0, out = 0;
     const uint8_t *da = sq_data(SQ_TRK(p, a)), *db = sq_data(SQ_TRK(p, b));
     uint8_t ca = sq.part[p].chan[a], cb = sq.part[p].chan[b], tmp[SQ_NOTE_LEN];
     if (la + lb > SQ_SCRATCH)
         return -1;
-    /* both channel assignments baked into the data, and b UNCHANGED (MMT-8 MERGE) */
-    for (i = 0; i < lb;) {
-        uint32_t l = sq_ev_len(db + i), k;
+    /* the two in order, one after the other (b's first on the same clock), both channel assignments baked into the
+     * data, and b UNCHANGED (MMT-8 MERGE) */
+    while (ia < la || ib < lb) {
+        int from_b = ia >= la || (ib < lb && sq_ev_tick(db + ib) <= sq_ev_tick(da + ia));
+        const uint8_t *e = from_b ? db + ib : da + ia;
+        uint32_t l = sq_ev_len(e), k, ch = from_b ? cb : ca;
         for (k = 0; k < l; k++)
-            scratch[i + k] = db[i + k];
-        if (cb)
-            scratch[i + 2u] = (uint8_t)((scratch[i + 2u] & 0xF0u) | (cb - 1u));
-        i += l;
+            scratch[out + k] = e[k];
+        if (ch)
+            scratch[out + 2u] = (uint8_t)((scratch[out + 2u] & 0xF0u) | (ch - 1u));
+        out += l;
+        if (from_b)
+            ib += l;
+        else
+            ia += l;
     }
-    for (i = 0; i < la;) {
-        uint32_t l = sq_ev_len(da + i), k;
-        for (k = 0; k < l; k++)
-            scratch[lb + i + k] = da[i + k];
-        if (ca)
-            scratch[lb + i + 2u] = (uint8_t)((scratch[lb + i + 2u] & 0xF0u) | (ca - 1u));
-        i += l;
-    }
-    sort_events(scratch, la + lb, tmp);
+    sort_events(scratch, la + lb, tmp);   /* (in order already: nothing to do, two tracks in order) */
     if (sq_replace(SQ_TRK(p, b), scratch, la + lb) != 0)
         return -1;
     sq.part[p].chan[b] = SQ_UNCHANGED;
