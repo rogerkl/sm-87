@@ -435,10 +435,10 @@ static int fn_quantize(uint8_t *e, void *ctx)
         end = nt + sq_ev_dur(e);
     else if (q[2] == SQ_Q_BOTH || q[2] == SQ_Q_END)
         end = to_grid(end, g);
-    if (end > q[1])
-        end = q[1];
     if (end <= nt)
         end = nt + (q[2] == SQ_Q_BOTH || q[2] == SQ_Q_END ? g : 1u);
+    if (end > q[1])
+        end = q[1];               /* (within the part: in a song, not on into the next step; nt is before it) */
     e[0] = (uint8_t)nt;
     e[1] = (uint8_t)(nt >> 8);
     e[5] = (uint8_t)(end - nt);

@@ -148,6 +148,21 @@ static void test_edits(void)
     sq_quantize(0, 1, 24, SQ_Q_BOTH, scratch);
     d = sq_data(SQ_TRK(0, 0));
     CHECK(sq_ev_dur(d) == 48u && sq_ev_dur(d + 7) == 24u, "and the ends: %u %u", sq_ev_dur(d), sq_ev_dur(d + 7));
+    {                             /* a note in the last half note of 5 beats, quantized to 1/2 with its end: to the
+                                   * part's end, not a grid line past it (480, not 576) */
+        sq_raw_t u[2];
+        raw(&u[0], 384, 0x90, 64, 100);
+        raw(&u[1], 394, 0x80, 64, 0);
+        sq_commit(3, 0, u, 2, 5, scratch);
+        sq_quantize(3, 1, 192, SQ_Q_BOTH, scratch);
+        d = sq_data(SQ_TRK(3, 0));
+        CHECK(sq_ev_tick(d) == 384u && sq_ev_dur(d) == 96u, "1/2 & end in 5 beats: %u+%u", sq_ev_tick(d),
+              sq_ev_dur(d));
+        sq_quantize(3, 1, 192, SQ_Q_END, scratch);
+        d = sq_data(SQ_TRK(3, 0));
+        CHECK(sq_ev_tick(d) == 384u && sq_ev_dur(d) == 96u, "the end alone, the same: %u+%u", sq_ev_tick(d),
+              sq_ev_dur(d));
+    }
     sq_transpose(0, 1, 12, scratch);
     d = sq_data(SQ_TRK(0, 0));
     CHECK(d[3] == 120u && d[7 + 3] == 72u && d[14 + 3] == 74u, "transposed, 132 folded back to 120: %u %u", d[3],
