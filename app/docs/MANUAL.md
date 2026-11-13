@@ -166,7 +166,8 @@ has the same for its patterns):
 - **Not while recording,** a count-in included (`RECORDING`, `STOP FIRST`), and not while following MIDI clock, whose
   song position sets the place.
 - **MIDI clock out:** a jump while playing sends a stop, the song position and a continue, so whatever follows the
-  clock goes there too.
+  clock goes there too. CONTINUE sends the song position too. In a song it counts from the song's start, the steps
+  before included, as the song position in is taken.
 
 ### MIDI modes (GLO)
 

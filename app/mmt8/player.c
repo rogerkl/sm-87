@@ -313,6 +313,18 @@ void sqp_punch(void)
     take_end(beats);
 }
 
+/* the song position going out (F2): 16ths from the song's start, the steps before the one playing counted too (as
+ * ext_locate takes one in), or from the part's; at most 14 bits */
+static uint32_t song_position(void)
+{
+    uint32_t t = sqp.tick, s;
+    if (sqp.song_mode)
+        for (s = 0; s < sqp.step; s++)
+            t += sq_part_ticks(step_part(s, 0));
+    t /= 24u;
+    return t < 0x3FFFu ? t : 0x3FFFu;
+}
+
 void sqp_continue(void)
 {
     uint32_t pos;
@@ -329,7 +341,7 @@ void sqp_continue(void)
     to_next = 0.0f;
     sqp.state = SQP_PLAYING;
     if (sqp.clock_out) {
-        pos = sqp.tick / 24u;     /* the song position: 16ths */
+        pos = song_position();
         sqp_emit(0xF2, pos & 0x7Fu, pos >> 7 & 0x7Fu);
         sqp_midi_rt(0xFB);
     }
@@ -404,7 +416,7 @@ int32_t sqp_locate(int32_t steps, int32_t beats)
         sqp_all_notes_off();
         sqp_resync();
         if (sqp.clock_out) {      /* what follows our clock: stopped, the song position, on again */
-            pos = sqp.tick / 24u;
+            pos = song_position();
             sqp_midi_rt(0xFC);
             sqp_emit(0xF2, pos & 0x7Fu, pos >> 7 & 0x7Fu);
             sqp_midi_rt(0xFB);

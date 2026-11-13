@@ -931,11 +931,22 @@ static void test_locate(void)
     sqp.loop_song = 0;
     sqp_to_step(1);
     CHECK(sqp.step == 1u && sqp.tick == 0u, "to step 2's start (%u)", sqp.step);
+    (void)sqp_locate(0, 1);       /* CONTINUE from step 2's second beat: the song position from the song's start */
+    n_out = 0;
+    sqp_continue();
+    CHECK(n_out >= 1u && out[0].st == 0xF2u && out[0].d1 == 20u && out[0].d2 == 0u,
+          "CONTINUE in a song: the song position 16th 20, step 1's 16 and a beat (%02X %u)", n_out ? out[0].st : 0,
+          n_out ? out[0].d1 : 0);
+    sqp_stop();
     n_out = 0;
     sqp_play();                   /* from the top; then a step on, playing */
     run(frames_for_ticks(20.0f));
     n_out = 0;
     (void)sqp_locate(1, 0);
+    for (i = 0; i < n_out && out[i].st != 0xF2u; i++)
+        ;
+    CHECK(i < n_out && out[i].d1 == 16u && out[i].d2 == 0u, "playing: the song position step 2's start, 16th 16 (%u)",
+          i < n_out ? out[i].d1 : 0);
     run(frames_for_ticks(5.0f));
     first_on(&key);
     CHECK(sqp.state == SQP_PLAYING && sqp.step == 1u && key == 64u, "playing: step 2 at once (%u, key %u)", sqp.step,
