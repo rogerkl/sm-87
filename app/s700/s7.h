@@ -96,17 +96,22 @@ void s7_default_params(uint8_t *p);
 
 /* ---- the engine (audio interrupt) ----
  * The S700's MIDI modes (its manual, 33-37; OVS's OMNION): OMNI OFF hears its basic channel, OMNI ON every channel,
- * both playing the program chosen; MULTI PROGRAM (its mode 7) hears every channel, channel 1..16 playing program
- * P1..P16, or P17..P32 while one of those is the program chosen (the manual says "or P17-32", not how: here, the
- * program chosen's bank). The voices (six, as the S700's: s7_poly) go to whichever channel needs one. The app sends the engine only what its
- * mode hears; the channel (0..15) is the message's */
+ * both playing the program chosen; MULTI PROGRAM (its mode 7) hears every channel, channel 1..16 playing 16 programs
+ * in a row from a first one (s7_multi_base). On the S700 that first one is the program chosen; here it is set apart,
+ * so choosing a program doesn't move what the channels play. The voices (six, as the S700's: s7_poly) go to
+ * whichever channel needs one. The app sends the engine only what its mode hears; the channel (0..15) is the
+ * message's */
 enum { S7_OMNI_OFF, S7_OMNI_ON, S7_MULTI };
 void s7_init(float fs);           /* the tables, at the output rate */
 void s7_midi_mode(uint32_t mode);
 uint32_t s7_program_of(uint32_t ch);   /* the program a channel plays (0..31) */
 void s7_note_on(uint32_t ch, uint32_t key, uint32_t vel);
+/* a note on a channel playing a program not its own (MULTI: the keys on one none of the 16 channels plays); its note
+ * off the channel's as any */
+void s7_note_on_prog(uint32_t ch, uint32_t prog, uint32_t key, uint32_t vel);
 void s7_note_off(uint32_t ch, uint32_t key, uint32_t off_vel);   /* off_vel: the note off's (64: a note on at 0) */
-void s7_program(uint32_t prog);   /* 0..31: P1..P32, the program chosen (MULTI: its bank) */
+void s7_program(uint32_t prog);   /* 0..31: P1..P32, the program chosen (MULTI: none of the channels' own) */
+void s7_multi_base(uint32_t prog);   /* MULTI: the program channel 1 plays (0..31), each channel after it the next */
 uint32_t s7_current_program(void);
 /* the controllers: each channel's own in MULTI; in OMNI ON or OFF one set for all */
 void s7_bend(uint32_t ch, int32_t v);   /* -8192..8191 */

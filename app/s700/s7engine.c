@@ -142,7 +142,7 @@ typedef struct {
 static voice_t vc[S7_VOICES];
 static uint32_t poly = S7_POLY_STD;   /* the voices a note may take: vc[0..poly) */
 static voice_t dv[S7_DRUM_VOICES];   /* the drum machine's */
-static uint32_t prog_now, note_count, bend_range = 2u, midi_mode = S7_OMNI_OFF;
+static uint32_t prog_now, multi_base, note_count, bend_range = 2u, midi_mode = S7_OMNI_OFF;
 static uint8_t wheel[S7_CHANNELS], press[S7_CHANNELS];   /* each channel's (MULTI), else [0] */
 static int16_t bend_raw[S7_CHANNELS];
 static float bend_ratio[S7_CHANNELS] = {1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f,
@@ -156,11 +156,12 @@ static uint32_t chan_of(uint32_t ch) { return midi_mode == S7_MULTI ? ch % S7_CH
 void s7_program(uint32_t prog) { prog_now = prog % S7_PROGRAMS; }
 uint32_t s7_current_program(void) { return prog_now; }
 void s7_midi_mode(uint32_t mode) { midi_mode = mode <= S7_MULTI ? mode : S7_OMNI_OFF; }
-/* MULTI: channel 1 plays the program chosen, each channel after it the next, as the S700 does (P2 chosen: channels
- * 1-16 play P2-17); past P32 round to P1 (a guess) */
+void s7_multi_base(uint32_t prog) { multi_base = prog % S7_PROGRAMS; }
+/* MULTI: channel 1 plays the first program (s7_multi_base), each channel after it the next, as the S700 does from
+ * the program chosen (P2: channels 1-16 play P2-17); past P32 round to P1 (a guess) */
 uint32_t s7_program_of(uint32_t ch)
 {
-    return midi_mode == S7_MULTI ? (prog_now + ch % S7_CHANNELS) % S7_PROGRAMS : prog_now;
+    return midi_mode == S7_MULTI ? (multi_base + ch % S7_CHANNELS) % S7_PROGRAMS : prog_now;
 }
 static void bend_set(uint32_t c)
 {
@@ -405,9 +406,12 @@ static voice_t *voice_free(void)
     return best;
 }
 
-void s7_note_on(uint32_t ch, uint32_t key, uint32_t vel)
+void s7_note_on(uint32_t ch, uint32_t key, uint32_t vel) { s7_note_on_prog(ch, s7_program_of(ch), key, vel); }
+
+void s7_note_on_prog(uint32_t ch, uint32_t prog, uint32_t key, uint32_t vel)
 {
-    uint32_t sl, prog = s7_program_of(ch);
+    uint32_t sl;
+    prog %= S7_PROGRAMS;
     if (vel == 0u) {
         s7_note_off(ch, key, 64u);
         return;

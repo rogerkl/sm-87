@@ -57,7 +57,8 @@ sampler's dumps, as many as the file holds.
   - One shot, loop, alternating and drum trigger.
   - 32 programs of key ranges.
   - The S700's MIDI modes: OMNI OFF (its channel), OMNI ON (every channel), and MULTI PROGRAM, where channels 1-16
-    play 16 programs from the one chosen (P1: programs 1-16), so each MMT-8 track can play its own program.
+    play 16 programs in a row (1-16 to start), so each MMT-8 track can play its own program. The keys play any
+    program while the sequence plays on unchanged.
 - **Sample memory** is 292 KB of flash (FREE on the strip): 6 full-length samples, as many as a stock S700 holds,
   or all 16 slots with shorter ones. Samples play in place from the flash. An empty slot holds the X7000's test tone.
 - **Samples over MIDI.** The FM-1 answers as an X7000 with 16 slots: the sample dump in and out, SPRM/RSPRM and
@@ -119,7 +120,7 @@ sampler's dumps, as many as the file holds.
 | REC | Arm recording on the part's lowest empty track (or the one chosen with REC + its key); again: disarm; while a take runs: punch out (the part plays on) |
 | SEL + first 8 white keys | Track mutes (on the SEQ page; in a song: the step's mutes); the 9th: the drums on or muted |
 | REC + first 8 white keys | The record track; the armed track's key again: none (until REC + a key chooses one) |
-| PRESET | The part or song (SEQ page; while a part plays, the next, queued for its end), else the sampler's program |
+| PRESET | The part or song (SEQ page; while a part plays, the next, queued for its end), else the sampler's program: the one the keys play |
 | K1 / K2 (SEQ) | Tempo / the record track's channel (UNCHANGED, 1-16) |
 | K4 (SEQ) | The drum pattern that plays with the parts; in a song (stopped): the step's drum pattern, or none (the step's row shows it: `P05 12345678 D07`, `D--` none) |
 | ALGO (SEQ) | The MMT-8's functions, below; SEQ goes back to the part or song |
@@ -131,7 +132,7 @@ sampler's dumps, as many as the file holds.
 | LFO | SPEED, DEPTH, DELAY, PRESSURE |
 | SELECT / K1-K4 (sampler pages) | The slot / the page's values. The strip under the LCD shows the slot, its sample and the program |
 | HOME | The sampler's overview |
-| GLO | MIDI: K1 the sampler's channel, K2 its mode (OMNI OFF, ON, MULTI), K3 the pitch bend's range, K4 the drums' channel. GLO again: the MIX, and again the VOICES (below) |
+| GLO | MIDI: K1 the sampler's channel, K2 its mode (OMNI OFF, ON, then MULTI with the programs channels 1-16 play: 1-16, 2-17 .. 32-15), K3 the pitch bend's range, K4 the drums' channel. GLO again: the MIX, and again the VOICES (below) |
 | FX | The effect, the MIDIVerb: K1 its program, K2 its return, K3 the channel whose program changes choose it, K4 on or off. FX again: each slot's send; again: each pad's (below) |
 | SAVE | Lit when something isn't saved: settings, the sample parameters, the sequencer (stopped) |
 
@@ -179,19 +180,28 @@ has the same for its patterns):
 The S700's MIDI modes, from its manual (33-37), set with K2 on the GLO page:
 - **OMNI OFF** (as before): the sampler hears its channel (K1) and plays the program shown (PRESET).
 - **OMNI ON:** every channel plays the program shown.
-- **MULTI** (the S700's MULTI PROGRAM / POLYPHONIC): channel 1 plays the program shown, and each channel after it
-  the next program, as on the S700. With P1 shown, channel 1 plays program 1, channel 2 program 2, up to 16; with
-  P2 shown, channels 1-16 play programs 2-17. (That's what the S700's manual means by "P1-16 (17-32)": P17 shown
-  gives programs 17-32.) Past P32 they go round to P1: with P20 shown, channel 14 plays P1. That part is a guess.
-  The voices go to whichever channel needs one. A program change on the sampler's own channel chooses the program
-  shown, which moves all 16. One on another channel is ignored. Pitch bend, the mod wheel and aftertouch are each
-  channel's own.
+- **MULTI** (the S700's MULTI PROGRAM / POLYPHONIC): channels 1-16 play 16 programs in a row, channel 1 the first
+  and each channel after it the next. K2 turned on past OMNI ON sets them: `1-16` (channel n plays program n), then
+  `2-17` (channels 1-16 play programs 2-17), and so on to `32-15`. Past P32 they go round to P1: with `20-3`,
+  channel 14 plays P1. That part is a guess. The voices go to whichever channel needs one. Pitch bend, the mod wheel
+  and aftertouch are each channel's own.
 
-In MULTI the keys play channel 1, the program shown. A track you record from the keys plays channel 1 when its
-channel is UNCHANGED, so it plays whatever program is shown then. To give a track a program of its own, set its
-channel (K2 on the SEQ page, or MIDI CHANNEL): with P1 shown, channel n plays program n.
+On the S700 the program chosen is channel 1's, so choosing another moves all 16 ("P1-16 (17-32)" in its manual is P1
+or P17 chosen). On SM-87 the two are separate, so a sequence can play `3-18` while you play P1 on the keys:
+- **The program shown (PRESET) is the one the keys play,** any of the 32. Choosing it changes nothing else, and
+  turning K2 doesn't change it.
+- **The keys play on the channel that plays their program,** so a take from them plays back as you heard it. With
+  `3-18` and P6 shown they play channel 4 (6 - 3 + 1), and a track left UNCHANGED records channel 4.
+- **A program none of the 16 channels plays** (P1 with `3-18`: one of the 16 before the first, going round past
+  P32) is played on channel 1. It sounds as shown, but a take of it plays back as channel 1's program, the first
+  (P3 there), because MIDI has only 16 channels: P1 would need channel 31. Turn K2 until a channel plays it (`20-3`
+  gives P1 to channel 14), or record it on a track set to a channel.
+- **A track whose channel is set** (MIDI ECHO while it records) plays that channel's program, keys or not.
+- **A program change on the sampler's own channel** chooses the program shown, as PRESET does. One on another channel
+  is ignored.
 
-Channel 10 is the drums' too. In MULTI it also plays a program: program 10 with P1 shown.
+Channel 10 is the drums' too. In MULTI it also plays a program (program 10 with `1-16`), and the keys on channel 10
+play the pads whose notes they reach.
 
 OVS (Akai's overall settings) carries the mode both ways.
 

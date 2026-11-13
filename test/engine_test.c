@@ -341,8 +341,9 @@ static void test_vibrato(void)
     (void)hz;
 }
 
-/* MULTI PROGRAM: channel n plays the program chosen + n - 1 (P1 chosen: program n, as the S700); its note offs and
- * bend its own. OMNI ON / OFF: the program chosen whatever the channel */
+/* MULTI PROGRAM: channel n plays the first program (s7_multi_base) + n - 1 (P1 first: program n, as the S700 with P1
+ * chosen), whatever the program chosen; its note offs and bend its own. OMNI ON / OFF: the program chosen whatever
+ * the channel */
 static void test_multi(void)
 {
     float hz = make_sine(1000.0f, 32000, 1800.0f), got;
@@ -355,7 +356,8 @@ static void test_multi(void)
     s7_slot[2].p[S7_P_KEYL(0)] = 24, s7_slot[2].p[S7_P_KEYH(0)] = 0;
     s7_slot[2].p[S7_P_KEYL(16)] = 0, s7_slot[2].p[S7_P_KEYH(16)] = 99;
     s7_midi_mode(S7_MULTI);
-    s7_program(0);
+    s7_multi_base(0);
+    s7_program(6);                        /* (the program chosen: not the channels') */
     CHECK(s7_program_of(0) == 0u && s7_program_of(4) == 4u && s7_program_of(15) == 15u, "MULTI: channel n, P n");
     s7_note_on(4, 60, 100);               /* channel 5: P5, an octave up */
     render(44100);
@@ -375,9 +377,9 @@ static void test_multi(void)
     render(44100 * 3);
     CHECK(s7_voices_active() == 0u, "channel 5's all notes off");
     s7_bend(0, 0);
-    s7_program(1);                        /* P2 chosen: channels 1-16 play P2-17, channel 4 P5 */
+    s7_multi_base(1);                     /* from P2: channels 1-16 play P2-17, channel 4 P5 */
     CHECK(s7_program_of(0) == 1u && s7_program_of(3) == 4u && s7_program_of(15) == 16u,
-          "P2 chosen: channel 1 P%u, 4 P%u, 16 P%u", s7_program_of(0) + 1u, s7_program_of(3) + 1u,
+          "from P2: channel 1 P%u, 4 P%u, 16 P%u", s7_program_of(0) + 1u, s7_program_of(3) + 1u,
           s7_program_of(15) + 1u);
     s7_note_on(3, 60, 100);
     render(44100);
@@ -386,17 +388,24 @@ static void test_multi(void)
     s7_note_on(0, 60, 100);
     CHECK(s7_voices_active() == 1u, "channel 1: P2, nothing in it");
     s7_kill();
-    s7_program(16);                       /* P17 chosen: channel 1 plays it; P20 chosen: channel 14 P1, round */
+    s7_multi_base(16);                    /* from P17: channel 1 plays it; from P20: channel 14 P1, round */
     s7_note_on(0, 60, 100);
-    CHECK(s7_voices_active() == 1u, "P17 chosen, channel 1: P17");
+    CHECK(s7_voices_active() == 1u, "from P17, channel 1: P17");
     s7_kill();
-    s7_program(19);
+    s7_multi_base(19);
     CHECK(s7_program_of(0) == 19u && s7_program_of(12) == 31u && s7_program_of(13) == 0u && s7_program_of(15) == 2u,
-          "P20 chosen: channel 13 P%u, 14 P%u, 16 P%u", s7_program_of(12) + 1u, s7_program_of(13) + 1u,
+          "from P20: channel 13 P%u, 14 P%u, 16 P%u", s7_program_of(12) + 1u, s7_program_of(13) + 1u,
           s7_program_of(15) + 1u);
     s7_note_on(13, 60, 100);
     CHECK(s7_voices_active() == 1u, "channel 14: P1, round past P32");
     s7_kill();
+    s7_note_on_prog(0, 4, 60, 100);       /* channel 1 (P20 from P20) given P5: an octave up; its note off channel 1's */
+    render(44100);
+    got = freq_of(out + 1000, 40000);
+    CHECK(s7_voices_active() == 1u && fabsf(got / (2.0f * hz) - 1.0f) < 1e-3f, "channel 1 given P5 (%.1f Hz)", got);
+    s7_note_off(0, 60, 64);
+    render(44100 * 3);
+    CHECK(s7_voices_active() == 0u, "its note off, channel 1's");
     s7_midi_mode(S7_OMNI_ON);             /* OMNI ON: the program chosen, P5, whatever the channel */
     s7_program(4);
     CHECK(s7_program_of(0) == 4u && s7_program_of(9) == 4u, "OMNI ON: P5 on every channel");
@@ -405,6 +414,7 @@ static void test_multi(void)
     render(44100 * 3);
     CHECK(s7_voices_active() == 0u, "its note off");
     s7_midi_mode(S7_OMNI_OFF);
+    s7_multi_base(0);
     s7_program(0);
     s7_kill();
 }

@@ -62,7 +62,9 @@ typedef struct {
     /* the MMT-8's MIDI FILTER (an object saved before it: its defaults) */
     uint8_t rec_filter;           /* what a take records besides notes: SQP_REC_* (all but aftertouch) */
     uint8_t rec_ch;               /* from which channel: 0 all, 1..16 */
-    uint8_t rsv3[2];
+    uint8_t multi_base;           /* MULTI: the program channel 1 plays, 0..31 (each channel after it the next; 0 in an
+                                   * object saved before it) */
+    uint8_t rsv3[1];
     /* the effect (FX, SM87_FX; kept in a build without it too; an object saved before it: its defaults) */
     uint8_t fx_prog;              /* the MIDIVerb's program: 0..62 (its 1..63) */
     uint8_t fx_ret;               /* its return into the mix, 0..99 */
@@ -143,6 +145,7 @@ static void settings_defaults(void)
     set.clock_in = 0;
     set.clock_out_off = 0;
     set.s7_mode = S7_OMNI_OFF;
+    set.multi_base = 0;
     set.s7_poly = S7_POLY_STD;
     set.dr_prog = 0;
     loop_click_defaults();
@@ -172,6 +175,8 @@ static void settings_load(void)
         loop_click_defaults();
     if (n < (int)SET_V5_LEN || set.rec_filter > 15u || set.rec_ch > 16u)
         filter_defaults();
+    if (n < (int)SET_V5_LEN || set.multi_base >= S7_PROGRAMS)
+        set.multi_base = 0;
     {
         uint32_t bad_fx = n < (int)sizeof set || set.fx_prog > 62u || set.fx_ret > 99u || set.fx_ch > 16u ||
                           set.fx_on > 1u;
@@ -245,6 +250,8 @@ static uint8_t stage[SDS_BUFS][S7_PACKED(S7_MAXWORDS)] __attribute__((section(".
  * messages (status | d1 << 8 | d2 << 16) between them, one writer and one reader */
 #define EVQ 64u
 #define EV_INTERNAL (1u << 24)    /* heard here only: not recorded, not out over MIDI (STEP EDIT's hit shown) */
+#define EV_PROG(p) (1u << 25 | (uint32_t)(p) << 26)   /* the keys' note on, MULTI: the sampler plays program p (0..31)
+                                                      * on channel 1, a program none of the 16 channels plays */
 static volatile uint32_t evq[EVQ];
 static volatile uint32_t evq_w, evq_r;
 
@@ -257,14 +264,25 @@ static void ev_push(uint32_t st, uint32_t d1, uint32_t d2)
     evq_w = w + 1u;
 }
 
+/* MULTI: the channel (0..15; 16 and on: none) that plays a program, channel 1 the first (multi_base) */
+static uint32_t multi_chan(uint32_t prog)
+{
+    return (prog % S7_PROGRAMS + S7_PROGRAMS - set.multi_base) % S7_PROGRAMS;
+}
+
+static int32_t keys_prog = -1;    /* the keys' note on being played, EV_PROG's program (else -1; audio interrupt) */
+
 /* one message to the sampler, on a channel its MIDI mode hears (audio interrupt). A program change chooses the
- * program (in MULTI on the basic channel only: the others' programs are theirs, by channel) */
+ * program (in MULTI on the basic channel only: the program the keys play; the channels' programs are theirs) */
 static void s7_message(uint32_t st, uint32_t d1, uint32_t d2)
 {
     uint32_t ch = st & 0x0Fu;
     switch (st & 0xF0u) {
     case 0x90u:
-        s7_note_on(ch, d1, d2);   /* velocity 0: a note off at 64 */
+        if (keys_prog >= 0)
+            s7_note_on_prog(ch, (uint32_t)keys_prog, d1, d2);
+        else
+            s7_note_on(ch, d1, d2);   /* velocity 0: a note off at 64 */
         break;
     case 0x80u:
         s7_note_off(ch, d1, d2);
@@ -306,10 +324,30 @@ static void s7_chan_text(char *t)
     }
 }
 
-/* the channel the keys play the sampler on: its basic channel; in MULTI channel 1, the program shown's */
+/* the keys play the program shown (PRESET), on the sampler's basic channel; in MULTI on the channel that plays it,
+ * so a take from them plays back as it was heard (3-18 and P6: channel 4). With none of the 16 playing it (one of the
+ * 16 before the first: 3-18 and P1, which MIDI has no channel for, 31), on channel 1, the first's, the program given
+ * with each note (EV_PROG): heard as shown, but a take of it plays back as the first */
 static uint32_t s7_keys_channel(void)
 {
-    return set.s7_mode == S7_MULTI ? 0u : set.s7_channel;
+    uint32_t c = multi_chan(s7_current_program());
+    return set.s7_mode != S7_MULTI ? set.s7_channel : c < S7_CHANNELS ? c : 0u;
+}
+
+static uint32_t s7_keys_ev(void)  /* what goes with the keys' note on: EV_PROG, or nothing */
+{
+    uint32_t p = s7_current_program();
+    return set.s7_mode == S7_MULTI && multi_chan(p) >= S7_CHANNELS ? EV_PROG(p) : 0u;
+}
+
+/* MULTI's first program: the programs channels 1-16 play, from b (the program the keys play not moved) */
+static void multi_set(uint32_t b)
+{
+    uint32_t f;
+    set.multi_base = (uint8_t)(b % S7_PROGRAMS);
+    f = plat_lock();
+    s7_multi_base(set.multi_base);
+    plat_unlock(f);
 }
 
 static volatile uint32_t midi_in_count, midi_in_last;
@@ -423,8 +461,10 @@ static void played_in(uint32_t st, uint32_t d1, uint32_t d2, uint32_t to)
         hrp_fill_pad((uint32_t)hr_pad_of(d1), d2, (st & 0xF0u) == 0x90u && d2);
     if (sqp.rec_armed || sqp.take_state == SQP_TAKE_RUNNING) {
         uint32_t ch = sq.part[sqp.part].chan[sqp.rec_track];
-        if (ch)
+        if (ch) {
             st = (st & 0xF0u) | (ch - 1u);
+            keys_prog = -1;       /* (the keys too: that channel's program) */
+        }
     }
     play_out(st, d1, d2, to);
 }
@@ -465,10 +505,12 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
     float gain = (float)master_q12 / 4096.0f * (8388607.0f * 0.5f / 2048.0f);
     while (evq_r != evq_w) {                 /* the keys: the sampler's channel, or (the pads) the drums' */
         uint32_t e = evq[evq_r % EVQ];
+        keys_prog = e & EV_PROG(0) ? (int32_t)(e >> 26 & 31u) : -1;
         if (e & EV_INTERNAL)
             play_out(e & 0xFFu, e >> 8 & 0xFFu, e >> 16 & 0xFFu, 0);
         else
             played_in(e & 0xFFu, e >> 8 & 0xFFu, e >> 16 & 0xFFu, TO_USB);
+        keys_prog = -1;
         evq_r = evq_r + 1u;
     }
     midi_in();
@@ -679,6 +721,7 @@ void app_init(void)
     s7_init(SM_FS);
     s7_bend_range(set.bend_range);
     s7_midi_mode(set.s7_mode);
+    multi_set(set.multi_base);
     s7_poly(set.s7_poly);
     {
         uint32_t i;
@@ -1083,25 +1126,35 @@ static void md_send_service(void)
 #define PG_MIDI (PG_N + 2u)       /* GLO: MIDI, the S700's (its basic channel, OMNI OFF / ON / MULTI, the bend's range) and
                                    * the drums' channel */
 
-static const char *const S7_MODE_TXT[3] = {"OFF", "ON", "MULT"};
+static const char *const S7_MODE_TXT[2] = {"OFF", "ON"};
 
-/* "CH  OMNI BEND DR" / "01  MULT   2 10" */
+/* "CH  OMNI BEND DR" / "01  OFF    2 10"; in MULTI the programs channels 1-16 play: "CH  MULTI BND DR" /
+ * "01  1-16   2 10" */
 static void page_midi(void)
 {
-    char t[LCD_ROWBUF], n[4];
+    char t[LCD_ROWBUF], n[8], m[4];
     uint32_t i;
     for (i = 0; i < LCD_COLS; i++)
         t[i] = ' ';
     t[LCD_COLS] = 0;
     fmt_uint(n, set.s7_channel + 1u, 2, '0');
     t[0] = n[0], t[1] = n[1];
-    for (i = 0; S7_MODE_TXT[set.s7_mode % 3u][i]; i++)
-        t[4 + i] = S7_MODE_TXT[set.s7_mode % 3u][i];
+    if (set.s7_mode == S7_MULTI) {
+        fmt_uint(n, set.multi_base + 1u, 0, ' ');
+        str_cat(n, "-");
+        fmt_uint(m, (set.multi_base + 15u) % S7_PROGRAMS + 1u, 0, ' ');
+        str_cat(n, m);
+    } else {
+        n[0] = 0;
+        str_cat(n, S7_MODE_TXT[set.s7_mode & 1u]);
+    }
+    for (i = 0; n[i]; i++)
+        t[4 + i] = n[i];
     fmt_uint(n, set.bend_range, 2, ' ');
     t[10] = n[0], t[11] = n[1];
     fmt_uint(n, set.dr_channel + 1u, 2, '0');
     t[14] = n[0], t[15] = n[1];
-    lcd_row(0, "CH  OMNI BEND DR");
+    lcd_row(0, set.s7_mode == S7_MULTI ? "CH  MULTI BND DR" : "CH  OMNI BEND DR");
     lcd_row(1, t);
 }
 
@@ -1362,21 +1415,28 @@ static void mix_turn(uint32_t k, int32_t e, uint8_t *slot)
     set_dirty = 1;
 }
 
-/* K1 the sampler's channel, K2 its mode, K3 the bend's range, K4 the drums' channel */
+/* K1 the sampler's channel, K2 its mode: OMNI OFF, ON, then MULTI from P1 (1-16), P2 (2-17) .. P32; K3 the bend's
+ * range, K4 the drums' channel */
 static void midi_turn(uint32_t k, int32_t e)
 {
     uint32_t f;
     if (k == EN_K1) {
         set.s7_channel = (uint8_t)clamp((int32_t)set.s7_channel + e, 0, 15);
     } else if (k == EN_K2) {
-        uint32_t m = (uint32_t)clamp((int32_t)set.s7_mode + e, S7_OMNI_OFF, S7_MULTI);
-        if (m == set.s7_mode)
+        int32_t at = set.s7_mode == S7_MULTI ? (int32_t)(S7_MULTI + set.multi_base) : (int32_t)set.s7_mode;
+        int32_t to = clamp(at + e, S7_OMNI_OFF, (int32_t)(S7_MULTI + S7_PROGRAMS - 1u));
+        uint32_t m = to < S7_MULTI ? (uint32_t)to : S7_MULTI;
+        if (to == at)
             return;
-        set.s7_mode = (uint8_t)m;
-        f = plat_lock();
-        s7_all_off();             /* (a note held stays where it was: let go) */
-        s7_midi_mode(m);
-        plat_unlock(f);
+        if (m != set.s7_mode) {
+            set.s7_mode = (uint8_t)m;
+            f = plat_lock();
+            s7_all_off();         /* (a note held stays where it was: let go) */
+            s7_midi_mode(m);
+            plat_unlock(f);
+        }
+        if (m == S7_MULTI)
+            multi_set((uint32_t)(to - S7_MULTI));
     } else if (k == EN_K3) {
         set.bend_range = (uint8_t)clamp((int32_t)set.bend_range + e, 0, 12);
         f = plat_lock();
@@ -1765,7 +1825,7 @@ static void input(void)
     for (k = 0; k < NKEYS; k++) {            /* key 0 is F3 (MIDI 53) */
         uint32_t bit = 1u << k;
         if ((keys & bit) && !(ui.keys & bit)) {
-            uint32_t note = (uint32_t)(53 + (int32_t)k + 12 * set.octave), v = touch_vel(k);
+            uint32_t note = (uint32_t)(53 + (int32_t)k + 12 * set.octave), v = touch_vel(k), ev = 0;
             ui.key_note[k] = 0xFFu;
             if (tracks && (key_track(k) >= 0 || !ed.fn)) {   /* the eight track buttons (a function's: the others play) */
                 if (key_track(k) >= 0 && ed.fn)
@@ -1796,9 +1856,10 @@ static void input(void)
                 ui.redraw = 1;
             } else {
                 ui.key_ch[k] = (uint8_t)s7_keys_channel();
+                ev = s7_keys_ev();
             }
             ui.key_note[k] = (uint8_t)note;
-            ev_push(0x90u | ui.key_ch[k], note, v ? v : 1u);
+            ev_push(ev | 0x90u | ui.key_ch[k], note, v ? v : 1u);
         } else if (!(keys & bit) && (ui.keys & bit) && ui.key_note[k] == 0xFEu) {
             uint32_t f = plat_lock();
             hrp.erase &= (uint16_t)~(1u << key_pad(k));
@@ -2234,6 +2295,8 @@ int app_expect(const char *what, int *got)
         *got = set.s7_channel + 1;
     else if (!strcmp(what, "bendrange"))
         *got = set.bend_range;
+    else if (!strcmp(what, "multibase"))    /* MULTI: the program channel 1 plays, 1..32 */
+        *got = set.multi_base + 1;
     else if (!strcmp(what, "keych"))        /* the channel the keys play it on, 1..16 */
         *got = (int)s7_keys_channel() + 1;
     else if (!strncmp(what, "progof", 6))   /* progofN: the program channel N plays, 1..32 */
