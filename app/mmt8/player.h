@@ -62,8 +62,9 @@ void sqp_continue(void);
 void sqp_aux_play(int cont);      /* the clock for the drums alone, the sequencer stopped (MIDI start or continue out);
                                    * sqp_stop stops it */
 /* the place moved (the MMT-8's FF/RW and auto-locate; main loop, inside plat_lock): a part by beats, round its ends
- * with its LOOP (else held at its first and last beat); a song by steps (to a step's start), then by beats over the
- * steps' ends, round with its LOOP. Playing: on from the start of the beat reached at once, the notes sounding cut;
+ * with its LOOP (else held at its first and last beat), or, playing with a part queued, past its end into that one's
+ * top and no further; a song by steps (to a step's start), then by beats over the steps' ends, round with its LOOP.
+ * Playing: on from the start of the beat reached at once, the notes sounding cut;
  * stopped: CONTINUE plays from there. Not in a count-in or take, nor with the drums alone. A part: the clocks it
  * moved in time (round its end, on: for the drums' own loop to move as much); a song: 0 */
 int32_t sqp_locate(int32_t steps, int32_t beats);

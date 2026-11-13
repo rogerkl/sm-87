@@ -1,5 +1,6 @@
 # SELECT on the SEQ page moves the place, as the MMT-8's FF/RW: a part by beats (SEL: by four), round its ends with
-# LOOP; stopped, SEL + PLAY plays from there; playing, on at once from the beat, the drums' own loop moved as far. A
+# LOOP (playing with a part queued: past the end into that one, and no further); stopped, SEL + PLAY plays from
+# there; playing, on at once from the beat, the drums' own loop moved as far. A
 # song by steps (stopped: the step shown, and SEL + PLAY from its start), SEL by beats over the steps. Not in a
 # count-in. 120 BPM: a beat is 500 ms.
 wait 600
@@ -53,6 +54,47 @@ expect drbeat 4
 tap PLAY
 wait 30
 expect seq 0
+# part 01, LENGTH 8 too. Part 00 playing with 01 queued: SELECT spun on past 00's end goes into 01 from its top and
+# stops there, SELECT turned on at once held; rested, it moves in 01 again
+turn PRESET 1
+wait 30
+expect part 1
+turn ALGO 1
+wait 30
+turn K1 8
+tap REC
+wait 30
+expect beats 8
+tap SEQ
+wait 30
+turn PRESET -1
+wait 30
+expect part 0
+tap PLAY
+wait 100
+expect seq 2
+turn PRESET 1
+wait 30
+expect nextpart 1
+spin SELECT 12
+wait 30
+expect part 1
+expect nextpart -1
+expect beat 1
+turn SELECT 3 20
+wait 30
+expect part 1
+expect beat 1
+wait 330
+spin SELECT 2
+wait 30
+expect beat 3
+tap PLAY
+wait 30
+expect seq 0
+turn PRESET -1
+wait 30
+expect part 0
 # not in a count-in
 tap REC
 wait 30

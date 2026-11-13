@@ -363,10 +363,19 @@ int32_t sqp_locate(int32_t steps, int32_t beats)
         n = sq.part[sqp.part].beats;
         if (!n)
             return 0;             /* (an empty part: no beats to go to) */
-        to = sqp.loop_part ? (want % (int32_t)n + (int32_t)n) % (int32_t)n
-                           : want < 0 ? 0 : want >= (int32_t)n ? (int32_t)n - 1 : want;
-        moved = (sqp.loop_part ? want : to) * (int32_t)SQ_PPQN - (int32_t)sqp.tick;   /* (round: on in time) */
-        sqp.tick = (uint32_t)to * SQ_PPQN;
+        if (playing && want >= (int32_t)n && sqp.next_part != 0xFFu) {
+            /* past the end with a part queued: that part from its top, as at the end, the rest not moved (in time:
+             * as far as the end) */
+            moved = (int32_t)(n * SQ_PPQN) - (int32_t)sqp.tick;
+            sqp.part = sqp.next_part;
+            sqp.next_part = 0xFFu;
+            sqp.tick = 0;
+        } else {
+            to = sqp.loop_part ? (want % (int32_t)n + (int32_t)n) % (int32_t)n
+                               : want < 0 ? 0 : want >= (int32_t)n ? (int32_t)n - 1 : want;
+            moved = (sqp.loop_part ? want : to) * (int32_t)SQ_PPQN - (int32_t)sqp.tick;   /* (round: on in time) */
+            sqp.tick = (uint32_t)to * SQ_PPQN;
+        }
     }
     if (playing) {                /* on from the beat reached at once, the notes sounding cut (the MMT-8's FF/RW) */
         sqp_all_notes_off();

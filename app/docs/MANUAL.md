@@ -156,6 +156,9 @@ has the same for its patterns):
   the first or last beat with LOOP `OFF`.
 - **Stopped,** SEL + PLAY plays from there; PLAY still plays from the top.
 - **Playing,** the part goes on at once from the start of the beat reached. Notes sounding stop, as on the MMT-8.
+- **With a part queued** (PRESET while playing), going on past the end goes into that part from its top, as at the
+  end, and stops there: the rest of the turn is dropped, and SELECT doesn't move the place again until it has rested
+  for a moment. Back past the start still goes round.
 - **The drums** beside the part move as far, so they stay with it.
 - **In a song,** SELECT goes by steps, to a step's start, and SEL + SELECT by beats across the steps. Stopped, the
   step SELECT shows is the one K3, K4 and the track keys edit, and SEL + PLAY plays from its start. When a song

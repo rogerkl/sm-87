@@ -882,6 +882,25 @@ static void test_locate(void)
     moved = sqp_locate(0, -9);
     CHECK(sqp.tick == 0u, "and at the first (tick %u)", (unsigned)sqp.tick);
     sqp.loop_part = 1;
+    /* a part queued: back round as before, the queue kept; on past the end into it, from its top and no further
+     * (in time: as far as the end); LOOP off the same */
+    run(frames_for_ticks(30.0f));
+    sqp_select_part(1);
+    moved = sqp_locate(0, -1);
+    CHECK(sqp.part == 0u && sqp.tick == 288u && sqp.next_part == 1u, "back round: part 00's beat 4, 01 still queued");
+    moved = sqp_locate(0, 3);
+    n_out = 0;
+    run(frames_for_ticks(5.0f));
+    first_on(&key);
+    CHECK(sqp.state == SQP_PLAYING && sqp.part == 1u && sqp.next_part == 0xFFu && moved == 96 && key == 64u,
+          "past the end: part 01 from its top (part %u, moved %d, key %u)", sqp.part, moved, key);
+    sqp.loop_part = 0;
+    sqp_select_part(0);
+    moved = sqp_locate(0, 9);
+    CHECK(sqp.part == 0u && sqp.next_part == 0xFFu && sqp.tick < 10u && moved == 192 - 5,
+          "LOOP off: part 00 queued, past the end into it (part %u, tick %u, moved %d)", sqp.part, (unsigned)sqp.tick,
+          moved);
+    sqp.loop_part = 1;
     sqp_stop();
     sqp.rec_armed = 1;
     sqp.rec_track = 1;

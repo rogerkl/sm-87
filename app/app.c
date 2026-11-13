@@ -1446,10 +1446,21 @@ static void track_key(uint32_t t, uint32_t btn)
 /* SELECT on the SEQ page: the place, as the MMT-8's FF/RW. A part by beats (SEL: by four); a song by steps (stopped:
  * the step shown and edited, up to its END, and SEL + PLAY plays from its start), SEL by beats over them. Not while
  * recording, nor following MIDI clock (its song position sets the place) */
+/* past a part's end into the part queued (sqp_locate): the rest of the turn dropped, SELECT not moving the place until
+ * it has rested this long */
+#define LOCATE_REST_MS 300u
+static uint8_t locate_held;
+static uint32_t locate_ms;
+
 static void seq_locate(int32_t e, int sel)
 {
-    uint32_t f, n = sq_song_steps(sqp.song);
+    uint32_t f, n = sq_song_steps(sqp.song), was;
     int32_t moved;
+    if (locate_held && plat_ms() - locate_ms < LOCATE_REST_MS) {
+        locate_ms = plat_ms();    /* (still turning: held) */
+        return;
+    }
+    locate_held = 0;
     if (sqp.song_mode && sqp.state == SQP_STOPPED && !sel) {
         int32_t st = (int32_t)seq_song_step + e;
         seq_song_step = (uint32_t)(st < 0 ? 0 : st > (int32_t)n ? (int32_t)n : st);
@@ -1474,9 +1485,14 @@ static void seq_locate(int32_t e, int sel)
     if (sqp.song_mode) {
         (void)sqp_locate(sel ? 0 : e, sel ? e : 0);
     } else {
+        was = sqp.part;
         moved = sqp_locate(0, e * (sel ? 4 : 1));
         if (moved)
             hrp_shift(moved);     /* (the drums' own loop: as far, so they stay with the part) */
+        if (sqp.part != was) {    /* into the part queued: the scroll stops there */
+            locate_held = 1;
+            locate_ms = plat_ms();
+        }
     }
     plat_unlock(f);
     if (sqp.song_mode && sqp.state == SQP_STOPPED)
