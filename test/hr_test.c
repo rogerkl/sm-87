@@ -566,6 +566,15 @@ static void test_voices(void)
     hr_kit_use(KIT, 2, KIT_PAD, 4);
     hr_pads_rekit(3);
     CHECK(hr_std[7].sound == 2u, "the kit one shorter: SLOT01 is sound %u", hr_std[7].sound);
+    /* a pad without a sound, its values out of range (a damaged settings object): checked as any other's */
+    hr_std[8].sound = HR_NO_SOUND;
+    hr_std[8].tune = 100;
+    hr_std[8].level = 200;
+    hr_std[8].poly = 9;
+    hr_pads_rekit(2);
+    CHECK(hr_std[8].sound == HR_NO_SOUND && hr_std[8].tune == 0 && hr_std[8].level == 99u && hr_std[8].poly == 1u,
+          "no sound, out of range: in range (tune %d level %u poly %u)", hr_std[8].tune, hr_std[8].level,
+          hr_std[8].poly);
 }
 
 /* a pattern's own sounds: stored, edited (the pads' until stored), taken as the pattern changes, copied, let go */

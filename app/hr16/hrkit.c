@@ -152,8 +152,8 @@ void hr_pads_rekit(uint32_t was)
     for (i = 0; i < HR_PADS; i++) {
         hr_pad_t *p = &hr_std[i];
         if (p->sound == HR_NO_SOUND)
-            continue;
-        if (p->sound >= was)      /* a slot: after the kit as it is now */
+            ;                     /* (none: its other values checked all the same) */
+        else if (p->sound >= was) /* a slot: after the kit as it is now */
             p->sound = p->sound - was < S7_SLOTS ? (uint8_t)(kit_n + p->sound - was) : HR_NO_SOUND;
         else if (p->sound >= kit_n)
             p->sound = HR_NO_SOUND;   /* (a sound the kit no longer has) */
@@ -291,7 +291,14 @@ void hr_sounds_get(uint32_t p, hr_pad_t *pads)
 
 int hr_sounds_store(uint32_t p)
 {
-    if (hr_sounds_put(p, hr_pad) != 0)
+    hr_pad_t pads[HR_PADS];
+    uint32_t i;
+    sq_lock();                    /* (the pads copied as one pattern's: the audio interrupt gives them another's as
+                                   * the pattern changes) */
+    for (i = 0; i < HR_PADS; i++)
+        pads[i] = hr_pad[i];
+    sq_unlock();
+    if (hr_sounds_put(p, pads) != 0)
         return -1;
     again(p);                     /* (the pads as they were: edits kept are stored now) */
     return 0;
