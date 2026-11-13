@@ -346,6 +346,8 @@ def bank(items, kit=None):
         return where
 
     for slot, name, words, p, pressure in items:
+        if not 1 <= len(words) <= MAXWORDS:   # (as sm87bank.js checkWords: the firmware takes no bank with such a one)
+            raise SystemExit(f"{name}: {len(words)} words: a sample has 1..{MAXWORDS}")
         head += struct.pack("<BBHI24s", slot, pressure, len(words), put(words), c_name(name).encode())
         head += bytes(p) + b"\0"
     for snd in sounds:
@@ -357,6 +359,20 @@ def bank(items, kit=None):
     foot = struct.pack("<IHHIIHH8x", BANK_MAGIC, BANK_VERSION, len(items), len(body), zlib.crc32(body), len(sounds),
                        len(pads))
     return body + foot + struct.pack("<I", zlib.crc32(foot))
+
+
+def bank_size(top):
+    """the bytes the bank ending at the end of top takes, footer and all, by its footer alone (0: none; SystemExit for
+    a damaged footer): one whose contents don't check (bank_read) can still be taken out or replaced"""
+    if len(top) < BANK_FOOT:
+        return 0
+    f = top[-BANK_FOOT:]
+    magic, _, _, size, _, _, _ = struct.unpack_from("<IHHIIHH", f)
+    if magic != BANK_MAGIC:
+        return 0
+    if zlib.crc32(f[:28]) != struct.unpack_from("<I", f, 28)[0] or size & 3 or size > len(top) - BANK_FOOT:
+        raise SystemExit("the package's samples don't check (a damaged footer)")
+    return size + BANK_FOOT
 
 
 def bank_read(top):
@@ -537,8 +553,7 @@ class Package:
     def put(self, b):
         """the bank b into the slot (b"" for none): above the image all 0xFF, b at the slot's top"""
         top = bytes(self.app[self.image_end:])
-        old = bank_read(top)
-        size = old["size"] if old else 0
+        size = bank_size(top)     # (not bank_read: samples that don't check are replaced as any others)
         if any(x != 0xFF for x in top[:len(top) - size]):
             self.fail("there's something above its firmware that isn't samples")
         if len(b) > self.room():
