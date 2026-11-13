@@ -1,0 +1,77 @@
+# A function's page goes with the part: playing, when the part queued takes over at the end of the one playing, the
+# page is the new part's, its values loaded again, as PRESET does stopped. NAME stores the name it shows into the part
+# it shows, not the part before's; EDIT adds in the part, not where K1 was in the one before. 120 BPM: a beat is 500 ms.
+wait 600
+tap SEQ
+wait 30
+# part 00: LENGTH 1, named OO PART NAME (NAME: N to O, REC)
+turn ALGO 1
+wait 30
+expect fn 1
+spin K1 1
+tap REC
+wait 30
+expect beats 1
+turn ALGO 7
+wait 30
+expect fn 8
+expect name1 78
+spin K2 1
+wait 30
+tap REC
+wait 30
+expect name1 79
+# part 01: LENGTH 4, NO PART NAME
+turn PRESET 1
+wait 30
+expect part 1
+turn ALGO -7
+wait 30
+expect fn 1
+spin K1 4
+tap REC
+wait 30
+expect beats 4
+# NAME on part 00, playing, part 01 queued: it takes over at the end of part 00's beat
+turn PRESET -1
+wait 30
+expect part 0
+turn ALGO 7
+wait 30
+expect fn 8
+tap PLAY
+wait 100
+expect seq 2
+turn PRESET 1
+wait 30
+expect part 0
+expect nextpart 1
+wait 500
+expect part 1
+shot edqueue.png
+# REC: part 01's own name, as the page shows it (part 00's before)
+tap REC
+wait 30
+expect name1 78
+# EDIT on part 01 (4 beats), track 1 empty: part 00 queued, then K1 to beat 3 (SEL: by beats), REC's place at the
+# end; part 00 (1 beat) takes over, and REC adds its note in it, at its first clock (before: at clock 192 of 96)
+turn ALGO 1
+wait 30
+expect fn 9
+expect evn 0
+turn PRESET -1
+wait 30
+expect nextpart 0
+press SEL
+spin K1 2
+release SEL
+wait 2100
+expect part 0
+tap REC
+wait 30
+expect evn 1
+expect evtick 0
+expect evdur 96
+tap PLAY
+wait 30
+expect seq 0

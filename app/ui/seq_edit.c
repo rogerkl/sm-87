@@ -76,6 +76,7 @@ static struct {
     uint16_t add_tick;            /* EDIT, at the end: where REC adds */
     uint8_t cur;                  /* NAME: the cursor */
     char name[SQ_NAME];
+    uint16_t of;                  /* what ed_load loaded: ed_of() */
 } ed = {.grid = 5};
 
 static int32_t ed_clamp(int32_t v, int32_t lo, int32_t hi) { return v < lo ? lo : v > hi ? hi : v; }
@@ -114,6 +115,9 @@ static void ed_pos(char *t, uint32_t tick, uint32_t from)
     str_cat(t, n);
 }
 
+/* what a function's page is for: the part, or in a song the song (its steps' parts come and go as it plays) */
+static uint32_t ed_of(void) { return sqp.song_mode ? 0x100u | sqp.song : sqp.part; }
+
 /* the part's (or song's) values a function starts from */
 static void ed_load(void)
 {
@@ -124,6 +128,16 @@ static void ed_load(void)
     ed.beats = sq.part[sqp.part].beats;
     ed.ev = 0;
     ed.add_tick = 0;
+    ed.of = (uint16_t)ed_of();
+}
+
+/* the part changed under the page while playing (a part queued took over at the end, or SELECT went into it): the
+ * page is the new part's, its values loaded again, as PRESET does stopped (a name half typed is let go). Before
+ * anything shows or uses them */
+static void ed_sync(void)
+{
+    if (ed.of != ed_of())
+        ed_load();
 }
 
 static void ed_enter(uint32_t fn)
@@ -189,6 +203,7 @@ static void ed_song_reload(void)
 static void ed_track(uint32_t t)
 {
     uint8_t part, mask;
+    ed_sync();
     switch (ed.fn) {
     case F_QUANT:
         if (sqp.song_mode) {      /* a song's: the track whose offset K1 sets */
@@ -337,6 +352,7 @@ static void ed_turn(uint32_t enc, int32_t d, uint32_t btn)
     int sel = (int)(btn >> B_SEL & 1u), song = sqp.song_mode;
     int32_t v;
     uint32_t i;
+    ed_sync();
     switch (ed.fn) {
     case F_LENGTH:                /* K1 the beats (SEL: tens), K2 at the end or the top */
         if (enc == EN_K1) {
@@ -475,6 +491,8 @@ static void ed_rec_event(int sel)
         return;
     }
     tick = ed.ev < n ? sq_ev_tick(sq_event(p, t, ed.ev)) : ed.add_tick;
+    if (tick >= ticks)            /* (in the part, whatever came before) */
+        tick = ticks - 1u;
     st = ed.ev < n ? 0x90u : ADD_ST[ed.add];
     ch = sq.part[p].chan[t] ? sq.part[p].chan[t] - 1u : set.s7_channel;   /* (UNCHANGED: the sampler's) */
     dur = ticks - tick < SQ_PPQN ? ticks - tick : SQ_PPQN;
@@ -524,7 +542,9 @@ static void ed_rec_step(int sel)
 static void ed_rec(uint32_t btn)
 {
     int sel = (int)(btn >> B_SEL & 1u), r = 0;
-    uint32_t p = sqp.part, i;
+    uint32_t p, i;
+    ed_sync();
+    p = sqp.part;
     if (ed.fn == F_QUANT && sqp.song_mode)
         return;                   /* (a song's offsets are set as K1 turns) */
     if (ed.fn == F_CLOCK)
@@ -735,6 +755,7 @@ static void ed_draw(void)
     uint32_t i, song = sqp.song_mode;
     uint8_t part, mask;
     a[0] = b[0] = 0;
+    ed_sync();
     if (ed.fn == F_EDIT && sqp.state == SQP_PLAYING)
         ed_follow();
     ed_num(x, song ? "SONG " : "PART ", song ? sqp.song : sqp.part, 2);

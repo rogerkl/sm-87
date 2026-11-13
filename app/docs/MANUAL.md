@@ -391,11 +391,12 @@ pads. So an MMT-8 track on channel 10 plays them too.
 
 ### The MMT-8's functions (ALGO on the SEQ page)
 
-As on the MMT-8, where you hold a function's button: the first eight white keys are the track buttons, K1-K4 set
-the function's values, and **REC does it** (RECORD). Nothing changes before REC. The functions that change the
-part's events wait until the sequencer stops ("STOP FIRST"). The tracks: a function starts with all eight lit; a
-track key chooses only its own, then the keys add and take away. COPY and MERGE take a track from (lit) and one to
-(flashing; red on the screen). The strip under the LCD shows the tracks and the function.
+As on the MMT-8, where you hold a function's button: the first eight white keys are the track buttons, K1-K4 set the
+function's values, and **REC does it** (RECORD). Nothing changes before REC. The functions that change the part's
+events wait until the sequencer stops ("STOP FIRST"). A function is the part's shown: when a part queued takes over,
+its page starts again from the new part's values (a name half typed is let go). The tracks: a function starts with
+all eight lit; a track key chooses only its own, then the keys add and take away. COPY and MERGE take a track from
+(lit) and one to (flashing; red on the screen). The strip under the LCD shows the tracks and the function.
 
 | Function | K1 | K2 | REC |
 |---|---|---|---|
