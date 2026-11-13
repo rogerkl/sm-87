@@ -14,6 +14,11 @@
 #include "mmt8/mmtdump.h"
 #include "hr16/hr.h"
 #include "hr16/hrdump.h"
+#include "config.h"
+#if SM87_FX
+#include "fx/fx.h"
+static void fx_apply(void);       /* (the FX pages') */
+#endif
 #include "ui/lcd.c"
 #include "ui/pages_s700.c"
 
@@ -58,11 +63,18 @@ typedef struct {
     uint8_t rec_filter;           /* what a take records besides notes: SQP_REC_* (all but aftertouch) */
     uint8_t rec_ch;               /* from which channel: 0 all, 1..16 */
     uint8_t rsv3[2];
+    /* the effect (FX, SM87_FX; kept in a build without it too; an object saved before it: its defaults) */
+    uint8_t fx_prog;              /* the MIDIVerb's program: 0..62 (its 1..63) */
+    uint8_t fx_ret;               /* its return into the mix, 0..99 */
+    uint8_t fx_ch;                /* a program change on this channel chooses its program: 0 none, 1..16 */
+    uint8_t fx_on;
+    uint8_t mix_send[S7_SLOTS];   /* each slot's send to it, 0..99 (the pads': hr_pad_t send) */
 } settings_t;
 #define SET_V1_LEN 12u            /* (to the drums') */
 #define SET_V2_LEN offsetof(settings_t, mix_level)   /* (to the mix) */
 #define SET_V3_LEN offsetof(settings_t, loop)        /* (to the loop and click) */
 #define SET_V4_LEN offsetof(settings_t, rec_filter)  /* (to the MIDI filter) */
+#define SET_V5_LEN offsetof(settings_t, fx_prog)     /* (to the effect) */
 enum { LOOP_OFF, LOOP_PARTS, LOOP_ALL, LOOP_N };
 #define CLICK_QS 10u
 static void seq_settings_apply(void);   /* LOOP, CLICK and MIDI FILTER into the sequencer (ui/seq_edit.c) */
@@ -102,6 +114,18 @@ static void loop_click_defaults(void)
     set.click_when = 1;
 }
 
+/* the effect: 2.0 M Wm (a medium room, two seconds, warm), at full, no channel; no slot sends to it */
+static void fx_defaults(void)
+{
+    uint32_t i;
+    set.fx_prog = 28;
+    set.fx_ret = 99;
+    set.fx_ch = 0;
+    set.fx_on = 1;
+    for (i = 0; i < S7_SLOTS; i++)
+        set.mix_send[i] = 0;
+}
+
 /* the MMT-8's MIDI FILTER: all but aftertouch, every channel */
 static void filter_defaults(void)
 {
@@ -123,6 +147,7 @@ static void settings_defaults(void)
     set.dr_prog = 0;
     loop_click_defaults();
     filter_defaults();
+    fx_defaults();
     drums_defaults();
     mix_defaults();
 }
@@ -145,8 +170,16 @@ static void settings_load(void)
     if (n < (int)SET_V4_LEN || set.loop >= LOOP_N || set.countin > 99u || set.click_q >= CLICK_QS ||
         set.click_when > 3u)
         loop_click_defaults();
-    if (n < (int)sizeof set || set.rec_filter > 15u || set.rec_ch > 16u)
+    if (n < (int)SET_V5_LEN || set.rec_filter > 15u || set.rec_ch > 16u)
         filter_defaults();
+    {
+        uint32_t bad_fx = n < (int)sizeof set || set.fx_prog > 62u || set.fx_ret > 99u || set.fx_ch > 16u ||
+                          set.fx_on > 1u;
+        for (i = 0; i < S7_SLOTS; i++)
+            bad_fx |= set.mix_send[i] > 99u;
+        if (bad_fx)
+            fx_defaults();
+    }
     if (n < (int)SET_V2_LEN || set.dr_channel > 15u || set.dr_quant >= HR_GRIDS) {
         drums_defaults();
         mix_defaults();
@@ -189,6 +222,7 @@ static void mix_apply(uint32_t slot)
     float g = mix_gain(set.mix_level[slot]), p = (float)set.mix_pan[slot] / (float)MIX_PAN_MAX;
     uint32_t f = plat_lock();
     s7_mix(slot, p > 0.0f ? g * (1.0f - p) : g, p < 0.0f ? g * (1.0f + p) : g);
+    s7_send(slot, g * mix_gain(set.mix_send[slot]));   /* (after its level, before its pan: a mixer's aux send) */
     dr_gain = mix_gain(set.drum_level);
     plat_unlock(f);
 }
@@ -307,6 +341,10 @@ static void play_out(uint32_t st, uint32_t d1, uint32_t d2, uint32_t to)
             s7_message(st, d1, d2);
         if ((st & 0x0Fu) == set.dr_channel)
             hr_message(st, d1, d2);
+#if SM87_FX
+        if ((st & 0xF0u) == 0xC0u && set.fx_ch && (st & 0x0Fu) == set.fx_ch - 1u)
+            fx_program(d1);       /* the effect's channel: as the MIDIVerb's, 0..62 its programs 1..63 */
+#endif
         if (to) {
             uint32_t len = (st & 0xE0u) == 0xC0u ? 2u : 3u;
             plat_midi_send((st >> 4) | st << 8 | d1 << 16 | (len == 3u ? d2 << 24 : 0u), to);
@@ -412,6 +450,12 @@ static void midi_in(void)         /* audio interrupt: the packets that came in *
 
 /* ------------------------------------------------------------------------------------------------- sound --- */
 static float mixl[APP_BLOCK], mixr[APP_BLOCK], drl[APP_BLOCK], drr[APP_BLOCK];
+#if SM87_FX
+static float fxs[APP_BLOCK], fxd[APP_BLOCK];   /* the effect's send: the sampler's slots', the drums' pads' */
+#define FX_SEND(b) (b)
+#else
+#define FX_SEND(b) 0
+#endif
 static float gain_now;
 
 void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
@@ -430,19 +474,28 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
     midi_in();
     for (i = 0; i < n; i++)
         mixl[i] = mixr[i] = drl[i] = drr[i] = 0.0f;
+#if SM87_FX
+    for (i = 0; i < n; i++)
+        fxs[i] = fxd[i] = 0.0f;
+#endif
     /* in stretches to the sequencer's next tick, so its events land on their frame */
     while (done < n) {
         uint32_t seg = sqp_frames_to_tick();
         if (seg > n - done)
             seg = n - done;
         if (seg) {
-            s7_render(mixl + done, mixr + done, 0, seg);
-            hr_render(drl + done, drr + done, 0, seg);
+            s7_render(mixl + done, mixr + done, FX_SEND(fxs + done), seg);
+            hr_render(drl + done, drr + done, FX_SEND(fxd + done), seg);
             click_render(mixl + done, mixr + done, seg);
         }
         done += seg;
         sqp_advance(seg);
     }
+#if SM87_FX
+    for (i = 0; i < n; i++)       /* the drums' sends after their bus, as their level: the drum machine's own */
+        fxs[i] += fxd[i] * dr_gain;
+    fx_render(fxs, mixl, mixr, n);   /* its return, into the mix */
+#endif
     for (i = 0; i < n; i++) {     /* the sampler's slots as the mix puts them, the drums' pads panned, their bus */
         float l, r;
         gain_now += (gain - gain_now) * 0.004f;   /* MASTER glides: no zipper */
@@ -633,6 +686,11 @@ void app_init(void)
             mix_apply(i);
     }
     s7mem_init();
+#if SM87_FX
+    fx_init(SM_FS);
+    fx_program(set.fx_prog);
+    fx_apply();
+#endif
     sds_init(stage[0], stage[1]);
     sq_load();
     hr_sounds_apply(hrp.pattern);
@@ -1050,6 +1108,143 @@ static void page_midi(void)
 #define PG_MIX (PG_N + 3u)        /* GLO again: the mix, each slot's level and pan, the drums' bus */
 
 #define PG_VOICES (PG_N + 4u)     /* GLO a third time: the sampler's voices */
+
+#if SM87_FX
+#define PG_FX (PG_N + 5u)         /* FX: the effect, the MIDIVerb (its program, return, channel, on) */
+#define PG_FX_SLOTS (PG_N + 6u)   /* FX again: each slot's send to it */
+#define PG_FX_PADS (PG_N + 7u)    /* FX a third time: each pad's */
+#define IS_FX_PAGE(pg) ((pg) == PG_FX || (pg) == PG_FX_SLOTS || (pg) == PG_FX_PADS)
+static uint8_t fx_pad;            /* the pad PG_FX_PADS shows */
+
+/* "FX 29   2.0 M Wm" (the program and its name, as the program chart has it) / "RET 99 CH --  ON" */
+static void page_fx(void)
+{
+    char t[LCD_ROWBUF], r[LCD_ROWBUF], n[8];
+    uint32_t p = fx_program_now();
+    t[0] = 0;
+    str_cat(t, "FX ");
+    fmt_uint(n, p + 1u, 2, '0');
+    str_cat(t, n);
+    ed_lr(r, t, fx_name(p));
+    lcd_row(0, r);
+    t[0] = 0;
+    str_cat(t, "RET ");
+    fmt_uint(n, set.fx_ret, 2, ' ');
+    str_cat(t, n);
+    str_cat(t, " CH ");
+    if (set.fx_ch) {
+        fmt_uint(n, set.fx_ch, 2, '0');
+        str_cat(t, n);
+    } else {
+        str_cat(t, "--");
+    }
+    ed_lr(r, t, set.fx_on ? "ON" : "OFF");
+    lcd_row(1, r);
+}
+
+/* the effect on, at its return: only while on and something is sent to it (a slot's send or a pad's above 0); else
+ * not run at all, and no time taken (as it comes on again its memory is cleared). Inside plat_lock */
+static void fx_apply(void)
+{
+    uint32_t i, any = 0;
+    for (i = 0; i < S7_SLOTS; i++)
+        any |= set.mix_send[i];
+    for (i = 0; i < HR_PADS; i++)
+        any |= hr_std[i].send;
+    fx_set(set.fx_ret, set.fx_on && any);
+}
+
+/* K1 the program, K2 the return, K3 the channel whose program changes choose it (none, 1..16), K4 on or off */
+static void fx_turn(uint32_t k, int32_t e)
+{
+    uint32_t f;
+    if (k == EN_K1)
+        set.fx_prog = (uint8_t)clamp((int32_t)fx_program_now() + e, 0, (int32_t)FX_PROGS - 1);
+    else if (k == EN_K2)
+        set.fx_ret = (uint8_t)clamp((int32_t)set.fx_ret + e, 0, 99);
+    else if (k == EN_K3)
+        set.fx_ch = (uint8_t)clamp((int32_t)set.fx_ch + e, 0, 16);
+    else if (k == EN_K4)
+        set.fx_on = e > 0;
+    else
+        return;
+    f = plat_lock();
+    if (k == EN_K1)
+        fx_program(set.fx_prog);
+    fx_apply();
+    plat_unlock(f);
+    set_dirty = 1;
+}
+
+/* "SND     SLOT" / "40       01": K1 the slot's send (after its level), K3 the slot (as SELECT) */
+static void page_fx_slots(uint32_t slot)
+{
+    char t[LCD_ROWBUF], n[4];
+    uint32_t i;
+    for (i = 0; i < LCD_COLS; i++)
+        t[i] = ' ';
+    t[LCD_COLS] = 0;
+    fmt_uint(n, set.mix_send[slot], 2, ' ');
+    t[0] = n[0], t[1] = n[1];
+    fmt_uint(n, slot + 1u, 2, '0');
+    t[9] = n[0], t[10] = n[1];
+    lcd_row(0, "SND     SLOT");
+    lcd_row(1, t);
+}
+
+/* "SND    PAD" / "40     01 KICK": K1 the pad's send (after its level; the global set-up's), K3 the pad (as
+ * SELECT) */
+static void page_fx_pads(uint32_t pad)
+{
+    char t[LCD_ROWBUF], n[4];
+    const char *nm = hr_pad_name(pad);
+    uint32_t i;
+    for (i = 0; i < LCD_COLS; i++)
+        t[i] = ' ';
+    t[LCD_COLS] = 0;
+    fmt_uint(n, hr_std[pad].send, 2, ' ');
+    t[0] = n[0], t[1] = n[1];
+    fmt_uint(n, pad + 1u, 2, '0');
+    t[7] = n[0], t[8] = n[1];
+    for (i = 0; nm[i] && 10u + i < LCD_COLS; i++)
+        t[10u + i] = nm[i];
+    lcd_row(0, "SND    PAD");
+    lcd_row(1, t);
+}
+
+/* PG_FX_SLOTS (slot: the slot shown, as the sampler's pages share it) or PG_FX_PADS */
+static void fx_sends_turn(uint32_t page, uint32_t k, int32_t e, uint8_t *slot)
+{
+    if (page == PG_FX_SLOTS) {
+        uint32_t s = *slot;
+        if (k == EN_K1) {
+            uint32_t f;
+            set.mix_send[s] = (uint8_t)clamp((int32_t)set.mix_send[s] + e, 0, 99);
+            mix_apply(s);
+            f = plat_lock();
+            fx_apply();
+            plat_unlock(f);
+            set_dirty = 1;
+        } else if (k == EN_K3 || k == EN_SELECT) {
+            *slot = (uint8_t)clamp((int32_t)s + e, 0, S7_SLOTS - 1);
+        }
+    } else {
+        if (k == EN_K1) {
+            uint32_t f = plat_lock(), v = (uint32_t)clamp((int32_t)hr_std[fx_pad].send + e, 0, 99);
+            hr_std[fx_pad].send = (uint8_t)v;   /* (the pads as they play take it too: a pattern's own sounds keep
+                                                  * none of their own) */
+            hr_pad[fx_pad].send = (uint8_t)v;
+            fx_apply();
+            plat_unlock(f);
+            set_dirty = 1;
+        } else if (k == EN_K3 || k == EN_SELECT) {
+            fx_pad = (uint8_t)clamp((int32_t)fx_pad + e, 0, HR_PADS - 1);
+        }
+    }
+}
+#else
+#define IS_FX_PAGE(pg) 0
+#endif
 
 /* "VOICES (S700)  6" (the S700's six) or "VOICES        10", and "PLAYING        3": the voices sounding now (one
  * note may take several, a sample each). K1 sets it */
@@ -1684,6 +1879,11 @@ static void input(void)
         } else if (k == B_HOME) {
             ui.page = PG_HOME;
             ui.redraw = 1;
+#if SM87_FX
+        } else if (k == B_FX) {              /* FX: the effect, again each slot's send, each pad's, round */
+            ui.page = ui.page == PG_FX ? PG_FX_SLOTS : ui.page == PG_FX_SLOTS ? PG_FX_PADS : PG_FX;
+            ui.redraw = 1;
+#endif
         }
     }
     if (btn != ui.btn)
@@ -1726,6 +1926,14 @@ static void input(void)
         } else if (ui.page == PG_VOICES && k != EN_SELECT) {
             voices_turn(k, e);
             ui.redraw = 1;
+#if SM87_FX
+        } else if (ui.page == PG_FX && k != EN_SELECT) {
+            fx_turn(k, e);
+            ui.redraw = 1;
+        } else if (ui.page == PG_FX_SLOTS || ui.page == PG_FX_PADS) {   /* (SELECT too: the slot, the pad) */
+            fx_sends_turn(ui.page, k, e, &ui.slot);
+            ui.redraw = 1;
+#endif
         } else if (k == EN_SELECT) {         /* SELECT: the slot the sampler's pages edit */
             int32_t sl = (int32_t)ui.slot + e;
             ui.slot = (uint8_t)(sl < 0 ? 0 : sl > 15 ? 15 : sl);
@@ -1740,6 +1948,7 @@ static void input(void)
     /* the lights: the held, SAVE while something is not saved, the transport, the page's button */
     lit_btn = btn | (unsaved() ? 1u << B_SAVE : 0u) | (sqp.rec_armed || hrp.rec ? 1u << B_REC : 0u);
     lit_btn |= ui.page == PG_SEQ ? 1u << B_SEQ : ui.page == PG_DRUM ? 1u << B_ARP : ui.page == PG_MIDI || ui.page == PG_MIX || ui.page == PG_VOICES ? 1u << B_GLO : 0u;
+    lit_btn |= IS_FX_PAGE(ui.page) ? 1u << B_FX : 0u;
     if (sqp.state != SQP_STOPPED || sqp.aux)
         lit_btn |= LED_PLAY_GREEN;
     lit_keys = keys;
@@ -1965,6 +2174,14 @@ void app_frame(void)
         page_mix(ui.slot);
     } else if (ui.page == PG_VOICES) {
         page_voices();
+#if SM87_FX
+    } else if (ui.page == PG_FX) {
+        page_fx();
+    } else if (ui.page == PG_FX_SLOTS) {
+        page_fx_slots(ui.slot);
+    } else if (ui.page == PG_FX_PADS) {
+        page_fx_pads(fx_pad);
+#endif
     } else if (ui.page == PG_HOME) {
         page_home();
     } else if (ui.page == PG_CLEAR) {
@@ -2029,6 +2246,20 @@ int app_expect(const char *what, int *got)
         *got = hrp.pattern;
     else if (!strcmp(what, "dumpcut"))      /* sample dumps cut short on the way (DUMP CUT SHORT) */
         *got = (int)dump_cuts;
+#if SM87_FX
+    else if (!strcmp(what, "fxprog"))       /* the effect's program, 1..63 (the one coming in, in a change) */
+        *got = (int)fx_program_now() + 1;
+    else if (!strcmp(what, "fxret"))
+        *got = set.fx_ret;
+    else if (!strcmp(what, "fxch"))         /* its program changes' channel, 0 none */
+        *got = set.fx_ch;
+    else if (!strcmp(what, "fxon"))
+        *got = set.fx_on;
+    else if (!strncmp(what, "fxsend", 6))   /* fxsendN: slot N's send */
+        *got = set.mix_send[(atoi(what + 6) - 1) & 15];
+    else if (!strncmp(what, "padsend", 7))  /* padsendN: pad N's (the global set-up's) */
+        *got = hr_std[(atoi(what + 7) - 1) & 15].send;
+#endif
     else if (!strcmp(what, "lcdcur"))       /* the LCD's cursor as last drawn: 1 shown, 0 not (or none) */
         *got = lcd_blink;
     else if (!strcmp(what, "chlights"))     /* the channel lights lit: bit 0 channel 1 */

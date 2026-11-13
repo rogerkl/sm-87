@@ -45,7 +45,12 @@ run_scripts() {
     done
 }
 build_host
-run_scripts app/tests/*.txt
+# (fx.txt only with the effect built in: app/config.h SM87_FX)
+if grep -q '^#define SM87_FX 0' app/config.h; then
+    run_scripts $(ls app/tests/*.txt | grep -v '/fx\.txt$')
+else
+    run_scripts app/tests/*.txt
+fi
 # samples built in: a disk image and a WAV, from the fixtures, and a kit of the WAV (app/tests/rom/bankkit.txt)
 "$PY" -I test/make_test_wav.py build/test/sine440.wav
 printf 'sound BEEP sine440.wav vel=20\nsound BOP sine440.wav\npad KICK BEEP note=36\npad HIGH BEEP tune=7 level=50 pan=-2 note=40 group=1 poly=2\n' >build/test/kit.txt

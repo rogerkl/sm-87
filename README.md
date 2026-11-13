@@ -27,6 +27,11 @@ yet** (see *On the device*).
   so [Axs7](https://rogerkl.github.io/Axs7/) sends and fetches its samples.
 - **The drum machine** is a cut-down HR-16: 16 pads, 100 patterns recorded as they loop with quantize and swing, a
   pattern's own sounds, and the HR-16's memory dump both ways. It plays with the sequencer on one clock.
+- **The effect** is an Alesis MIDIVerb on a send from each sampler slot and each drum pad: its 63 programs as Eric
+  Brombaugh compiled them from its ROM ([MIDIVerb_RE](https://github.com/emeb/MIDIVerb_RE),
+  [g081_audio](https://github.com/emeb/g081_audio), MIT: `app/fx/LICENSE`; the algorithms are Alesis's), at its own
+  rate between its own filters. `SM87_FX` in `app/config.h` leaves it out (its code, about 95 KB, its 32 KB of
+  memory).
 - **The screen** is a 2 × 16 character LCD, drawn dot by dot, with a status strip under it and, between them, a
   light for each MIDI channel.
 
@@ -163,7 +168,8 @@ to a slot with a built-in sample takes pool space and leaves the built-in one un
   lower-rate kit sounds leave more for samples (that one takes a build), and a drum pad can play a sampler slot too
   (PAD SOUND).
 - **The room is the package's.** `mkrom.py PACKAGE.fwsc` says how much the firmware in it leaves. A later firmware
-  may leave a little less.
+  may leave a little less. The effect's code takes about 95 KB of it; a build without it (`SM87_FX` 0 in
+  `app/config.h`) leaves that for samples.
 
 The steps:
 

@@ -16,5 +16,5 @@
     "flash": ["856014", "B36014"],
     "features": ["usb-audio-in", "usb-audio-out", "velocity", "pressure", "screen-reader"]
   },
-  "credits": "Built on fm1-base and felucca-bsp, from Felucca by Leo Kuroshita (Hügelton Instruments); the sampler follows Axs7's engine."
+  "credits": "Built on fm1-base and felucca-bsp, from Felucca by Leo Kuroshita (Hügelton Instruments); the sampler follows Axs7's engine; the effect runs the Alesis MIDIVerb's programs as Eric Brombaugh compiled them (MIDIVerb_RE, g081_audio)."
 }
