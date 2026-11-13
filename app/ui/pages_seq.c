@@ -67,7 +67,7 @@ static void seq_step_drums(int32_t e, const char *at_end)
 
 static void seq_draw(int sel_held)
 {
-    char t[LCD_COLS + 1], n[8];
+    char t[LCD_ROWBUF], n[8];
     uint32_t i, used = sq_part_used(sqp.part);
     const char *state = sqp.state == SQP_STOPPED ? " " : sqp.take_state == SQP_TAKE_RUNNING ? CH_REC : CH_PLAY;
     if (ed.fn) {

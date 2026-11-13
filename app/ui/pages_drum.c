@@ -448,7 +448,7 @@ static void dr_rec(uint32_t btn)
         dr_say(r, dr.pad < HR_PADS ? "PAD MOVED" : "PATTERN MOVED");
         break;
     case DF_SOUND: {              /* the pads' sounds kept with the pattern; SEL: its own let go */
-        char n[4], t[LCD_COLS + 1];
+        char n[4], t[LCD_ROWBUF];
         uint32_t sp = hr_snd.p;
         if (sp >= SQ_PATTERNS)
             return;
@@ -515,7 +515,7 @@ static void dr_pad_title(char *t, uint32_t pad)
 
 static void dr_draw(int sel_held)
 {
-    char t[LCD_COLS + 1], n[12];
+    char t[LCD_ROWBUF], n[12];
     uint32_t p = dr_pattern(), i;
     const hr_pad_t *pd = &hr_pad[dr.pad % HR_PADS];
     const char *state = sqp.state == SQP_STOPPED && !sqp.aux ? " " : hrp_recording() ? CH_REC : CH_PLAY;
@@ -673,7 +673,7 @@ static void dr_draw(int sel_held)
         return;
     case DF_SOUND: {              /* "01 KICK   GLOBAL", "06 RIDE  PAT 05*" */
         const char *nm = hr_pad_name(dr.pad % HR_PADS);
-        char l[LCD_COLS + 1];
+        char l[LCD_ROWBUF];
         fmt_uint(l, dr.pad % HR_PADS + 1u, 2, '0');
         if (!(nm[0] == 'P' && nm[1] == 'A' && nm[2] == 'D' && nm[3] == ' ')) {   /* (unnamed: its number) */
             str_cat(l, " ");

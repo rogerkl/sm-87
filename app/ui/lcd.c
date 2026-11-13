@@ -6,6 +6,8 @@
 
 #define LCD_COLS 16
 #define LCD_ROWS 2
+#define LCD_ROWBUF 24               /* a row being made (str_cat, fmt_uint): room for a number a digit or two wider
+                                   * than its place; lcd_row shows the first LCD_COLS */
 #define LCD_PITCH 3               /* pixels from dot to dot */
 #define LCD_DOT 2
 #define LCD_CW 15                 /* a character's width: 5 dots */

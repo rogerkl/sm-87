@@ -595,7 +595,7 @@ static void hr_service(void)
 /* a take done: made into its track (the sorting outside the lock, the move inside) */
 static void take_service(void)
 {
-    char t[LCD_COLS + 1] = "TRACK ", n[4];
+    char t[LCD_ROWBUF] = "TRACK ", n[4];
     int r;
     if (sqp.take_nothing) {                  /* stopped in the count-in, or nothing played into an empty part */
         uint32_t f = plat_lock();
@@ -831,7 +831,7 @@ int app_sysex(const uint8_t *p, uint32_t n)
                 say_cut((uint32_t)slot);
                 cut_want[slot] = 0;
             } else if ((uint32_t)slot == rx_said_slot && plat_ms() - rx_said_ms < 1300u) {   /* its dump's, just said */
-                char t[LCD_COLS + 1] = "SLOT ", k[4];
+                char t[LCD_ROWBUF] = "SLOT ", k[4];
                 fmt_uint(k, (uint32_t)slot + 1u, 2, '0');
                 str_cat(t, k);
                 str_cat(t, " + PARAMS");
@@ -1001,7 +1001,7 @@ static void md_send_service(void)
         sent += c;
     }
     if (mdtx.k == mdtx.m) {
-        char t[LCD_COLS + 1] = "", n[8];
+        char t[LCD_ROWBUF] = "", n[8];
         (void)plat_sysex_put(&f7, 1);
         (void)plat_sysex_end();
         mdtx.on = 0;
@@ -1026,7 +1026,7 @@ static const char *const S7_MODE_TXT[3] = {"OFF", "ON", "MULT"};
 /* "CH  OMNI BEND DR" / "01  MULT   2 10" */
 static void page_midi(void)
 {
-    char t[LCD_COLS + 1], n[4];
+    char t[LCD_ROWBUF], n[4];
     uint32_t i;
     for (i = 0; i < LCD_COLS; i++)
         t[i] = ' ';
@@ -1051,7 +1051,7 @@ static void page_midi(void)
  * note may take several, a sample each). K1 sets it */
 static void page_voices(void)
 {
-    char t[LCD_COLS + 1], n[4];
+    char t[LCD_ROWBUF], n[4];
     uint32_t p = s7_poly_now();
     fmt_uint(n, p, 2, ' ');
     ed_lr(t, p == S7_POLY_STD ? "VOICES (S700)" : "VOICES", n);
@@ -1082,7 +1082,7 @@ static void voices_turn(uint32_t k, int32_t e)
  * takes) or "TEST TONE" (nothing to clear). Its name is on the strip under */
 static void page_clear(uint32_t slot)
 {
-    char t[LCD_COLS + 1], n[12] = "SLOT ", m[4];
+    char t[LCD_ROWBUF], n[12] = "SLOT ", m[4];
     fmt_uint(m, slot + 1u, 2, '0');
     str_cat(n, m);
     ed_lr(t, "CLEAR", n);
@@ -1121,7 +1121,7 @@ static void slot_clear(uint32_t slot)
 /* "LEV PAN SLOT DRM" / "99  L20  01  99" */
 static void page_mix(uint32_t slot)
 {
-    char t[LCD_COLS + 1], n[4];
+    char t[LCD_ROWBUF], n[4];
     uint32_t i;
     int32_t p = set.mix_pan[slot];
     for (i = 0; i < LCD_COLS; i++)
@@ -1195,7 +1195,7 @@ static void midi_turn(uint32_t k, int32_t e)
 static void hd_service(void)
 {
     hd_report_t r;
-    char t[LCD_COLS + 1] = "", n[8];
+    char t[LCD_ROWBUF] = "", n[8];
     uint32_t f;
     if (hdrx.over || hdrx.n < HD_HDR) {
         app_say("HR-16 DUMP", hdrx.over ? "NOT TAKEN" : "TOO SHORT");
@@ -1246,7 +1246,7 @@ static void md_service(void)
         if (mdrx.over || mdrx.n < MD_HDR) {
             app_say("MMT-8 DUMP", mdrx.over ? "NOT TAKEN" : "TOO SHORT");
         } else {
-            char t[LCD_COLS + 1] = "", n[8];
+            char t[LCD_ROWBUF] = "", n[8];
             f = plat_lock();
             sqp_stop();
             plat_unlock(f);
@@ -1755,7 +1755,7 @@ void app_input_only(void) { input(); }
 
 static void say_slot(const char *a, const char *b, uint32_t slot)
 {
-    char t[LCD_COLS + 1] = "", n[4];
+    char t[LCD_ROWBUF] = "", n[4];
     str_cat(t, b);
     fmt_uint(n, slot + 1u, 2, '0');
     str_cat(t, n);
@@ -1766,7 +1766,7 @@ static void say_slot(const char *a, const char *b, uint32_t slot)
  * longer than a message, as it means sending it again */
 static void say_cut(uint32_t slot)
 {
-    char t[LCD_COLS + 1] = "S", n[8];
+    char t[LCD_ROWBUF] = "S", n[8];
     fmt_uint(n, slot + 1u, 2, '0');
     str_cat(t, n);
     str_cat(t, " ");
@@ -1855,7 +1855,7 @@ static void ch_lights(uint32_t now, int redraw)
 
 static void page_home(void)
 {
-    char t[LCD_COLS + 1], n[8];
+    char t[LCD_ROWBUF], n[8];
     uint32_t prog = s7_current_program(), i, nslots = 0;
     for (i = 0; i < S7_SLOTS; i++)
         nslots += (uint32_t)s7_slot_in_program(&s7_slot[i], prog);
@@ -1920,7 +1920,7 @@ void app_frame(void)
     hr_service();
     sd = sds_rx_dump();           /* (once: the USB interrupt may finish it meanwhile) */
     if (mdrx.st == MD_RX_DATA || hdrx.st == MD_RX_DATA || mdtx.on) {   /* an MMT-8 or HR-16 dump in or out */
-        char t[LCD_COLS + 1];
+        char t[LCD_ROWBUF];
         if (mdtx.on) {
             lcd_row(0, mdtx.busy);
             progress_row(t, "BYTES ", mdtx.k * 7u / 8u, mdtx.n);
@@ -1936,7 +1936,7 @@ void app_frame(void)
         lcd_row(1, t);
     } else if (sd || tx.on) {   /* a sample dump in or out: its slot, its words so far */
         const sds_dump_t *d = sd;
-        char t[LCD_COLS + 1] = "", k[4];
+        char t[LCD_ROWBUF] = "", k[4];
         str_cat(t, d ? "DUMP IN  SLOT " : "DUMP OUT SLOT ");
         fmt_uint(k, (d ? d->slot : tx.slot) + 1u, 2, '0');
         str_cat(t, k);

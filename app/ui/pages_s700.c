@@ -190,7 +190,7 @@ static void page_s700_draw(uint32_t pg, uint32_t slot, uint32_t prog)
 {
     const page_t *g = &PAGES[pg];
     const s7_slot_t *s = &s7_slot[slot];
-    char top[LCD_COLS + 1], bot[LCD_COLS + 1], t[12];
+    char top[LCD_ROWBUF], bot[LCD_ROWBUF], t[12];
     uint32_t c, w = LCD_COLS / g->ncols, i;
     for (i = 0; i < LCD_COLS; i++)
         top[i] = bot[i] = ' ';

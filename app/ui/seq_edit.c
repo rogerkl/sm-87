@@ -432,7 +432,7 @@ static void ed_turn(uint32_t enc, int32_t d, uint32_t btn)
 /* what a function did, for a moment over its page */
 static void ed_say(int r, const char *done)
 {
-    char t[LCD_COLS + 1];
+    char t[LCD_ROWBUF];
     ed_num(t, sqp.song_mode ? "SONG " : "PART ", sqp.song_mode ? sqp.song : sqp.part, 2);
     if (r == 0)
         app_say(done, t);
@@ -689,7 +689,7 @@ static void ed_draw_event(char *a, char *b)
         str_cat(a, x);
     }
     if (st == 0xB0u || st == 0xA0u) {
-        char v[LCD_COLS + 1];
+        char v[LCD_ROWBUF];
         ed_num(v, "VALUE ", e[4], 3);
         ed_lr(b, v, c);
     } else {
@@ -717,7 +717,7 @@ static void ed_follow(void)
 /* a function's page on the LCD */
 static void ed_draw(void)
 {
-    char a[LCD_COLS + 1], b[LCD_COLS + 1], x[LCD_COLS + 1], n[8];
+    char a[LCD_ROWBUF], b[LCD_ROWBUF], x[LCD_ROWBUF], n[12];   /* (n: "UNCHANGED") */
     uint32_t i, song = sqp.song_mode;
     uint8_t part, mask;
     a[0] = b[0] = 0;
