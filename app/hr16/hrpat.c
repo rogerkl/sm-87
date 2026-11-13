@@ -396,7 +396,7 @@ static int song_playing(void) { return sqp.state == SQP_PLAYING && sqp.song_mode
 
 void hrp_tick(void)
 {
-    uint32_t p, t, ticks, len, a;
+    uint32_t p, t, ticks, len, a, in_pattern = 0;   /* in_pattern: the pads the pattern has on this clock */
     const uint8_t *d;
     int own = !song_playing(), quiet;
     if (sqp.started) {            /* from the top, or on from its beat */
@@ -441,10 +441,13 @@ void hrp_tick(void)
         uint32_t pad = d[a + 2u];
         if (quiet)
             continue;
-        if (own && hrp.rec && (hrp.erase >> pad & 1u))
+        if (own && hrp.rec && (hrp.erase >> pad & 1u)) {
             rec_put(p, t, pad, 0, HR_REC_ERASE);   /* held to erase: out as it comes by */
-        else if (!skipped(pad))
-            hr_emit(pad, d[a + 3u]);
+        } else {
+            in_pattern |= 1u << pad;   /* (played now, or just before by hand: FILL leaves it this clock) */
+            if (!skipped(pad))
+                hr_emit(pad, d[a + 3u]);
+        }
     }
     cur = a;
     if (!hrp.fill)
@@ -453,6 +456,8 @@ void hrp_tick(void)
         uint32_t i;
         for (i = 0; i < HR_PADS; i++) {
             if (!(fill_mask >> i & 1u) || (int32_t)(sqp.clock - fill_after[i]) <= 0)
+                continue;
+            if (in_pattern >> i & 1u)   /* the pattern has the pad on this clock: once, not twice */
                 continue;
             hr_emit(i, fill_vel[i]);
             if (own && hrp_recording())
