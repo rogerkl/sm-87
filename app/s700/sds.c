@@ -229,7 +229,7 @@ uint32_t sds_tx_header(sds_tx_t *t, const s7_slot_t *s, uint32_t slot, uint8_t h
         start = end ? end - 1u : 0u;
     n = end - start;              /* the sampler sends START to END */
     ls = (mode == S7_LOOP || mode == S7_ALT) && lp >= start && lp + 2u <= end ? lp - start : n;
-    t->s = s;
+    t->data = s->data;
     t->start = start;
     t->n = n;
     h[0] = 0xF0;
@@ -252,7 +252,7 @@ void sds_tx_block(const sds_tx_t *t, uint32_t b, uint8_t blk[SDS_BLOCK])
     blk[0] = (uint8_t)(b & 0x7Fu);
     for (i = 0; i < SDS_WORDS_PER_BLOCK; i++) {
         uint32_t at = b * SDS_WORDS_PER_BLOCK + i;
-        uint32_t w = at < t->n ? (uint32_t)(s7_w12(t->s->data, t->start + at) + 2048) : 0u;   /* padded with zero
+        uint32_t w = at < t->n ? (uint32_t)(s7_w12(t->data, t->start + at) + 2048) : 0u;   /* padded with zero
                                                                                                 * bytes, as the X7000 */
         blk[1u + 2u * i] = (uint8_t)(w >> 5 & 0x7Fu);
         blk[2u + 2u * i] = (uint8_t)((w & 0x1Fu) << 2);

@@ -729,7 +729,9 @@ static void dump_send(uint32_t slot)
     tx.next = 0;
     tx.slot = (uint8_t)slot;
     tx.on = plat_sysex_put(h, SDS_HEADER) == 0;
-    if (!tx.on)
+    if (tx.on)
+        s7mem_hold(slot);         /* (its sectors kept as they are till it has gone: a dump in for it goes elsewhere) */
+    else
         (void)plat_sysex_end();
 }
 
@@ -744,6 +746,7 @@ static void dump_send_service(void)
         if (plat_sysex_put(blk, SDS_BLOCK) != 0) {   /* nobody reading: the frame is cut, given up */
             (void)plat_sysex_end();
             tx.on = 0;
+            s7mem_hold(S7_SLOTS);
             app_say("SEND CUT SHORT", "");
             return;
         }
@@ -752,6 +755,7 @@ static void dump_send_service(void)
         (void)plat_sysex_put(&f7, 1);
         (void)plat_sysex_end();
         tx.on = 0;
+        s7mem_hold(S7_SLOTS);
         say_slot("SENT", "SLOT ", tx.slot);
     }
     sx_last_ms = plat_ms();

@@ -31,6 +31,9 @@ void s7mem_init(void);            /* boot: the directory (or the X7000's empty m
  * cut before the next save finds that slot empty, not playing this one. 0 = done, -1 no room, -2 flash failed */
 int s7mem_write(uint32_t slot, const uint8_t *packed, uint32_t words);
 void s7mem_clear(uint32_t slot);  /* the slot back to the test tone, in no program; its sectors free */
+/* the slot's sectors held while a dump of them goes out (S7_SLOTS: let go): not given to another sample meanwhile,
+ * a dump in for the slot itself included (it goes elsewhere, or MEMORY FULL) */
+void s7mem_hold(uint32_t slot);
 uint32_t s7mem_free_sectors(void);
 uint32_t s7mem_largest_free(void);   /* sectors in the largest free run: the longest sample that fits now */
 uint32_t s7mem_words_in(uint32_t sectors);

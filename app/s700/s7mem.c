@@ -219,9 +219,24 @@ void s7mem_init(void)
     dirty = 0;
 }
 
+/* the sectors of a dump going out (s7mem_hold) */
+static uint16_t held_at = NONE, held_n;
+
+void s7mem_hold(uint32_t slot)
+{
+    held_at = NONE;
+    held_n = 0;
+    if (slot < S7_SLOTS && dir.slot[slot].sector != NONE && !is_rom(dir.slot[slot].sector)) {
+        held_at = dir.slot[slot].sector;
+        held_n = (uint16_t)S7M_SECTORS_FOR(dir.slot[slot].words);
+    }
+}
+
 static int sector_used(uint32_t k, uint32_t except)
 {
     uint32_t i;
+    if (held_at != NONE && k >= held_at && k < (uint32_t)held_at + held_n)
+        return 1;                 /* (going out: its own slot's too) */
     for (i = 0; i < S7_SLOTS; i++) {
         uint32_t s = dir.slot[i].sector;
         if (i != except && s != NONE && !is_rom(s) && k >= s && k < s + S7M_SECTORS_FOR(dir.slot[i].words))

@@ -525,6 +525,8 @@ While a sample comes in or goes out, the LCD shows its slot and the words so far
 `WORDS 12000  37%`), then `RECEIVED` or `SENT`. Its parameters (`PARAMETERS IN`, `PARAMETERS SENT`) and the MIDI
 settings Axs7 reads or changes (`MIDI SETTINGS`) show for a moment as they come and go. In the browser emulator a
 dump arrives all at once, as the browser passes a SysEx on only when it is whole, so only what came of it shows.
+A slot going out goes out whole as it began, even if a dump for the same slot comes in meanwhile: that one is taken
+into other memory (`MEMORY FULL` if there's no room beside the one going out), and the slot plays it from then on.
 
 A dump that stops before its sample's end lost bytes on the way: a long SysEx through a virtual MIDI cable can. The
 LCD then says `DUMP CUT SHORT` with the words that came of those the sample has (`S10 21000/28752`), and again when

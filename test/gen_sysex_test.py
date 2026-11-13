@@ -164,6 +164,27 @@ def main():
         "expect end4 300",
         "shot dump_cut.png",
     ]
+    # a dump in for a slot while that slot goes out (RSD): the one going out goes on with what it began with, whole
+    # (its sectors held till it has gone); the one coming in goes elsewhere, and the slot has it from then on
+    old = [2048 + int(1500 * math.sin(2 * math.pi * 7 * i / 3000)) for i in range(3000)]
+    new = [2048 + int(900 * math.sin(2 * math.pi * 3 * i / 2400)) for i in range(2400)]
+    lines += [
+        "# a dump in for slot 6 while slot 6 goes out: that one goes out whole as it began, this one is taken",
+        "sysex " + hx(dump(5, old, 0, len(old))),
+        "wait 100",
+        f"expect words6 {len(old)}",
+        "sysex_out",
+        "sysex F0 7E 00 05 00 F7",
+        "wait 2",
+        "sysex " + hx(dump(5, new, 0, len(new))),
+        "wait 300",
+        f"expect words6 {len(new)}",
+        "expect_sysex " + hx(dump(5, old, 0, len(old))),
+        "sysex_out",
+        "sysex F0 7E 00 05 00 F7",
+        "wait 300",
+        "expect_sysex " + hx(dump(5, new, 0, len(new))),
+    ]
     (ROOT / "app" / "tests" / "sysex.txt").write_text("\n".join(lines) + "\n")
     mmt8_test()
     clock_test()

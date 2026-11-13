@@ -66,7 +66,8 @@ uint32_t sds_rate_code(uint32_t period_ns);   /* the nearest of the 41 rates; 0 
 uint32_t sds_build(const s7_slot_t *s, uint32_t slot, void (*put)(const uint8_t *p, uint32_t n, void *ctx), void *ctx);
 /* the same a piece at a time: the header (returns the blocks to follow), then each block, then F7 */
 typedef struct {
-    const s7_slot_t *s;
+    const uint8_t *data;          /* the slot's words as the header was made: a dump in for the slot meanwhile goes
+                                   * elsewhere (s7mem_hold), and this one goes on sending what it began */
     uint32_t start, n;            /* the words sent: from START, n of them */
 } sds_tx_t;
 uint32_t sds_tx_header(sds_tx_t *t, const s7_slot_t *s, uint32_t slot, uint8_t hdr[SDS_HEADER]);
