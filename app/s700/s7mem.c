@@ -331,11 +331,13 @@ int s7mem_write(uint32_t slot, const uint8_t *packed, uint32_t words)
         words = S7_MAXWORDS;
     bytes = S7_PACKED(words);
     n = S7M_SECTORS_FOR(words);
-    /* the slot's old sample is let go first: its sectors may take the new one */
-    slot_swap(slot, NONE, TONE_WORDS);
-    at = find_run(n, S7_SLOTS);
+    /* room first, the slot's own sectors counted free (they may take the new one): with none, nothing is touched,
+     * and the slot keeps the sample it has */
+    at = find_run(n, slot);
     if (at < 0)
         return -1;
+    /* then the slot's old sample is let go: its voices stopped before its sectors are written over */
+    slot_swap(slot, NONE, TONE_WORDS);
     /* sectors the store's directory still points at (a sample cleared or replaced since it was saved, this slot's
      * own old one too): the directory saved first, without it. Else a power cut before the next save (3 s after a
      * dump) would bring back a slot pointing at this sample's data; now it finds that slot empty */
