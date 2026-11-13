@@ -265,6 +265,108 @@ static void test_record(void)
     hrp.rec = 0;
 }
 
+/* to clock c of the run (from c0): the ticks till then played */
+static void to_clock(uint32_t c0, uint32_t c)
+{
+    while (sqp.clock - c0 < c)
+        tick1();
+}
+
+/* hits played ahead of their place are heard at once, and not again as the pattern gets there. The table of them
+ * lets go of those whose place has passed (a hit taken into the pattern only after its place: the main loop late),
+ * and keeps one for a pad's place however often it's hit there (a roll); so the next early hit always has one */
+static void test_early(void)
+{
+    uint32_t c0, k;
+    sq_clear();
+    sqp_init(FS);
+    hrp.pattern = 6;
+    hrp.quant = 3;                        /* 1/16: 24 clocks */
+    hrp.swing = 0;
+    hrp.rec = 1;
+    n_hit = 0;
+    sqp_aux_play(0);
+    c0 = sqp.clock;
+    for (k = 0; k < 8u; k++) {            /* pads 1-8 a clock before 24, 48 .. 192, into the pattern after it */
+        to_clock(c0, 24u * (k + 1u));
+        hrp_record(k, 100);
+    }
+    to_clock(c0, 194);
+    take_hits();
+    to_clock(c0, 216);                    /* pad 9 a clock before 216, in time */
+    hrp_record(8, 100);
+    take_hits();
+    to_clock(c0, 286);                    /* a roll on pad 10 just before 288, then pad 11 */
+    for (k = 0; k < 8u; k++)
+        hrp_record(9, 100);
+    hrp_record(10, 100);
+    take_hits();
+    to_clock(c0, 300);
+    CHECK(played(0, c0, ""), "the first time round: none heard again (%u)", n_hit);
+    to_clock(c0, 768 + 300);
+    CHECK(played(0, c0, "792:0 816:1 840:2 864:3 888:4 912:5 936:6 960:7 984:8 1056:9 1056:10"),
+          "the second time round, all of them");
+    sqp_stop();
+    hrp.rec = 0;
+}
+
+/* a quantized place at or past the pattern's end is its top: 1/12 swung, a 1-beat pattern, a hit at 90 (its pair
+ * of places runs over the end: 108, which would be 12, off the grid) */
+static void test_record_end(void)
+{
+    uint32_t c0;
+    sq_clear();
+    sqp_init(FS);
+    sq.pattern[6].beats = 1;
+    hrp.pattern = 6;
+    hrp.quant = 2;                        /* 1/12: 32 clocks */
+    hrp.swing = 12;
+    hrp.rec = 1;
+    n_hit = 0;
+    sqp_aux_play(0);
+    c0 = sqp.clock;
+    to_clock(c0, 91);
+    hrp_record(0, 100);
+    take_hits();
+    CHECK(hr_hits(6) == 1u && hr_hit_tick(hr_hit_at(6, 0)) == 0u, "at the top, clock %u",
+          hr_hits(6) ? hr_hit_tick(hr_hit_at(6, 0)) : 999u);
+    to_clock(c0, 100);
+    CHECK(played(0, c0, ""), "heard once (%u)", n_hit);
+    to_clock(c0, 200);
+    CHECK(played(0, c0, "192:0"), "and next time round at its top");
+    sqp_stop();
+    hrp.rec = 0;
+    sq.pattern[6].beats = 0;
+}
+
+/* a hit between CONTINUE and its first clock goes where it goes on from: the beat's start (hrp_tick's), not 0 */
+static void test_record_continue(void)
+{
+    uint32_t c0;
+    sq_clear();
+    sqp_init(FS);
+    sq.pattern[6].beats = 4;
+    hrp.pattern = 6;
+    hrp.quant = 3;
+    hrp.swing = 0;
+    hrp.rec = 1;
+    n_hit = 0;
+    hrp.tick = 290;                       /* stopped in beat 4 */
+    sqp_aux_play(1);
+    c0 = sqp.clock;
+    hrp_record(0, 100);
+    take_hits();
+    CHECK(hr_hits(6) == 1u && hr_hit_tick(hr_hit_at(6, 0)) == 288u, "at beat 4's start, clock %u",
+          hr_hits(6) ? hr_hit_tick(hr_hit_at(6, 0)) : 999u);
+    to_clock(c0, 10);
+    CHECK(played(0, c0, ""), "heard once (%u)", n_hit);
+    to_clock(c0, 400);
+    CHECK(played(0, c0, "384:0"), "and next time round");
+    sqp_stop();
+    hrp.rec = 0;
+    sq.pattern[6].beats = 0;
+}
+
 /* STEP EDIT's places: the grid's steps and every hit, round at the ends; the hits at one; a hit moved */
 static void test_step(void)
 {
@@ -706,6 +808,9 @@ int main(void)
     test_patterns();
     test_player();
     test_record();
+    test_early();
+    test_record_end();
+    test_record_continue();
     test_step();
     test_offset_fill();
     test_program();

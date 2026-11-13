@@ -319,8 +319,9 @@ static uint8_t cur_p = 0xFFu;     /* the pattern it is in (0xFF: none played yet
 static int32_t cur_t = -1;        /* the clock played last */
 static uint8_t moved = 1;         /* the patterns changed: cur found again */
 
-/* hits played ahead of their place (quantized later than played): not played again as the pattern gets there */
-#define SKIPS 8u
+/* hits played ahead of their place (quantized later than played): not played again as the pattern gets there. One
+ * for a pad's place, however often it's hit there; let go as its place passes (here, or as a hit comes by) */
+#define SKIPS 16u
 static struct {
     uint32_t clock;
     uint8_t pad;
@@ -475,30 +476,56 @@ int hrp_recording(void)
     return hrp.rec && (sqp.aux || (sqp.state == SQP_PLAYING && !sqp.song_mode && !hrp.mute));
 }
 
+/* where a hit played now goes in pattern p, before it's quantized: the clock just played or the next, the nearer;
+ * before a run's first tick (or the pattern's), that tick's: the top, or CONTINUE's beat (as hrp_tick makes it).
+ * *next: the clock the next tick plays */
+static uint32_t hit_pos(uint32_t p, uint32_t *next)
+{
+    if (sqp.started || cur_p != p || cur_t < 0) {
+        uint32_t t = sqp.started == 2u ? hrp.tick / SQ_PPQN * SQ_PPQN : 0u;
+        *next = t < hr_beats(p) * SQ_PPQN ? t : 0u;
+        return *next;
+    }
+    *next = (uint32_t)cur_t + 1u;
+    return sqp_nearer_last() ? (uint32_t)cur_t : *next;
+}
+
 void hrp_record(uint32_t pad, uint32_t vel)
 {
-    uint32_t p = hrp.pattern, ticks = hr_beats(p) * SQ_PPQN, pos, q, last;
+    uint32_t p = hrp.pattern, ticks = hr_beats(p) * SQ_PPQN, pos, q, next;
     if (!hrp_recording() || pad >= HR_PADS || !vel)
         return;
     if (sqp.started && !pre_start) {   /* before the first tick: the skips of a run before gone now */
         n_skip = 0;
         pre_start = 1;
     }
-    /* where it was played: the clock just played or the next, the nearer (before the first: the first) */
-    last = cur_p == p && cur_t >= 0 && !sqp.started ? (uint32_t)cur_t : 0xFFFFFFFFu;
-    pos = last == 0xFFFFFFFFu ? 0u : sqp_nearer_last() ? last : last + 1u;
+    pos = hit_pos(p, &next);
     q = hr_quantize(pos, HR_GRID[hrp.quant % HR_GRIDS], hrp.swing);
-    if (q + 1u > last + 1u && n_skip < SKIPS) {   /* ahead of the clock played (or none yet): heard now, not then */
-        skip[n_skip].clock = sqp.clock + (q - (last + 1u));
-        skip[n_skip].pad = (uint8_t)pad;
-        n_skip++;
+    if (q > ticks)
+        q = ticks;                /* past the end (a swung pair over it): the top, as the grid starts again there */
+    if (q >= next) {              /* ahead of the clock played (or on the next): heard now, not then */
+        uint32_t c = sqp.clock + (q - next), i = 0;
+        int there = 0;
+        while (i < n_skip) {
+            if ((int32_t)(sqp.clock - skip[i].clock) > 0) {   /* its place passed (not in the pattern by then) */
+                skip[i] = skip[--n_skip];
+                continue;
+            }
+            there |= skip[i].clock == c && skip[i].pad == pad;
+            i++;
+        }
+        if (!there && n_skip < SKIPS) {
+            skip[n_skip].clock = c;
+            skip[n_skip].pad = (uint8_t)pad;
+            n_skip++;
+        }
     }
     rec_put(p, q % ticks, pad, vel, HR_REC_ADD);
 }
 
 void hrp_fill_pad(uint32_t pad, uint32_t vel, int on)
 {
-    uint32_t last, pos, q;
+    uint32_t next, pos, q;
     if (pad >= HR_PADS)
         return;
     if (!on || !vel) {
@@ -508,10 +535,9 @@ void hrp_fill_pad(uint32_t pad, uint32_t vel, int on)
     if (!hrp.fill)
         return;
     /* the hit itself is played (and recorded) as any: the repeats from the grid's next step after where it went */
-    last = cur_p != 0xFFu && cur_t >= 0 && !sqp.started ? (uint32_t)cur_t : 0xFFFFFFFFu;
-    pos = last == 0xFFFFFFFFu ? 0u : sqp_nearer_last() ? last : last + 1u;
+    pos = hit_pos(cur_p != 0xFFu ? cur_p : hrp.pattern, &next);   /* (the pattern playing: in a song, the step's) */
     q = hr_quantize(pos, fill_grid(), hrp.swing);
-    fill_after[pad] = sqp.clock + q - (last + 1u);   /* (the clock of q: it may be the last played's, or earlier) */
+    fill_after[pad] = sqp.clock + q - next;   /* (the clock of q: it may be the last played's, or earlier) */
     fill_vel[pad] = (uint8_t)vel;
     fill_mask |= (uint16_t)(1u << pad);
 }
