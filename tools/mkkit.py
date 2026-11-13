@@ -29,6 +29,12 @@ PADS = 16
 SOUNDS = 127                    # a pattern keeps a kit sound as a number under 128 (the slots above: hrkit.c)
 
 
+def name_ok(n):
+    """a name as the firmware's C has it: up to NAME printable ASCII characters, none that would end its string (a
+    quote, a backslash) or the comment that lists it (*/)"""
+    return len(n) <= NAME and all(" " <= c <= "~" for c in n) and '"' not in n and "\\" not in n and "*/" not in n
+
+
 def parse(path):
     sounds, pads = [], []
     for n, line in enumerate(Path(path).read_text().splitlines(), 1):
@@ -50,8 +56,8 @@ def parse(path):
             raise SystemExit(f"{where}: not a sound or a pad: {line.strip()}")
     names = [s["name"] for s in sounds]
     for s in sounds:
-        if len(s["name"]) > NAME or not s["name"].isascii():
-            raise SystemExit(f"{s['at']}: {s['name']}: a name of up to {NAME} characters")
+        if not name_ok(s["name"]):
+            raise SystemExit(f"{s['at']}: {s['name']}: a name of up to {NAME} characters, no \" \\ or */")
         if names.count(s["name"]) > 1:
             raise SystemExit(f"{s['at']}: {s['name']} twice")
         if not 0 <= s["vel"] <= 99:
@@ -63,8 +69,8 @@ def parse(path):
     for p in pads:
         if p["sound"] not in names:
             raise SystemExit(f"{p['at']}: no sound {p['sound']}")
-        if len(p["name"]) > NAME:
-            raise SystemExit(f"{p['at']}: {p['name']}: a name of up to {NAME} characters")
+        if not name_ok(p["name"]):
+            raise SystemExit(f"{p['at']}: {p['name']}: a name of up to {NAME} characters, no \" \\ or */")
         for k, lo, hi in (("tune", -24, 24), ("level", 0, 99), ("pan", -3, 3), ("note", 0, 127), ("group", 0, 9),
                           ("poly", 1, 2)):
             if not lo <= p[k] <= hi:
