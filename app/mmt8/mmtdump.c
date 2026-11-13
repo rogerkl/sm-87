@@ -129,6 +129,7 @@ static int32_t md_track_in(const uint8_t *img, uint32_t at, uint32_t end, uint8_
     while (at < end) {
         uint32_t num, v, ch, a1, a2, b = img[at];
         if (b & 0x80u) {          /* a new clock */
+            uint32_t was = t;
             if (at + 7u > end)
                 return -1;
             t = le16(img + at + 1u);
@@ -139,6 +140,9 @@ static int32_t md_track_in(const uint8_t *img, uint32_t at, uint32_t end, uint8_
                 *next = at;
                 return (int32_t)n;
             }
+            if (t < was)
+                return -1;        /* back in time: an MMT-8 sends a track in order, so bytes damaged on the way (the
+                                   * player takes a track in time order: taken as it came, notes would go unplayed) */
         } else {
             if (at + 5u > end)
                 return -1;

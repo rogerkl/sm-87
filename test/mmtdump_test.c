@@ -286,6 +286,14 @@ static void test_cut_short(void)
     (void)md_import(img2, n, scratch, &r);
     CHECK(r.bad && !r.cut && !r.full && r.parts == 1u && r.songs == 1u && r.first_lost == 1,
           "damaged: bad (%u cut %u), %u parts, %u songs, first lost %d", r.bad, r.cut, r.parts, r.songs, r.first_lost);
+    memcpy(img2, img, n);         /* whole, but in part 01's track 1 the 6th note's clock 2, after 16: back in time */
+    img2[part1 + (img[part1 + 16] | (uint32_t)img[part1 + 17] << 8) + 7u * 5u + 1u] = 2u;
+    sq_clear();
+    (void)md_import(img2, n, scratch, &r);
+    CHECK(r.bad && !r.cut && !r.full && r.parts == 1u && r.songs == 1u && r.first_lost == 1 && sq_part_empty(1) &&
+              sq_valid(),
+          "a clock back in time: bad (%u cut %u), %u parts, %u songs, first lost %d", r.bad, r.cut, r.parts, r.songs,
+          r.first_lost);
     memcpy(img2, img, n);         /* a header saying nothing (zeros): the end lost still told, by part 01 past it */
     img2[0xCF] = img2[0xD0] = 0;
     sq_clear();

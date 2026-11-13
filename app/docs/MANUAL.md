@@ -471,7 +471,8 @@ the FM-1 passes the clock on. Clocks are timed in rendered frames, to a block (2
     the loss is taken. Send it again. A long dump sent as one message through a virtual MIDI cable can lose bytes; a
     librarian that sends it in pieces with a pause between them, as an MMT-8 sends it at MIDI's speed, is safer. In
     the emulator, its Send .syx button sends a file with no cable on the way.
-  - `DUMP DAMAGED`: all of it came, but a part or song in it can't be read.
+  - `DUMP DAMAGED`: all of it came, but a part or song in it can't be read (bytes changed on the way: a track's
+    events going back in time, say). What can't be read isn't taken; the rest is.
   - `MEMORY FULL`: the sequencer's 64 KB holds a little less than an MMT-8's. A note sharing a clock takes 7 bytes
     here and 5 there, so a full memory of chords may not fit. The LCD says from which part on it didn't
     (`FROM PART 96`), or how many parts and songs it took when only songs didn't fit.
