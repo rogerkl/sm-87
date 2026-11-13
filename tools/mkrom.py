@@ -65,6 +65,12 @@ PERIODS = [254817, 240515, 227016, 214275, 202248, 190897, 180183, 170070, 16052
 RATES = {36 + i: 1e9 / p for i, p in enumerate(PERIODS)}
 
 
+def rate_of(code):
+    """a rate code's rate, Hz, as the firmware plays it (s7_rate): 36..76 the sampler's, 77 Akai's spec allows"""
+    code = max(code, 36)
+    return RATES[code] if code in RATES else 26400 * 2 ** ((code - 69) / 12)
+
+
 def default_params():
     """an empty slot's (the X7000's test tone's sound), in no program"""
     p = []
@@ -614,14 +620,14 @@ def show(items, kit=None):
     for s, n, w, p, _ in items:
         words = w if isinstance(w, int) else len(w)
         progs = [q + 1 for q in range(32) if p[4 * q] <= p[4 * q + 1]]
-        print(f"slot {s + 1:2}  {n:23.23}  {words:5} words  {RATES[p[P_RECBW]]:7.0f} Hz  root {p[P_RECNP]}  "
+        print(f"slot {s + 1:2}  {n:23.23}  {words:5} words  {rate_of(p[P_RECBW]):7.0f} Hz  root {p[P_RECNP]}  "
               f"mode {p[P_RPMODE]}  programs {','.join(map(str, progs)) or '-'}")
     if not kit:
         return
     names = [snd["name"] for snd in kit["sounds"]]
     for i, snd in enumerate(kit["sounds"]):
         words = snd["words"] if isinstance(snd["words"], int) else len(snd["words"])
-        print(f"kit sound {i + 1:2}  {snd['name']:6}  {words:5} words  {RATES[snd['rate']]:7.0f} Hz  vel {snd['vel']}")
+        print(f"kit sound {i + 1:2}  {snd['name']:6}  {words:5} words  {rate_of(snd['rate']):7.0f} Hz  vel {snd['vel']}")
     for i, q in enumerate(kit["pads"]):
         snd = q["sound"]
         what = names[snd] if snd < len(names) else f"SLOT{snd - len(names) + 1:02}" if snd != 0xFF else "-----"

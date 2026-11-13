@@ -11,6 +11,8 @@ description of itself) and made-up SDK files, so it needs neither a device build
 With DIR, it leaves its packages and samples there for test/bank_js_test.mjs, web/sm87bank.js's test: the same
 packages as this makes them, the device build's too when there is one (app/build/sm87.fwsc).
 """
+import contextlib
+import io
 import json
 import random
 import struct
@@ -287,6 +289,15 @@ if len(sys.argv) > 1:
         "names": [mkrom.c_name(n_) for _, n_, _, _, _ in sorted(more, key=lambda it: it[0])],
         "kit": {"sounds": [{**x, "words": [int(v) for v in x["words"]]} for x in KIT["sounds"]], "pads": KIT["pads"]},
         "identity": "FM-1_8700", "imageEnd": len(app), "slot": P.APP_SLOT}))
+
+# the listing: every rate code the firmware plays, 77 too (the RATE page's top)
+p77 = mkrom.default_params()
+p77[mkrom.P_RECBW] = 77
+listing = io.StringIO()
+with contextlib.redirect_stdout(listing):
+    mkrom.show([(0, "fast", 1000, p77, 0)],
+               {"sounds": [{"name": "TOP", "words": 10, "rate": 77, "vel": 0}], "pads": []})
+check(listing.getvalue().count("  41907 Hz") == 2, f"rate 77 listed: {listing.getvalue()!r}")
 
 print(f"bank_test: {checks - failed} of {checks} checks passed")
 sys.exit(1 if failed else 0)
