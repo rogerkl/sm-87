@@ -23,14 +23,20 @@ static void copy(uint8_t *d, const uint8_t *s, uint32_t n)
         d[i] = s[i];
 }
 
-/* the first hit at (tick, pad) or after it */
+/* the first hit at (tick, pad) or after it: a binary search, as the hits are in that order and all as long (the
+ * audio interrupt's, after every edit) */
 static uint32_t find(uint32_t p, uint32_t tick, uint32_t pad)
 {
     const uint8_t *d = sq_data(SQ_PAT(p));
-    uint32_t len = sq_len(SQ_PAT(p)), a = 0;
-    while (a < len && (hr_hit_tick(d + a) < tick || (hr_hit_tick(d + a) == tick && d[a + 2u] < pad)))
-        a += SQ_HIT_LEN;
-    return a;
+    uint32_t lo = 0, hi = sq_len(SQ_PAT(p)) / SQ_HIT_LEN, key = tick << 8 | pad;
+    while (lo < hi) {
+        uint32_t m = (lo + hi) / 2u;
+        if ((hr_hit_tick(d + m * SQ_HIT_LEN) << 8 | d[m * SQ_HIT_LEN + 2u]) < key)
+            lo = m + 1u;
+        else
+            hi = m;
+    }
+    return lo * SQ_HIT_LEN;
 }
 
 int hr_add(uint32_t p, uint32_t tick, uint32_t pad, uint32_t vel, uint8_t *scratch)
@@ -278,6 +284,33 @@ int hr_move(uint32_t p, uint32_t tick, uint32_t pad, uint32_t to_tick, uint32_t 
 }
 
 /* ------------------------------------------------------------------------------------------------ OFFSET --- */
+static uint32_t hit_key(const uint8_t *h) { return hr_hit_tick(h) << 8 | h[2]; }
+
+/* the hits from a to b-1 the other way round */
+static void reverse_hits(uint8_t *d, uint32_t a, uint32_t b)
+{
+    while (a + SQ_HIT_LEN < b) {
+        uint32_t i;
+        b -= SQ_HIT_LEN;
+        for (i = 0; i < SQ_HIT_LEN; i++) {
+            uint8_t x = d[a + i];
+            d[a + i] = d[b + i];
+            d[b + i] = x;
+        }
+        a += SQ_HIT_LEN;
+    }
+}
+
+/* the hits from s on before those before s, in place */
+static void rotate_hits(uint8_t *d, uint32_t s, uint32_t len)
+{
+    if (!s || s >= len)
+        return;
+    reverse_hits(d, 0, s);
+    reverse_hits(d, s, len);
+    reverse_hits(d, 0, len);
+}
+
 int hr_offset(uint32_t p, uint32_t pad, int32_t clocks, uint8_t *scratch)
 {
     const uint8_t *d = sq_data(SQ_PAT(p));
@@ -298,13 +331,22 @@ int hr_offset(uint32_t p, uint32_t pad, int32_t clocks, uint8_t *scratch)
         scratch[a + 2u] = d[a + 2u];
         scratch[a + 3u] = d[a + 3u];
     }
+    if (pad >= HR_PADS) {         /* all of them: in the same order, round from where they went past an end */
+        uint32_t s = 0, n = 0;
+        for (a = SQ_HIT_LEN; a < len; a += SQ_HIT_LEN)
+            if (hit_key(scratch + a) < hit_key(scratch + a - SQ_HIT_LEN))
+                s = a, n++;
+        if (n == 1u && hit_key(scratch + len - SQ_HIT_LEN) < hit_key(scratch)) {
+            rotate_hits(scratch, s, len);
+            return sq_replace(SQ_PAT(p), scratch, len);
+        }                         /* (else, hits past the length: sorted as one pad's) */
+    }
     for (a = SQ_HIT_LEN; a < len; a += SQ_HIT_LEN) {   /* (all but sorted: a pad's hits moved past the others near) */
         uint8_t h[SQ_HIT_LEN];
-        uint32_t key = hr_hit_tick(scratch + a) << 8 | scratch[a + 2u];
+        uint32_t key = hit_key(scratch + a);
         for (i = 0; i < SQ_HIT_LEN; i++)
             h[i] = scratch[a + i];
-        for (i = a; i >= SQ_HIT_LEN && (hr_hit_tick(scratch + i - SQ_HIT_LEN) << 8 | scratch[i - SQ_HIT_LEN + 2u]) > key;
-             i -= SQ_HIT_LEN)
+        for (i = a; i >= SQ_HIT_LEN && hit_key(scratch + i - SQ_HIT_LEN) > key; i -= SQ_HIT_LEN)
             copy(scratch + i, scratch + i - SQ_HIT_LEN, SQ_HIT_LEN);
         copy(scratch + i, h, SQ_HIT_LEN);
     }
