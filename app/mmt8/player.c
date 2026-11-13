@@ -761,8 +761,9 @@ void sqp_input(uint32_t st, uint32_t d1, uint32_t d2)
         tick = 0;                 /* in the count-in's last sixteenth: a little early, on the one */
     else if (sqp.state != SQP_PLAYING)
         return;
-    else                          /* between two ticks: the nearer one (the tick just played, or the next) */
-        tick = sqp.tick && to_next > 0.5f * frames_per_tick ? sqp.tick - 1u : sqp.tick;
+    else                          /* between two ticks: the nearer one (the tick just played, or the next; MIDI
+                                   * clock's ticks spaced as it comes) */
+        tick = sqp.tick && sqp_nearer_last() ? sqp.tick - 1u : sqp.tick;
     if (sqp.take_n >= SQP_TAKE_MAX) {
         sqp.take_full = 1;
         return;

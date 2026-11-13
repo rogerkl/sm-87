@@ -747,6 +747,43 @@ static void test_clock_in(void)
     CHECK(sqp.state == SQP_STOPPED, "clock in off: FA does nothing");
 }
 
+/* a note played between two ticks while following MIDI clock goes to the nearer, by the clock's own spacing (as the
+ * drums', sqp_nearer_last), not the set tempo's: the clock at 60 BPM, the tempo set 120 */
+static void test_input_clock(void)
+{
+    uint32_t k, wrong = 0, ahead = 0;
+    sq_clear();
+    sqp_init(FS);
+    sqp_set_tempo(120);
+    sqp.clock_in = 1;
+    sqp.part = 0;
+    sqp.rec_armed = 1;
+    sqp.rec_track = 0;
+    sqp.countin_beats = 0;
+    n_out = frame_now = n_clk = 0;
+    clk_next = 0.0f;
+    clk_per = FS * 60.0f / (60.0f * 24.0f);
+    run_clocked((uint32_t)(clk_per * 24.0f));
+    sqp_rt_in(0xFA, 0, frame_now);
+    run_clocked((uint32_t)(clk_per * 2.0f));
+    for (k = 0; k < 200u && sqp.take_state == SQP_TAKE_RUNNING; k++) {
+        uint32_t want;
+        run_clocked(37);
+        if (!sqp.tick)
+            continue;
+        want = sqp_nearer_last() ? sqp.tick - 1u : sqp.tick;
+        ahead += want == sqp.tick;
+        sqp_input(0x90, 60, 100);
+        wrong += sqp_take[sqp.take_n - 1u].tick != want;
+    }
+    CHECK(k == 200u && wrong == 0u && ahead > 40u, "200 notes between the clocks' ticks: %u on the farther tick (%u on "
+          "the next)", wrong, ahead);
+    sqp_stop();
+    sqp.take_state = SQP_TAKE_NONE;
+    sqp.rec_armed = 0;
+    sqp.clock_in = 0;
+}
+
 /* LOOP and CLICK, as the MMT-8's: a part's LOOP off, it stops at its end (one queued still follows), a take on a
  * part with a length stops there too; a song's on, after its last step its first again (off, as it starts: it stops,
  * test_queue_and_song); the count-in's beats (0: none); the click at its value, while recording or playing */
@@ -1062,6 +1099,7 @@ int main(void)
     test_filter();
     test_image_versions();
     test_clock_in();
+    test_input_clock();
     printf("seq: %d checks, %d failed\n", checks, fails);
     return fails != 0;
 }
