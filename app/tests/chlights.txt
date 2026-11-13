@@ -1,0 +1,63 @@
+# The channel lights between the LCD and the strip, two over each track (channel 1 and 2 over track 1): a light
+# flashes as a message on its channel comes in or is played. MIDI in, a key (the sampler's channel), a pad (the
+# drums'), MIDI ECHO to the record track's channel, and a track playing back. 120 BPM: a beat is 500 ms.
+wait 600
+expect chlights 0
+# MIDI in on channel 3: its light, for a moment
+midi TRS 92 3C 64
+wait 30
+expect chlights 4
+midi TRS 82 3C 40
+wait 150
+expect chlights 0
+# a key: the sampler's channel, 1
+key w0 down
+wait 30
+expect chlights 1
+key w0 up
+wait 150
+expect chlights 0
+# the drum page: a pad, the drums' channel, 10
+tap ARP
+wait 30
+key w0 down
+wait 30
+expect chlights 512
+key w0 up
+wait 150
+expect chlights 0
+tap ARP
+wait 30
+# SEQ: REC armed on track 1, its channel 5 (K2): MIDI ECHO, in on 1 and out on 5, both lit
+tap SEQ
+wait 30
+tap REC
+wait 30
+expect armed 1
+turn K2 5
+wait 30
+midi TRS 90 3C 64
+wait 30
+expect chlights 17
+midi TRS 80 3C 40
+wait 150
+expect chlights 0
+# a take: the count-in, a note on the one, stopped after a beat; played back, channel 5 alone
+tap PLAY
+wait 2000
+midi TRS 90 3C 64
+wait 200
+midi TRS 80 3C 40
+wait 300
+tap PLAY
+wait 150
+expect beats 1
+expect chlights 0
+tap PLAY
+wait 30
+expect seq 2
+expect chlights 16
+shot chlights.png
+tap PLAY
+wait 150
+expect chlights 0

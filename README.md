@@ -27,7 +27,8 @@ yet** (see *On the device*).
   so [Axs7](https://rogerkl.github.io/Axs7/) sends and fetches its samples.
 - **The drum machine** is a cut-down HR-16: 16 pads, 100 patterns recorded as they loop with quantize and swing, a
   pattern's own sounds, and the HR-16's memory dump both ways. It plays with the sequencer on one clock.
-- **The screen** is a 2 × 16 character LCD, drawn dot by dot, with a status strip under it.
+- **The screen** is a 2 × 16 character LCD, drawn dot by dot, with a status strip under it and, between them, a
+  light for each MIDI channel.
 
 **The manual**, [app/docs/MANUAL.md](app/docs/MANUAL.md) (also on the [site](https://rogerkl.github.io/sm-87/manual/)),
 has the controls, the pages and the MIDI. The site has the [installer](https://rogerkl.github.io/sm-87/install/) and

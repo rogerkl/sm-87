@@ -100,7 +100,8 @@ sampler's dumps, as many as the file holds.
   - With the MMT-8: one clock and tempo. A song step chooses the drum pattern that plays with it (or none). Playing
     a part, the drums loop their own pattern beside it; with PROGRAM CHANGE on, a program change in the part
     chooses it. On their own page they play alone.
-- **The screen** is a 2 × 16 character LCD, drawn dot by dot, with a status strip under it.
+- **The screen** is a 2 × 16 character LCD, drawn dot by dot, with a status strip under it and, between them, a
+  light for each MIDI channel.
 
 ---
 
@@ -128,6 +129,11 @@ sampler's dumps, as many as the file holds.
 | HOME | The sampler's overview |
 | GLO | MIDI: K1 the sampler's channel, K2 its mode (OMNI OFF, ON, MULTI), K3 the pitch bend's range, K4 the drums' channel. GLO again: the MIX, and again the VOICES (below) |
 | SAVE | Lit when something isn't saved: settings, the sample parameters, the sequencer (stopped) |
+
+**The channel lights**, the row of 16 between the LCD and the strip, flash as a message on their MIDI channel comes
+in or is played: from MIDI in, the keys, the sequencer, the drums, or MIDI ECHO. They go in pairs over the track
+buttons, channels 1 and 2 over track 1 through 15 and 16 over track 8, so a track's channel is easy to find (channel 5
+is the left light over track 3). They're on every page, which helps to see what channel a keyboard sends on.
 
 **Under the strip on the SEQ page**, the part playing and the one after it, large, with their names (the drum page
 has the same for its patterns):

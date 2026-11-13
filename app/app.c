@@ -279,6 +279,10 @@ static uint32_t s7_keys_channel(void)
 }
 
 static volatile uint32_t midi_in_count, midi_in_last;
+/* the channel lights over the tracks (ch_lights): a bit a channel, set as a message on it comes in or is played (in
+ * the audio interrupt only; the main loop takes them under the lock) */
+static volatile uint16_t ch_seen;
+#define CH_SEEN(st) (ch_seen = (uint16_t)(ch_seen | 1u << ((st) & 0x0Fu)))
 
 /* one message to the drums (audio interrupt): a note plays the pads on it (its off: nothing, they play out) */
 static void hr_message(uint32_t st, uint32_t d1, uint32_t d2)
@@ -298,6 +302,7 @@ static void hr_message(uint32_t st, uint32_t d1, uint32_t d2)
 static void play_out(uint32_t st, uint32_t d1, uint32_t d2, uint32_t to)
 {
     if (st < 0xF0u) {
+        CH_SEEN(st);
         if (set.s7_mode != S7_OMNI_OFF || (st & 0x0Fu) == set.s7_channel)
             s7_message(st, d1, d2);
         if ((st & 0x0Fu) == set.dr_channel)
@@ -321,6 +326,7 @@ void hr_emit(uint32_t pad, uint32_t vel)
 {
     uint32_t ch = set.dr_channel, note = hr_pad[pad].note;
     hr_hit(pad, vel);
+    CH_SEEN(ch);
     plat_midi_send(0x09u | (0x90u | ch) << 8 | note << 16 | vel << 24, TO_USB);
     sqp_off_after(HR_OFF_TICKS, 0x80u | ch, note);
 }
@@ -394,6 +400,7 @@ static void midi_in(void)         /* audio interrupt: the packets that came in *
     while (plat_midi_in(&pkt, &port)) {
         uint32_t st = (pkt >> 8) & 0xFFu, d1 = (pkt >> 16) & 0x7Fu, d2 = pkt >> 24 & 0x7Fu;
         if (st < 0xF0u) {
+            CH_SEEN(st);          /* (the channel it came on; MIDI ECHO's, if another, as it is played) */
             played_in(st, d1, d2, TO_USB & ~plat_midi_in_from());
             midi_in_count++;
             midi_in_last = st;
@@ -1763,6 +1770,38 @@ static void draw_status(void)
     cv_blit(0, LCD_Y + LCD_H + 10);
 }
 
+/* the 16 channel lights, between the LCD and the strip: two over each track (channels 1 and 2 over track 1 .. 15 and
+ * 16 over track 8; on the drum page over the first eight pads), each flashing as a message on its channel comes in
+ * (MIDI in, the keys) or is played (the sequencer, the drums, MIDI ECHO). Drawn when one changes */
+#define CH_FLASH_MS 100u
+#define CH_LIGHTS_Y (LCD_Y + LCD_H + 2)
+static uint16_t ch_shown;         /* the channels lit on the screen */
+
+static void ch_lights(uint32_t now, int redraw)
+{
+    static uint32_t until[16];
+    uint32_t f = plat_lock(), seen = ch_seen, lit = 0, i;
+    ch_seen = 0;
+    plat_unlock(f);
+    for (i = 0; i < 16u; i++) {
+        if (seen >> i & 1u)
+            until[i] = now + CH_FLASH_MS;
+        if ((int32_t)(until[i] - now) > 0)
+            lit |= 1u << i;
+    }
+    if (lit == ch_shown && !redraw)
+        return;
+    ch_shown = (uint16_t)lit;
+    cv_begin(240, 8, C_BLACK);
+    for (i = 0; i < 16u; i++) {   /* round, 5 pixels: over a track's box (6 + 29 a track, 26 wide) a quarter in */
+        int32_t x = 6 + (int32_t)(i / 2u) * 29 + (i & 1u ? 17 : 4);
+        uint16_t c = lit >> i & 1u ? RGB(240, 60, 40) : RGB(64, 44, 44);
+        cv_rect(x + 1, 2, 3, 5, c);
+        cv_rect(x, 3, 5, 3, c);
+    }
+    cv_blit(0, CH_LIGHTS_Y);
+}
+
 static void page_home(void)
 {
     char t[LCD_COLS + 1], n[8];
@@ -1897,6 +1936,7 @@ void app_frame(void)
             panel_off();
         }
     }
+    ch_lights(now, ui.redraw);
     ui.redraw = 0;
     ann_tick(now);
 }
@@ -1932,6 +1972,8 @@ int app_expect(const char *what, int *got)
         *got = sqp.step + 1;
     else if (!strcmp(what, "drpat"))        /* the drums: their own pattern */
         *got = hrp.pattern;
+    else if (!strcmp(what, "chlights"))     /* the channel lights lit: bit 0 channel 1 */
+        *got = ch_shown;
     else if (!strcmp(what, "recfilter"))    /* MIDI FILTER: what a take records besides notes (SQP_REC_*) */
         *got = sqp.rec_filter;
     else if (!strcmp(what, "recch"))        /* and its channel: 0 all */
