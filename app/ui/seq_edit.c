@@ -167,6 +167,16 @@ static int ed_step(uint8_t *part, uint8_t *mask)
     return 1;
 }
 
+/* a song's steps change only while stopped (as seq_step_drums): the player has its places in them, and a step taken
+ * out under it would leave them past the song's end. 0: playing, said */
+static int ed_step_stopped(void)
+{
+    if (sqp.state == SQP_STOPPED)
+        return 1;
+    app_say("STOP FIRST", "TO EDIT A STEP");
+    return 0;
+}
+
 /* the song as the player has it again (its first step's part and tracks), after its steps changed */
 static void ed_song_reload(void)
 {
@@ -211,7 +221,7 @@ static void ed_track(uint32_t t)
         break;
     case F_EDIT:
         if (sqp.song_mode) {      /* the step's tracks */
-            if (ed_step(&part, &mask)) {
+            if (ed_step(&part, &mask) && ed_step_stopped()) {
                 (void)sq_song_set(sqp.song, seq_song_step, part, (uint8_t)(mask ^ (1u << t)), sq_scratch);
                 ed_song_reload();
                 sq_dirty = 1;
@@ -309,6 +319,8 @@ static void ed_turn_step(uint32_t enc, int32_t d)
         seq_song_step = (uint32_t)ed_clamp((int32_t)seq_song_step + d, 0, (int32_t)sq_song_steps(sqp.song));
     } else if (enc == EN_K1) {
         if (ed_step(&part, &mask)) {
+            if (!ed_step_stopped())
+                return;
             part = (uint8_t)ed_clamp(part + d, 0, (int32_t)SQ_PARTS - 1);
             (void)sq_song_set(sqp.song, seq_song_step, part, mask, sq_scratch);
             ed_song_reload();
@@ -488,6 +500,8 @@ static void ed_rec_step(int sel)
 {
     uint8_t part = seq_last_part, mask = 0xFFu;
     int r;
+    if (!ed_step_stopped())
+        return;
     if (sel) {
         if (!ed_step(&part, &mask))
             return;

@@ -420,7 +420,7 @@ plays on a channel of its own). SELECT goes from event to event; K3 is the veloc
 fine), K4 the duration (SEL: by beats; not a note: the channel). Past the last is END OF TRACK: K1 is where REC adds,
 K2 what (a note, a program change, a controller, bend, aftertouch). In a **song**, EDIT shows its steps: SELECT the
 step, K1 its part, the track keys its tracks, REC puts a step in before it (at the end: the part K1 chose), SEL + REC
-takes it out. While playing, EDIT follows: the last event played on the track (in a song, the step playing); stopped,
+takes it out; the steps change only while stopped (`STOP FIRST`). While playing, EDIT follows: the last event played on the track (in a song, the step playing); stopped,
 it stays on it, ready to edit.
 
 **QUANTIZE in a song** sets each track's clock offset, as the MMT-8's: the track key chooses the track (track 1
