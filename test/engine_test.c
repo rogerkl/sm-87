@@ -410,6 +410,42 @@ static void test_multi(void)
 }
 
 /* the mix: a slot's gains left and right; another slot's voice untouched */
+/* a loop's window read afresh just after the wrap (a note above its root steps over words): its first word is the
+ * loop's own (LOOP: its last; ALT: its second), never the word before LOOP. Two samples alike but for that word play
+ * alike once the loop has begun, at any key */
+static void test_wrap(void)
+{
+    static float a[44100];
+    static const uint32_t KEYS[3] = {55, 67, 79};
+    uint32_t m, k, copy, i;
+    for (m = 0; m < 2u; m++)
+        for (k = 0; k < 3u; k++) {
+            float worst = 0.0f, peak = 0.0f;
+            for (copy = 0; copy < 2u; copy++) {
+                (void)make_sine(1000.0f, 1000, 1800.0f);
+                if (copy)
+                    s7_put_w12(smp, 199, 4000);   /* the word before LOOP, far off the sine */
+                slot_setup(1000);
+                s7_slot[0].p[S7_P_RPMODE] = m ? S7_ALT : S7_LOOP;
+                s7_set_word(s7_slot[0].p, S7_P_SLOOP, 200);
+                s7_note_on(0, KEYS[k], 100);
+                render(44100);
+                s7_kill();
+                if (!copy) {
+                    memcpy(a, out, sizeof a);
+                    continue;
+                }
+                for (i = 2000; i < 44100u; i++) {   /* (from well past the first time through word 199) */
+                    float d = fabsf(out[i] - a[i]);
+                    worst = d > worst ? d : worst;
+                    peak = fabsf(a[i]) > peak ? fabsf(a[i]) : peak;
+                }
+            }
+            CHECK(peak > 0.0f && worst <= peak * 1e-4f, "%s, key %u: the word before LOOP never heard in the loop "
+                  "(%.5f of the peak)", m ? "ALT" : "LOOP", KEYS[k], peak > 0.0f ? worst / peak : 0.0f);
+        }
+}
+
 static void test_mix(void)
 {
     float l, r, l0;
@@ -476,6 +512,7 @@ int main(void)
     test_level();
     test_vibrato();
     test_multi();
+    test_wrap();
     test_mix();
     test_poly();
     printf("engine: %d checks, %d failed\n", checks, fails);

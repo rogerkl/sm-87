@@ -370,13 +370,15 @@ static void voice_render(voice_t *x, float *out, uint32_t n)
         amp = x->env * x->level;
         v = y * amp;
         out[k] += v;
-        /* on: the position moves by the step, kept within the loop's first period */
+        /* on: the position moves by the step, kept within the loop's first period, a word in from its start: the
+         * window read afresh there (a step over a word) takes its first word from inside the loop, not the word
+         * before LOOP */
         {
             uint32_t f = x->frac + x->step_f;
             x->pos += x->step_i + (f < x->frac);
             x->frac = f;
         }
-        if (x->period && x->pos >= x->loop_start + x->period) {
+        if (x->period && x->pos > x->loop_start + x->period) {
             x->pos -= x->period;
             x->win_i -= (int32_t)x->period;
         }
