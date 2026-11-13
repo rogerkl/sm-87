@@ -168,6 +168,14 @@ turn K2 1
 wait 30
 shot fn_name.png
 expect name1 78
+# the cursor under the letter blinks, 400 ms shown and 400 hidden, with nothing else changing (from past MIDI
+# CHANNEL's message)
+wait 1100
+expect lcdcur 1
+wait 400
+expect lcdcur 0
+wait 400
+expect lcdcur 1
 tap REC
 wait 30
 expect name1 79

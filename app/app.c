@@ -2025,6 +2025,8 @@ int app_expect(const char *what, int *got)
         *got = hrp.pattern;
     else if (!strcmp(what, "dumpcut"))      /* sample dumps cut short on the way (DUMP CUT SHORT) */
         *got = (int)dump_cuts;
+    else if (!strcmp(what, "lcdcur"))       /* the LCD's cursor as last drawn: 1 shown, 0 not (or none) */
+        *got = lcd_blink;
     else if (!strcmp(what, "chlights"))     /* the channel lights lit: bit 0 channel 1 */
         *got = ch_shown;
     else if (!strcmp(what, "recfilter"))    /* MIDI FILTER: what a take records besides notes (SQP_REC_*) */

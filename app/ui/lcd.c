@@ -81,6 +81,7 @@ static const uint8_t FONT5X7[][5] = {
 static char lcd_txt[LCD_ROWS][LCD_COLS + 1];
 static int8_t lcd_cur_row = -1, lcd_cur_col;   /* the cursor (an underline), -1: none */
 static uint8_t lcd_changed = 1;
+static uint8_t lcd_blink;         /* the cursor as last drawn: 1 shown (it blinks, 400 ms on, 400 off) */
 
 static void lcd_clear(void)
 {
@@ -148,16 +149,20 @@ static void lcd_glyph(int32_t x, int32_t y, uint8_t ch, int cursor)
 static void lcd_draw(int force)
 {
     uint32_t r, c;
+    uint8_t blink = lcd_cur_row >= 0 && (plat_ms() / 400u) % 2u == 0u;
+    if (blink != lcd_blink)
+        lcd_changed = 1;          /* (the cursor's blink turned over: nothing else redraws it) */
     if (!lcd_changed && !force)
         return;
     lcd_changed = 0;
+    lcd_blink = blink;
     cv_begin(240, LCD_H, LCD_GLASS);
     cv_rect(0, 0, 240, 1, LCD_EDGE);
     cv_rect(0, LCD_H - 1, 240, 1, LCD_EDGE);
     for (r = 0; r < LCD_ROWS; r++)
         for (c = 0; c < LCD_COLS; c++)
             lcd_glyph((int32_t)c * LCD_CW, LCD_PAD + (int32_t)r * (LCD_RH + LCD_GAP), (uint8_t)lcd_txt[r][c],
-                      lcd_cur_row == (int32_t)r && lcd_cur_col == (int32_t)c && (plat_ms() / 400u) % 2u == 0u);
+                      lcd_cur_row == (int32_t)r && lcd_cur_col == (int32_t)c && blink);
     cv_blit(0, LCD_Y);
 }
 
