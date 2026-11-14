@@ -163,10 +163,10 @@ jobs:
         with:
           name: packages
           path: build/attested
-      - name: The emulator, with fm1-base's SysEx changes (patches/), until they are in fm1-base
+      - name: The emulator, with fm1-base's changes (patches/), until they are in fm1-base
         run: |
           set -euo pipefail
-          git -C fm1-base apply ../patches/fm1-base-emu-sysex.patch
+          for p in patches/*.patch; do git -C fm1-base apply "../$p"; done
           git clone -q https://github.com/emscripten-core/emsdk.git "$RUNNER_TEMP/emsdk"
           git -C "$RUNNER_TEMP/emsdk" checkout -q a2b92777574c2feda07994cd4f1079a3dfc151f8   # emsdk 6.0.10
           "$RUNNER_TEMP/emsdk/emsdk" install 6.0.10

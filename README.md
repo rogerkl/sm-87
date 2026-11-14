@@ -61,7 +61,7 @@ SM-87 is MPL-2.0 ([LICENSING.md](LICENSING.md)).
 | `documentation/` | The S700/X7000 reference, the HR-16's dump, the sample bank's format, and `manuals.md`: the machines' manuals, which aren't in the repository |
 | `build.sh` | The build: fm1-base's `tools/build.py` on `app/`, its options passed on |
 | `.github/workflows/` | `tests.yml` (the tests on every push), `release.yml` (a release, from a tag) |
-| `patches/` | fm1-base's changes for the browser emulator's SysEx, until they are in fm1-base |
+| `patches/` | fm1-base's changes for the browser emulator (its SysEx, a hint when it has no sound), until they are in fm1-base |
 | `LICENSE`, `LICENSING.md` | MPL-2.0, and what else a firmware package holds |
 
 ### Flash
@@ -247,13 +247,13 @@ the port names on both sides, and loopMIDI's activity for it.
 
 `test/run.sh` runs it when there is a build.
 
-Three small changes to the fm1-base submodule make whole dumps work in the emulator and show what goes wrong.
-They're in `patches/fm1-base-emu-sysex.patch` (the submodule stays at upstream's commit); apply them after cloning,
-before building the emulator:
+Small changes to the fm1-base submodule make whole dumps work in the emulator, show what goes wrong, and say when
+the browser plays no sound. They're in `patches/` (the submodule stays at upstream's commit); apply them after
+cloning, before building the emulator:
 
-    git -C fm1-base apply ../patches/fm1-base-emu-sysex.patch
+    for p in patches/*.patch; do git -C fm1-base apply "../$p"; done
 
-All are worth sending upstream:
+All are worth sending upstream. `fm1-base-emu-sysex.patch`:
 - `web/emu/emu_web.c`: the frame size comes from `APP_WEB_SX_IN` in `app.h` (8 KB before), so a 66 KB dump arrives
   in one frame.
 - `web/emu/parts/midi_worklet.js`: a SysEx frame streamed over several frames of the main loop (plat_sysex_begin ..
@@ -261,6 +261,12 @@ All are worth sending upstream:
   quantum did.
 - `web/emu/parts/midi.js` and `midi_worklet.js`: MIDI that fails shows on the page's alert line (the list above).
   Before, a failed send, a port that wouldn't open and a frame lost on the way all went unnoticed.
+
+`fm1-base-emu-nosound.patch`:
+- `web/emu/index.html`: the FM-1 runs on the browser's audio thread, so with no audio output working (a Bluetooth
+  headset that switched itself off, an output unplugged) the page said "Starting…" for ever, or the panel stopped,
+  with no error anywhere. Once the audio clock has stood still for 3 s it now says so, on the switch and on the alert
+  line, and the hint goes when the clock moves again.
 
 ### On the device
 
