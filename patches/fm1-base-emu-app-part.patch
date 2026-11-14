@@ -1,0 +1,78 @@
+diff --git a/tools/build.py b/tools/build.py
+index a74366d..6f58a1b 100755
+--- a/tools/build.py
++++ b/tools/build.py
+@@ -1388,15 +1388,24 @@ def emu_parts():
+ 
+ 
+ def emu_parts_out(emu, parts):
+-    """the app's own part of the page and of the worklet (APP_DIR/web/emu/app.js, app_worklet.js) as they are; with
+-    parts, app.js and app_worklet.js are made to load the parts (web/emu/parts/parts.js, parts_worklet.js) and the app's
+-    own files under new names (app_own.js, app_own_worklet.js). What an earlier build with other parts left goes"""
++    """the app's own part of the page and of the worklet (APP_DIR/web/emu/app.js, app_worklet.js) as they are, and the
++    modules they import beside them; with parts, app.js and app_worklet.js are made to load the parts
++    (web/emu/parts/parts.js, parts_worklet.js) and the app's own files under new names (app_own.js,
++    app_own_worklet.js). What an earlier build with other parts left goes"""
+     import json
+     import shutil
+     own = {f: APP / "web" / "emu" / f for f in ("app.js", "app_worklet.js") if (APP / "web" / "emu" / f).exists()}
+     for f in ("app.js", "app_worklet.js", "app_own.js", "app_own_worklet.js"):
+         if (emu / f).exists():
+             (emu / f).unlink()
++    # the app's other modules (APP_DIR/web/emu/*.js besides app.js, app_worklet.js and worklet.js: what they import as
++    # "./NAME.js"), beside them as they are
++    for f in sorted((APP / "web" / "emu").glob("*.js")) if (APP / "web" / "emu").is_dir() else []:
++        if f.name in ("app.js", "app_worklet.js", "worklet.js"):
++            continue
++        if f.name in ("app_own.js", "app_own_worklet.js", "parts.js"):
++            raise SystemExit(f"{f}: a name the emulator's build gives its own files: call it something else")
++        shutil.copy(f, emu / f.name)
+     if (emu / "parts").exists():
+         shutil.rmtree(emu / "parts")
+     if not parts:
+diff --git a/web/emu/parts/parts.js b/web/emu/parts/parts.js
+index ecb0bc6..d53f43b 100644
+--- a/web/emu/parts/parts.js
++++ b/web/emu/parts/parts.js
+@@ -9,6 +9,8 @@
+ //                 message to the part's worklet side: { type: "app", part: NAME, ...m }), beforeLoad(fn) (fn(msg) may
+ //                 change the load message, or a promise of it: msg.parts.NAME goes to the worklet side's load)
+ //   message(m)    a message from the part's worklet side (fm1.part(NAME, m) there)
++// The app's own part (app_own.js) gets the same ctx: what its beforeLoad puts in msg.parts.app goes to its worklet
++// side's fm1App.load(fm1, data); its post(m) to fm1App.message (no part: "app" is the app's own, not a part's name).
+ // The worklet's side is parts_worklet.js.
+ 
+ export function compose(parts, own, info) {
+@@ -33,7 +35,8 @@ export function compose(parts, own, info) {
+       p.m.attach({ ...ctx, ...info, bar, beforeLoad: (fn) => hooks.push(fn),
+         post: (m, transfer) => post({ ...m, type: "app", part: p.name }, transfer) });
+     }
+-    if (own.attach) own.attach(ctx);
++    if (own.attach) own.attach({ ...ctx, ...info, bar, beforeLoad: (fn) => hooks.push(fn),
++      post: (m, transfer) => post({ ...m, type: "app" }, transfer) });
+   }
+   function message(m) {
+     if (m && m.part) {
+diff --git a/web/emu/parts/parts_worklet.js b/web/emu/parts/parts_worklet.js
+index ebc0adb..dc0742d 100644
+--- a/web/emu/parts/parts_worklet.js
++++ b/web/emu/parts/parts_worklet.js
+@@ -9,7 +9,8 @@
+ //   message   the page side's messages ({ type: "app", part: name, ... })
+ //   process   before each render quantum (after the app's own)
+ // fm1 is the worklet's processor (worklet.js: ex, the wasm's exports; mem; port); fm1.part(name, m, transfer) sends
+-// a message to the part's page side. The app's own fm1App (load, message, process, env) keeps working beside them.
++// a message to the part's page side. The app's own fm1App (load, message, process, env) keeps working beside them:
++// its load(fm1, data) after the parts', data what the app's own page part put in the load message (msg.parts.app).
+ 
+ const own = globalThis.fm1App || {};
+ const parts = [];
+@@ -29,7 +30,7 @@ globalThis.fm1App = {
+   load(fm1) {
+     fm1.part = (name, m, transfer) => fm1.port.postMessage({ ...m, type: "app", part: name }, transfer || []);
+     for (const p of parts) if (p.load) p.load(fm1, (fm1.partData || {})[p.name]);
+-    if (own.load) own.load(fm1);
++    if (own.load) own.load(fm1, (fm1.partData || {}).app);
+   },
+   message(fm1, m) {
+     if (m.part) {

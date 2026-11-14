@@ -61,7 +61,7 @@ SM-87 is MPL-2.0 ([LICENSING.md](LICENSING.md)).
 | `documentation/` | The S700/X7000 reference, the HR-16's dump, the sample bank's format, and `manuals.md`: the machines' manuals, which aren't in the repository |
 | `build.sh` | The build: fm1-base's `tools/build.py` on `app/`, its options passed on |
 | `.github/workflows/` | `tests.yml` (the tests on every push), `release.yml` (a release, from a tag) |
-| `patches/` | fm1-base's changes for the browser emulator (its SysEx, a hint when it has no sound), until they are in fm1-base |
+| `patches/` | fm1-base's changes for the browser emulator (its SysEx, a hint when it has no sound, a hook for Load .fwsc), until they are in fm1-base |
 | `LICENSE`, `LICENSING.md` | MPL-2.0, and what else a firmware package holds |
 
 ### Flash
@@ -139,7 +139,8 @@ check the copy is this one.
 
 The host simulator and the browser emulator have no firmware slot. For them, `mkrom.py --emu FILE ... [--kit KIT]`
 writes `app/rom/emu_bank.h` (not in the repository: the sounds aren't ours to publish), built in while it exists;
-`--emu --none` removes it. `test/run.sh` sets it aside while it runs and puts it back.
+`--emu --none` removes it. `test/run.sh` sets it aside while it runs and puts it back. The emulator can also play a
+package's, with no build: its **Load .fwsc** (below).
 
 #### Getting the most samples in
 
@@ -228,6 +229,15 @@ file holds. They go one at a time, with a pause after each long enough for SM-87
 flash. A long dump through a virtual cable can lose bytes on the way (SM-87 then says `DUMP CUT SHORT`); this way
 none are.
 
+Its **Load .fwsc** button takes the samples and drum kit built into a firmware package (Axs7's, or `mkrom.py`'s) and
+starts the FM-1 again with them in place of the build's own, as installing the package would. `sm87bank.js`'s
+`Sm87Package.bank()` gives the bank's bytes as the package holds them; the page keeps them in IndexedDB (the data
+part's database, under a key of SM-87's own) and puts them in the load message (`app.js`), and the worklet's side
+(`app_worklet.js`) writes them into `app.wasm` before it boots (`s7mem.c`'s `sm87_bank_*`, in the emulator only).
+`app/web/emu/sm87bank.js` is a link to `web/sm87bank.js`, copied beside `app.js` as the emulator is built. The page
+says whether the firmware took them; **Built-in samples** forgets them. A factory reset keeps them, as it keeps an
+FM-1's firmware.
+
 When MIDI goes wrong in the emulator, it says so in red under its bar:
 - a port that won't open (another program has it, say);
 - a message the browser won't send;
@@ -245,10 +255,14 @@ the port names on both sides, and loopMIDI's activity for it.
 - A `.syx` file of four sample dumps, with stray bytes and a message cut short between them, split and paced as Send
   .syx does it: every dump taken in.
 
-`test/run.sh` runs it when there is a build.
+`node test/emu_bank_test.mjs` does Load .fwsc's part after the page: with no package the build's own samples, with a
+package's bank its samples (one read back word for word with RSD) and kit, with a damaged one the build's own again,
+and the page told which each time.
 
-Small changes to the fm1-base submodule make whole dumps work in the emulator, show what goes wrong, and say when
-the browser plays no sound. They're in `patches/` (the submodule stays at upstream's commit); apply them after
+`test/run.sh` runs both when there is a build.
+
+Small changes to the fm1-base submodule make whole dumps work in the emulator, show what goes wrong, say when the
+browser plays no sound, and let Load .fwsc hand its samples over before the FM-1 boots. They're in `patches/` (the submodule stays at upstream's commit); apply them after
 cloning, before building the emulator:
 
     for p in patches/*.patch; do git -C fm1-base apply "../$p"; done
@@ -267,6 +281,14 @@ All are worth sending upstream. `fm1-base-emu-sysex.patch`:
   headset that switched itself off, an output unplugged) the page said "Starting…" for ever, or the panel stopped,
   with no error anywhere. Once the audio clock has stood still for 3 s it now says so, on the switch and on the alert
   line, and the hint goes when the clock moves again.
+
+`fm1-base-emu-app-part.patch`:
+- `web/emu/parts/parts.js`, `parts_worklet.js`: the app's own part of the page gets what a part gets (`beforeLoad`,
+  `post`, the bar, the app's id and name). What its `beforeLoad` puts in `msg.parts.app` goes to its worklet side's
+  `fm1App.load(fm1, data)`, before the device boots. Before, only fm1-base's own parts could hand the worklet data at
+  load.
+- `tools/build.py`: the app's other modules in `APP_DIR/web/emu/` (`*.js` besides `app.js`, `app_worklet.js` and
+  `worklet.js`) are copied beside them, so its part of the page can import them.
 
 ### On the device
 
