@@ -101,6 +101,8 @@ const pb = new Sm87Package(baked, "baked");
 const got = pb.samples();
 check(got && got.length === 3 && got[2].slot === 9 && same(got[2].words, bySlot[2].words) && pb.kit() &&
   pb.kit().pads.length === J.kit.pads.length, "read from the package: samples, kit");
+check(same(pb.bank(), bank) && pkg.bank() !== null && new Sm87Package(orig, "orig").bank() === null,
+  "its bank's bytes as put in (the emulator's Load .fwsc); none without");
 pb.put(null);
 check(same(pb.bytes(), orig), "out again: the package as built, byte for byte");
 const pa = new Sm87Package(baked, "baked");

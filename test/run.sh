@@ -64,5 +64,8 @@ build_host
 if [ -f app/build/emu/app.wasm ]; then
     node test/emu_test.mjs app/build/emu | grep -E "FAIL|passed|failed"
     node test/emu_test.mjs app/build/emu >/dev/null || { echo "FAILED: test/emu_test.mjs"; exit 1; }
+    # its Load .fwsc: a package's samples in place of the build's own (the bank tests' packages, above)
+    node test/emu_bank_test.mjs app/build/emu build/test/bank | grep -E "FAIL|passed|failed"
+    node test/emu_bank_test.mjs app/build/emu build/test/bank >/dev/null || { echo "FAILED: test/emu_bank_test.mjs"; exit 1; }
 fi
 echo "all tests passed"

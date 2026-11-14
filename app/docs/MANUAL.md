@@ -36,9 +36,13 @@ An install writes the firmware only: the FM-1 keeps its sequences, its settings 
 installer's last section puts M-VAVE's own firmware back.
 
 To try it without an FM-1, open the [emulator](https://rogerkl.github.io/sm-87/emu/). It runs the same code in your
-browser, with sound, and talks MIDI with SysEx both ways, so Axs7 can send it samples too. Its **Send .syx** button,
-in the bar under the panel, sends a SysEx file straight in, with no MIDI cable: an MMT-8's or HR-16's memory dump, or a
-sampler's dumps, as many as the file holds.
+browser, with sound, and talks MIDI with SysEx both ways, so Axs7 can send it samples too. In the bar under the panel:
+- **Send .syx** sends a SysEx file straight in, with no MIDI cable: an MMT-8's or HR-16's memory dump, or a sampler's
+  dumps, as many as the file holds.
+- **Load .fwsc** takes the samples and drum kit built into a firmware package, as Axs7 (or `tools/mkrom.py`) puts them
+  in, and the emulator starts again with them, as an FM-1 would once that package is installed. The slots that held
+  the samples built in before get the new ones; a sample you sent in stays where it is. Your browser keeps them, a
+  factory reset too (as it keeps an FM-1's firmware), until **Built-in samples** goes back to the emulator's own.
 
 ---
 
@@ -586,7 +590,8 @@ Samples sent go into the sample pool, about 292 KB, and the strip shows how much
 also be built into the firmware, about 270 KB more (the effect's code takes about 95 KB of the same room: a build
 without it, `SM87_FX` 0 in `app/config.h`, leaves about 365 KB): from Axs7 (its wiki's
 [SM-87](https://github.com/rogerkl/Axs7/wiki/SM-87) page), or with `tools/mkrom.py` (the
-[README](https://github.com/rogerkl/sm-87#samples-built-in)).
+[README](https://github.com/rogerkl/sm-87#samples-built-in)). Try such a package in the emulator first: its **Load
+.fwsc** plays what it holds.
 
 ---
 

@@ -11,7 +11,8 @@
 #define ROM 0xF000u               /* sector ROM | i: built-in sample i */
 
 /* the samples built in: the bank at the top of the firmware's slot (s7bank.h, tools/mkrom.py). The host simulator and
- * the browser emulator have no slot: theirs is app/rom/emu_bank.h while it exists (tools/mkrom.py --emu) */
+ * the browser emulator have no slot: theirs is app/rom/emu_bank.h while it exists (tools/mkrom.py --emu), or in the
+ * emulator a package's, loaded on its page */
 static s7_bank_t bank;
 #ifdef PLAT_HOST
 #if defined(__has_include)
@@ -20,8 +21,30 @@ static s7_bank_t bank;
 #define EMU_BANK 1
 #endif
 #endif
+#ifdef PLAT_WEB
+/* the browser emulator: a package's samples, loaded on its page (app/web/emu/app.js: Load .fwsc), put here before the
+ * FM-1 boots (app_worklet.js), in place of the build's own as a package's would be. As big as the firmware's slot */
+#define WEB_BANK_MAX 581564u
+static uint8_t web_bank[WEB_BANK_MAX] __attribute__((aligned(4)));
+static uint32_t web_bank_n;
+static int web_bank_taken;        /* 1 its samples play, -1 they don't check (the build's own play), 0 none given */
+__attribute__((used, visibility("default"))) uint8_t *sm87_bank_buf(void) { return web_bank; }
+__attribute__((used, visibility("default"))) uint32_t sm87_bank_max(void) { return WEB_BANK_MAX; }
+__attribute__((used, visibility("default"))) void sm87_bank_set(uint32_t n) { web_bank_n = n <= WEB_BANK_MAX ? n : 0u; }
+__attribute__((used, visibility("default"))) int sm87_bank_taken(void) { return web_bank_taken; }
+/* the samples and kit sounds of the bank playing (the page's, or the build's own) */
+__attribute__((used, visibility("default"))) uint32_t sm87_bank_count(void) { return bank.n; }
+__attribute__((used, visibility("default"))) uint32_t sm87_bank_kit(void) { return bank.kit_sounds; }
+#endif
 static void bank_open(void)
 {
+#ifdef PLAT_WEB
+    if (web_bank_n) {             /* (a bank of a kit alone has no samples, and is one) */
+        web_bank_taken = s7bank_parse(web_bank + web_bank_n, web_bank_n, &bank) >= 0 && bank.base ? 1 : -1;
+        if (web_bank_taken > 0)
+            return;
+    }
+#endif
 #ifdef EMU_BANK
     s7bank_parse(S7_EMU_BANK + sizeof S7_EMU_BANK, (uint32_t)sizeof S7_EMU_BANK, &bank);
 #else
