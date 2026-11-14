@@ -43,6 +43,8 @@ browser, with sound, and talks MIDI with SysEx both ways, so Axs7 can send it sa
   in, and the emulator starts again with them, as an FM-1 would once that package is installed. The slots that held
   the samples built in before get the new ones; a sample you sent in stays where it is. Your browser keeps them, a
   factory reset too (as it keeps an FM-1's firmware), until **Built-in samples** goes back to the emulator's own.
+  Axs7's **OPEN IN EMULATOR** (its BANK view) does the same with the package it makes, without saving it: it opens
+  the emulator in a tab of its own (one already on starts again with the samples). Switch it on there.
 
 ---
 

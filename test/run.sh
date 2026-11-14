@@ -28,6 +28,7 @@ done
 "$PY" -I test/bank_test.py build/test/bank
 if command -v node >/dev/null; then
     node test/bank_js_test.mjs build/test/bank
+    node test/sm87emu_test.mjs build/test/bank
 fi
 # the scripts expect the X7000's empty memory: the host build's samples built in (app/rom/emu_bank.h, tools/mkrom.py
 # --emu) are set aside meanwhile, and put back however this ends. (The drum kit, resources/kit, is the build's: always

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 // Copyright (C) 2026 Roger Klaveness
-// The emulator's "Load .fwsc" (app/web/emu/app.js, app_worklet.js; s700/s7mem.c sm87_bank_*): a package's samples, as
+// The emulator's "Load .fwsc" (app/web/emu/app.js, app_worklet.js; s700/s7mem.c sm87_bank_*; and Axs7's OPEN IN
+// EMULATOR, through web/sm87emu.js): a package's samples, as
 // the page gives them in the load message, played in place of the build's own. Each case in an emulator of its own
 // (the harness takes one a process):
 //   - none given: the build's own samples, and the page told none was given;
@@ -19,8 +20,8 @@ const banks = resolve(process.argv[3] || "build/test/bank");
 const caseName = process.argv[4];
 
 if (caseName) {                                   // one case: what the emulator made of it, as JSON
-  const own = await import(pathToFileURL(resolve(dir, "app_own.js")).href);
   const sb = await import(pathToFileURL(resolve(dir, "sm87bank.js")).href);
+  const { emuSamples } = await import(pathToFileURL(resolve(dir, "sm87emu.js")).href);
   const held = new sb.Sm87Package(readFileSync(resolve(banks, "baked.fwsc")), "baked.fwsc").contents();
   const samples = held.samples.map((x) => {      // (the fixture's END is 0: RSD sends START to END)
     const params = Uint8Array.from(x.params);
@@ -30,7 +31,7 @@ if (caseName) {                                   // one case: what the emulator
   });
   const pkg = new sb.Sm87Package(readFileSync(resolve(banks, "orig.fwsc")), "orig.fwsc");
   pkg.put(sb.makeBank(samples, held.kit));
-  const k = own.fromPackage(pkg.bytes(), "test.fwsc");
+  const k = emuSamples(pkg.bytes(), "test.fwsc");
   let bank = null;
   if (caseName === "bank") bank = k.bank;
   if (caseName === "damaged") {

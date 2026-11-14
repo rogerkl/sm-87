@@ -12,9 +12,11 @@
 //    slots that held the samples built in before get the new ones, a sample sent in stays where it is. They are kept
 //    in this browser until "Built-in samples" (a factory reset keeps them, as it keeps an FM-1's firmware). The
 //    worklet's side puts them in before the FM-1 boots (app_worklet.js; s700/s7mem.c).
+// Another page of the site (Axs7's OPEN IN EMULATOR) hands it samples the same way (sm87emu.js): kept where Load .fwsc
+// keeps them, and word that it did, on which the FM-1 starts again with them.
 import { toDevice } from "./parts/midi.js";
 import * as data from "./parts/data.js";
-import { Sm87Package } from "./sm87bank.js";
+import { emuAnnounce, emuHolds, emuSamples, forgetSamples, keepSamples, keptSamples } from "./sm87emu.js";
 
 /** the SysEx messages in a file's bytes, F0 .. F7 each; bytes between them left out, and a message cut short (no F7,
  *  or another status byte inside) */
@@ -67,40 +69,7 @@ async function send(file, button, said, status) {
   }
 }
 
-// ---------------------------------------------------------------- a firmware package's samples
-const DB = "fm1-emu", STORE = "state";    // the data part's database (parts/data.js), under a key of SM-87's own
-
-function db() {
-  return new Promise((resolve, reject) => {
-    const r = indexedDB.open(DB, 1);
-    r.onupgradeneeded = () => r.result.createObjectStore(STORE);
-    r.onsuccess = () => resolve(r.result);
-    r.onerror = () => reject(r.error);
-  });
-}
-async function op(mode, fn) {
-  const d = await db();
-  return new Promise((resolve, reject) => {
-    const t = d.transaction(STORE, mode), q = fn(t.objectStore(STORE));
-    t.oncomplete = () => { d.close(); resolve(q && q.result); };
-    t.onerror = t.onabort = () => { d.close(); reject(t.error); };
-  });
-}
-const bankKey = (id) => `${id}:bank`;
-/** the package's samples kept: { name, bank (ArrayBuffer), samples, kit (its sounds) }, or undefined */
-const kept = (id) => op("readonly", (s) => s.get(bankKey(id)));
-const keep = (id, k) => op("readwrite", (s) => s.put(k, bankKey(id)));
-const forget = (id) => op("readwrite", (s) => s.delete(bankKey(id)));
-
-/** a package's samples as they are kept: Sm87BankError (its message says why), or Error for one without samples */
-export function fromPackage(bytes, name) {
-  const pkg = new Sm87Package(bytes, name), bank = pkg.bank();
-  if (!bank) throw new Error(`${name} has no samples in it`);
-  const c = pkg.contents();
-  return { name, bank: bank.buffer, samples: c.samples.length, kit: c.kit ? c.kit.sounds.length : 0 };
-}
-
-const holds = (k) => `${count(k.samples, "sample")}${k.kit ? `, a drum kit of ${count(k.kit, "sound")}` : ""}`;
+// ---------------------------------------------------------------- a firmware package's samples (sm87emu.js keeps them)
 
 /** the emulator's data area kept as it is now (a sample sent in just before), then the page again: the FM-1 starts
  * with what is kept (after a while without an answer, as it is) */
@@ -120,7 +89,7 @@ function pkgShow(taken) {
   pkgSaid.button.hidden = !k;
   pkgSaid.text.dataset.taken = String(taken);   // (the firmware's word: 1 taken, -1 not, 0 none given or not yet)
   pkgSaid.text.textContent = !k ? "" : taken === -1 ? `${k.name}'s samples don't check: the built-in ones play.`
-    : `Samples: ${k.name} (${holds(k)}).`;
+    : `Samples: ${k.name} (${emuHolds(k)}).`;
 }
 
 // the worklet's word, once the FM-1 is on: whether it took the package's samples (app_worklet.js)
@@ -134,7 +103,7 @@ function attachPackage(ctx, bar) {
     return;                               // (an fm1-base without the hook: patches/fm1-base-emu-app-part.patch)
   ctx.beforeLoad(async (msg) => {
     try {
-      const k = await kept(ctx.id);
+      const k = await keptSamples(ctx.id);
       pkgKept = k && k.bank instanceof ArrayBuffer ? k : null;
     } catch (e) {
       status(`The samples loaded before could not be read: ${(e && e.message) || e}`);
@@ -169,15 +138,15 @@ function attachPackage(ctx, bar) {
     if (!file) return;
     let k;
     try {
-      k = fromPackage(new Uint8Array(await file.arrayBuffer()), file.name);
+      k = emuSamples(new Uint8Array(await file.arrayBuffer()), file.name);
     } catch (e) {
       status(`${(e && e.message) || e}: nothing changed.`);
       return;
     }
     load.disabled = builtIn.disabled = true;
-    said.textContent = `Starting again with ${file.name} (${holds(k)})…`;
+    said.textContent = `Starting again with ${file.name} (${emuHolds(k)})…`;
     try {
-      await keep(ctx.id, k);
+      await keepSamples(k, ctx.id);
     } catch (e) {
       load.disabled = builtIn.disabled = false;
       status(`${file.name}'s samples could not be kept in this browser: ${(e && e.message) || e}`);
@@ -189,9 +158,15 @@ function attachPackage(ctx, bar) {
   builtIn.addEventListener("click", async () => {
     load.disabled = builtIn.disabled = true;
     said.textContent = "Starting again with the built-in samples…";
-    try { await forget(ctx.id); } catch { /* (none kept) */ }
+    try { await forgetSamples(ctx.id); } catch { /* (none kept) */ }
     await startAgain(ctx.id);
   });
+  // another page has kept samples for it (Axs7): the FM-1 starts again with them
+  emuAnnounce(ctx.id, () => {
+    load.disabled = builtIn.disabled = true;
+    said.textContent = "Samples from another page: starting again with them…";
+    startAgain(ctx.id);
+  }, ctx.node && ctx.node.port);
 }
 
 export function attach(ctx) {

@@ -238,6 +238,13 @@ part's database, under a key of SM-87's own) and puts them in the load message (
 says whether the firmware took them; **Built-in samples** forgets them. A factory reset keeps them, as it keeps an
 FM-1's firmware.
 
+Axs7's **OPEN IN EMULATOR** (its BANK view) hands the emulator a package's samples the same way, through
+`web/sm87emu.js` (Axs7 keeps a copy, and its tests check it is this one; `app/web/emu/sm87emu.js` links to it): they
+are kept where Load .fwsc keeps them, and an emulator switched on, which says so on a `BroadcastChannel`, is told and
+starts again with them; with none running, Axs7 opens the emulator in a tab of its own, which plays them as it is
+switched on. Both need the same origin, as on rogerkl.github.io (`/Axs7/`, `/sm-87/emu/`); Axs7's `npm run dev`
+proxies `/sm-87/emu/` to the emulator served on port 8087 for that.
+
 When MIDI goes wrong in the emulator, it says so in red under its bar:
 - a port that won't open (another program has it, say);
 - a message the browser won't send;
@@ -255,7 +262,8 @@ the port names on both sides, and loopMIDI's activity for it.
 - A `.syx` file of four sample dumps, with stray bytes and a message cut short between them, split and paced as Send
   .syx does it: every dump taken in.
 
-`node test/emu_bank_test.mjs` does Load .fwsc's part after the page: with no package the build's own samples, with a
+`node test/sm87emu_test.mjs` checks `web/sm87emu.js`: a package's samples as the emulator keeps them, and the
+channel (an emulator heard, told, gone). `node test/emu_bank_test.mjs` does Load .fwsc's part after the page: with no package the build's own samples, with a
 package's bank its samples (one read back word for word with RSD) and kit, with a damaged one the build's own again,
 and the page told which each time.
 
