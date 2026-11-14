@@ -71,7 +71,8 @@ void hr_pads_rekit(uint32_t kit_n);
  * the pads' until stored (another pattern taken: gone, as the HR-16's); of the global set-up's, the set-up's. The
  * kit's sounds are kept by number, the slots as slots: a kit grown leaves them as they were */
 typedef struct {
-    uint8_t p;                    /* the pattern the pads have the sounds of (0xFF: none yet, the global set-up's) */
+    uint8_t p;                    /* the pattern the pads have the sounds of (HR_NONE: none, the global set-up's; 0xFF:
+                                   * none yet) */
     uint8_t own;                  /* its own (else the global set-up's) */
     uint8_t edited;               /* its own changed on the pads, not stored */
 } hr_snd_t;
@@ -116,8 +117,8 @@ uint32_t hr_voices_active(void);
 #define HR_GRIDS 9u
 extern const uint8_t HR_GRID[HR_GRIDS];       /* quantize: 1/4 .. 1/64 in clocks, then off (1) */
 extern const char *const HR_GRID_TXT[HR_GRIDS];
-uint32_t hr_beats(uint32_t p);    /* its length: its own, else HR_DEFAULT_BEATS */
-uint32_t hr_hits(uint32_t p);
+uint32_t hr_beats(uint32_t p);    /* its length: its own, else HR_DEFAULT_BEATS (HR_NONE too) */
+uint32_t hr_hits(uint32_t p);     /* (HR_NONE: 0) */
 static inline uint32_t hr_hit_tick(const uint8_t *h) { return h[0] | (uint32_t)h[1] << 8; }
 const uint8_t *hr_hit_at(uint32_t p, uint32_t i);   /* hit i: tick (2), pad, velocity; 0 past the last */
 /* a hit at tick (one of the pad's there already: its velocity replaced); -1 no room. scratch: SQ_SCRATCH bytes */
@@ -153,10 +154,12 @@ int hr_offset(uint32_t p, uint32_t pad, int32_t clocks, uint8_t *scratch);
 /* ---- the player (audio interrupt, sqp_on_tick) ----
  * With the sequencer playing a song: each step's pattern, from the step's start (none: quiet). Else its own loop:
  * the pattern chosen, over and over, the next one queued for its end; with the sequencer's part (unless muted), or
- * alone (sqp.aux: PLAY on the drum page) */
+ * alone (sqp.aux: PLAY on the drum page). Its own may be none (HR_NONE, "--", as a song step without drums): quiet,
+ * its loop the part's beside one (a pattern chosen starts with the part's next round), else a beat */
+#define HR_NONE SQ_PATTERNS       /* the drums' own pattern: none (also the pads' sounds of none: hr_snd.p) */
 typedef struct {
-    uint8_t pattern;              /* its own (PRESET on its page) */
-    uint8_t next;                 /* queued for the pattern's end, 0xFF none */
+    uint8_t pattern;              /* its own (PRESET on its page), HR_NONE none */
+    uint8_t next;                 /* queued for the pattern's end (HR_NONE: none), 0xFF nothing queued */
     uint8_t mute;                 /* not with the sequencer's parts */
     uint8_t rec;                  /* record: hits played go into its own pattern while it loops */
     uint8_t quant, swing;         /* the recording's: HR_GRID's index, clocks (hr_swing_max) */
@@ -169,6 +172,7 @@ typedef struct {
 } hrp_t;
 extern volatile hrp_t hrp;
 void hrp_tick(void);              /* a tick of the clock (sqp_on_tick) */
+uint32_t hrp_ticks(void);         /* its own loop's length, clocks (its pattern's; none's: the part's, or a beat) */
 void hrp_resync(void);            /* the patterns changed (sq_unlock) */
 void hrp_shift(int32_t ticks);    /* its own loop moved that many clocks (the sequencer's part located: sqp_locate) */
 int hrp_recording(void);          /* hits played go in now */

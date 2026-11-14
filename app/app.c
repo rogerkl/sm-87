@@ -669,6 +669,8 @@ static void hr_service(void)
             dr_step_add(r.pad, r.vel);
             continue;
         }
+        if (r.pattern >= SQ_PATTERNS)
+            continue;             /* (none: nothing to record into) */
         if (r.kind == HR_REC_ERASE) {
             full |= hr_remove(r.pattern, r.tick, r.pad, sq_scratch) != 0;
         } else {
@@ -1788,7 +1790,7 @@ static void seq_turn(uint32_t enc, int32_t e, uint32_t btn)
             sq.song[sqp.song].tempo = (uint8_t)sqp.tempo;
             sq_dirty = 1;
         }
-    } else if (enc == EN_K4 && !sqp.song_mode) {   /* the drums' pattern with the part */
+    } else if (enc == EN_K4 && !sqp.song_mode) {   /* the drums' pattern with the part: none, 00..99 */
         dr_pattern_turn(e);
     } else if (enc == EN_K4) {               /* the song step's drum pattern: none, 00..99 */
         seq_step_drums(e, "K3 ADDS A STEP");
@@ -2305,8 +2307,8 @@ int app_expect(const char *what, int *got)
         *got = hrp.tick / SQ_PPQN + 1;
     else if (!strcmp(what, "seqstep"))      /* the song's step playing, or to go on from (from 1) */
         *got = sqp.step + 1;
-    else if (!strcmp(what, "drpat"))        /* the drums: their own pattern */
-        *got = hrp.pattern;
+    else if (!strcmp(what, "drpat"))        /* the drums: their own pattern, -1 none (--) */
+        *got = hrp.pattern >= SQ_PATTERNS ? -1 : hrp.pattern;
     else if (!strcmp(what, "dumpcut"))      /* sample dumps cut short on the way (DUMP CUT SHORT) */
         *got = (int)dump_cuts;
 #if SM87_FX
@@ -2347,7 +2349,7 @@ int app_expect(const char *what, int *got)
         *got = (int)click_count;
     else if (!strcmp(what, "drprog"))       /* program change chooses the drums' pattern: 1 on */
         *got = set.dr_prog;
-    else if (!strcmp(what, "drnext"))       /* the one queued (-1 none) */
+    else if (!strcmp(what, "drnext"))       /* the one queued (-1 none; 100: none, --, queued) */
         *got = hrp.next == 0xFFu ? -1 : hrp.next;
     else if (!strcmp(what, "drplaying"))    /* the pattern sounding (a song step's), -1 none */
         *got = hrp.playing == 0xFFu ? -1 : hrp.playing;
@@ -2429,8 +2431,8 @@ int app_expect(const char *what, int *got)
         *got = hr_pad[(atoi(what + 6) - 1) & 15].pan;
     else if (!strncmp(what, "stdsnd", 6))   /* stdsndN: pad N's sound in the global set-up (-1 none) */
         *got = hr_std[(atoi(what + 6) - 1) & 15].sound == HR_NO_SOUND ? -1 : hr_std[(atoi(what + 6) - 1) & 15].sound;
-    else if (!strcmp(what, "drsndp"))       /* the pattern the pads have the sounds of */
-        *got = hr_snd.p == 0xFFu ? -1 : hr_snd.p;
+    else if (!strcmp(what, "drsndp"))       /* the pattern the pads have the sounds of (-1 none) */
+        *got = hr_snd.p >= SQ_PATTERNS ? -1 : hr_snd.p;
     else if (!strcmp(what, "drown"))        /* they are its own */
         *got = hr_snd.own;
     else if (!strcmp(what, "dredited"))     /* its own edited, not stored */

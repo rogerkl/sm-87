@@ -2,7 +2,7 @@
  * Copyright (C) 2026 Roger Klaveness */
 /* SM-87: the HR-16: its patterns (hits in, out, a pad's out, the length, COPY), quantize with swing, the player (alone,
  * with the sequencer's part, a song's steps), recording as it loops, the pads' voices (the hats' group, a pad's poly,
- * the pan), and a pattern's own sounds. Built and run by test/run.sh */
+ * the pan), a pattern's own sounds, and none ("--"). Built and run by test/run.sh */
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -786,6 +786,92 @@ static void test_program(void)
     CHECK(hrp.tick == 100u, "and on again: %u", hrp.tick);
 }
 
+/* none ("--", as a song step without drums): quiet. Beside a part its loop is the part's: a pattern chosen starts with
+ * the part's next round, none chosen comes at the pattern's end. Alone a beat: a pattern chosen starts on the next.
+ * FILL still plays; nothing is recorded into it */
+static void test_none(void)
+{
+    sq_raw_t t[2] = {{0, 0x90, 60, 100, 0}, {10, 0x80, 60, 0, 0}};
+    hr_rec_t r;
+    uint32_t c0;
+    sq_clear();
+    sqp_init(FS);
+    CHECK(hr_beats(HR_NONE) == HR_DEFAULT_BEATS && hr_hits(HR_NONE) == 0u && !hr_hit_at(HR_NONE, 0),
+          "none: no hits (%u)", hr_hits(HR_NONE));
+    hr_set_length(1, 2, scratch);         /* pattern 1: two beats, the snare on 2 */
+    hr_add(1, 96, 1, 110, scratch);
+    sq_commit(0, 0, t, 2, 3, scratch);    /* part 0: 3 beats, 288 clocks */
+    sqp_select_part(0);
+    hrp.pattern = HR_NONE;
+    hrp.next = 0xFF;
+    hrp.rec = 0;
+    hrp.mute = 0;
+    n_hit = 0;
+    sqp_play();
+    ticks(100);                           /* clocks 0..99 */
+    CHECK(n_hit == 0u && hrp.playing == 0xFFu, "beside a part: quiet (%u hits, %u)", n_hit, hrp.playing);
+    CHECK(hrp_ticks() == 288u && hrp.at == 99u, "its loop the part's: %u clocks, at %u", hrp_ticks(), hrp.at);
+    CHECK(hr_snd.p == HR_NONE && !hr_snd.own, "the pads: the global set-up's (%u)", hr_snd.p);
+    hrp.next = 1;
+    ticks(187);                           /* to 286 */
+    CHECK(hrp.pattern == HR_NONE, "pattern 1 queued: not before the part's end (%u)", hrp.pattern);
+    ticks(1);                             /* 287, the part's last */
+    CHECK(hrp.pattern == 1u && hrp.next == 0xFFu, "at the part's end: pattern 1 (%u, %u)", hrp.pattern, hrp.next);
+    ticks(113);                           /* to 400 */
+    hrp.next = HR_NONE;
+    ticks(79);                            /* to 479: pattern 1's end (2 beats from 288) */
+    CHECK(hrp.pattern == HR_NONE && hrp.next == 0xFFu, "none queued: at the pattern's end (%u)", hrp.pattern);
+    ticks(10);                            /* to 489: the part's 201 */
+    CHECK(hrp.at == 201u && hrp.playing == 0xFFu, "on the part's clock: %u", hrp.at);
+    hrp.next = 1;
+    ticks(183);                           /* to 672: the part's next round at 576, its snare at 672 */
+    CHECK(played(0, 0, "384:1 672:1"), "pattern 1 with the part's rounds, none between");
+    hrp_program(5);                       /* a program change: a pattern again (playing: queued) */
+    CHECK(hrp.pattern == 1u && hrp.next == 5u, "a program change: queued (%u, %u)", hrp.pattern, hrp.next);
+    sqp_stop();
+
+    /* alone: a beat; pattern 1 chosen at clock 30 starts at 96, its snare at 192 */
+    hrp.pattern = HR_NONE;
+    hrp.next = 0xFF;
+    n_hit = 0;
+    sqp_aux_play(0);
+    c0 = sqp.clock;
+    ticks(30);
+    CHECK(hrp_ticks() == SQ_PPQN, "alone: a beat (%u)", hrp_ticks());
+    hrp.next = 1;
+    ticks(66);
+    CHECK(hrp.pattern == 1u, "on the next beat: pattern 1 (%u)", hrp.pattern);
+    ticks(100);
+    CHECK(played(0, c0, "192:1"), "its snare a beat later");
+    sqp_stop();
+
+    /* FILL plays over none, on its clock; recording takes nothing (no pattern) */
+    hrp.pattern = HR_NONE;
+    hrp.quant = 3;
+    hrp.swing = 0;
+    hrp.rec = 1;
+    n_hit = 0;
+    sqp_aux_play(0);
+    c0 = sqp.clock;
+    ticks(30);
+    CHECK(!hrp_recording(), "recording armed, none: nothing goes in");
+    hrp_record(0, 100);
+    hrp_step_in(0, 100);
+    hrp.fill = 1;
+    hrp_fill_pad(2, 77, 1);
+    ticks(100);
+    CHECK(played(0, c0, "48:2 72:2 96:2 120:2"), "FILL over none: on the 1/16s after its own");
+    CHECK(!hrp_take(&r), "nothing recorded");
+    hrp_fill_pad(2, 0, 0);
+    hrp.fill = 0;
+    hrp.tick = 50;
+    hrp_shift(-200);                      /* the part located: none's place is the part's */
+    CHECK(hrp.tick == 50u, "none: not moved (%u)", hrp.tick);
+    sqp_stop();
+    hrp.rec = 0;
+    hrp.pattern = 0;
+}
+
 /* COPY a pad's hits onto another pad (the HR-16's): merged, the destination's length kept, a hit there taking the
  * copied velocity; within one pattern too; none to copy: said */
 static void test_copy_pad(void)
@@ -823,6 +909,7 @@ int main(void)
     test_step();
     test_offset_fill();
     test_program();
+    test_none();
     test_copy_pad();
     test_voices();
     test_sounds();
