@@ -1,7 +1,8 @@
 /* SPDX-License-Identifier: MPL-2.0
  * Copyright (C) 2026 Roger Klaveness */
 /* SM-87: the HR-16's page (ARP). The LCD as the HR-16 shows a pattern: its number, the beat playing; the sixteen white
- * keys its pads. PRESET picks the pattern (queued for the end of the one playing), K1 the tempo, K2 the quantize (a new
+ * keys its pads. PRESET picks the pattern, or none below 00 ("--": quiet, as a song step without drums; queued for the
+ * end of the one playing), K1 the tempo, K2 the quantize (a new
  * one: no swing, as the HR-16's), K3 the swing (the HR-16's clocks late, as far as the quantize allows; shown as a
  * percentage too); REC arms recording (hits played go into the pattern as it loops, quantized and swung; SEL + a pad
  * held erases that pad's hits as they come by); OCT+ held is the HR-16's FILL (a pad held repeats at the quantize rate,
@@ -61,8 +62,22 @@ static uint32_t pad_key_bits(void)
     return m;
 }
 
-/* the pattern the page is about: the one queued, else its own */
+/* the pattern the page is about: the one queued, else its own (HR_NONE: none) */
 static uint32_t dr_pattern(void) { return hrp.next != 0xFFu ? hrp.next : hrp.pattern; }
+
+/* a pattern's number as the LCD shows it: "05", "--" none */
+static void patt_txt(char *n, uint32_t p)
+{
+    if (p < SQ_PATTERNS)
+        fmt_uint(n, p, 2, '0');
+    else
+        n[0] = n[1] = '-', n[2] = 0;
+}
+
+/* the functions about the pattern (its hits, its length): none with no pattern ("--") */
+#define DF_OF_PATTERN(fn)                                                                                             \
+    ((fn) == DF_STEP || (fn) == DF_LENGTH || (fn) == DF_ERASE || (fn) == DF_COPY || (fn) == DF_OFFSET)
+static int dr_no_pattern(void) { return DF_OF_PATTERN(dr.fn) && hrp.pattern >= SQ_PATTERNS; }
 
 static int dr_song_playing(void) { return sqp.state == SQP_PLAYING && sqp.song_mode; }
 
@@ -70,7 +85,7 @@ static void dr_enter(uint32_t fn)
 {
     dr.fn = (uint8_t)fn;
     dr.beats = (uint16_t)hr_beats(hrp.pattern);
-    dr.to = hrp.pattern;
+    dr.to = (uint8_t)(hrp.pattern < SQ_PATTERNS ? hrp.pattern : 0u);
     dr.pad_to = HR_PADS;
     if (fn == DF_ERASE || fn == DF_OFFSET || fn == DF_COPY)
         dr.pad = HR_PADS;         /* (the whole pattern, until a pad is chosen) */
@@ -101,7 +116,10 @@ static const uint8_t *dr_step_hit(uint32_t *n_out)
 /* the pads with a hit at the place, a bit each */
 static uint32_t dr_step_pads(void)
 {
-    uint32_t first, n = hr_hits_at(hrp.pattern, dr.st, &first), i, m = 0;
+    uint32_t first, n, i, m = 0;
+    if (hrp.pattern >= SQ_PATTERNS)
+        return 0;
+    n = hr_hits_at(hrp.pattern, dr.st, &first);
     for (i = 0; i < n; i++)
         m |= 1u << hr_hit_at(hrp.pattern, first + i)[2];
     return m;
@@ -214,6 +232,8 @@ static void dr_step_change(uint32_t enc, int32_t e, int sel)
 static void dr_step_add(uint32_t pad, uint32_t vel)
 {
     uint32_t p = hrp.pattern;
+    if (p >= SQ_PATTERNS)
+        return;
     (void)dr_step_hit(0);
     if (!sq.pattern[p].beats)     /* (its length now its own: the default it showed) */
         sq.pattern[p].beats = HR_DEFAULT_BEATS;
@@ -242,20 +262,25 @@ static void dr_pad_key(uint32_t pad)
         dr.pad = (uint8_t)pad;
 }
 
+/* PRESET (K4 on the SEQ page): none ("--"), 00..99 */
 static void dr_pattern_turn(int32_t e)
 {
-    int32_t v = (int32_t)dr_pattern() + e;
-    uint32_t f;
-    v = v < 0 ? 0 : v > 99 ? 99 : v;
+    int32_t v = (int32_t)dr_pattern();
+    uint32_t f, to;
+    v = clamp((v >= (int32_t)SQ_PATTERNS ? -1 : v) + e, -1, (int32_t)SQ_PATTERNS - 1);
+    to = v < 0 ? HR_NONE : (uint32_t)v;
     if (hrp.rec && (sqp.aux || sqp.state != SQP_STOPPED)) {
         app_say("RECORDING", "STOP FIRST");   /* (the HR-16: no other pattern while recording) */
         return;
     }
     f = plat_lock();
-    if (sqp.aux || (sqp.state != SQP_STOPPED && !sqp.song_mode))
-        hrp.next = (uint8_t)v == hrp.pattern ? 0xFFu : (uint8_t)v;   /* playing: at the end of this one */
-    else
-        hrp.pattern = (uint8_t)v, hrp.next = 0xFFu;
+    if (sqp.aux || (sqp.state != SQP_STOPPED && !sqp.song_mode)) {
+        hrp.next = to == hrp.pattern ? 0xFFu : (uint8_t)to;   /* playing: at the end of this one */
+    } else {
+        hrp.pattern = (uint8_t)to, hrp.next = 0xFFu;
+        if (to >= SQ_PATTERNS)
+            hrp.rec = 0;          /* (nothing to record into) */
+    }
     plat_unlock(f);
     dr.beats = (uint16_t)hr_beats(dr_pattern());
 }
@@ -296,6 +321,8 @@ static void dr_turn(uint32_t enc, int32_t e, uint32_t btn)
         dr.pad = (uint8_t)clamp((int32_t)dr.pad + e, 0, HR_PADS - 1);
         return;
     }
+    if (dr_no_pattern())
+        return;
     switch (dr.fn) {
     case DF_STEP:
         if (enc == EN_SELECT) {
@@ -407,6 +434,10 @@ static void dr_rec(uint32_t btn)
     uint32_t p = hrp.pattern, i;
     int r = 0;
     int stopped = sqp.state == SQP_STOPPED && !sqp.aux;
+    if (dr_no_pattern()) {
+        app_say("NO PATTERN", "CHOOSE ONE FIRST");
+        return;
+    }
     switch (dr.fn) {
     case DF_STEP: {               /* the hit shown out */
         const uint8_t *h = dr_step_hit(0);
@@ -450,8 +481,10 @@ static void dr_rec(uint32_t btn)
     case DF_SOUND: {              /* the pads' sounds kept with the pattern; SEL: its own let go */
         char n[4], t[LCD_ROWBUF];
         uint32_t sp = hr_snd.p;
-        if (sp >= SQ_PATTERNS)
+        if (sp >= SQ_PATTERNS) {
+            app_say("NO PATTERN", "GLOBAL SOUNDS");   /* (none: the pads have the global set-up's) */
             return;
+        }
         t[0] = 0;
         str_cat(t, "PATT ");
         fmt_uint(n, sp, 2, '0');
@@ -497,6 +530,10 @@ static void dr_rec_arm(void)
         app_say("RECORD A PATTERN", "SEQ: PART MODE");
         return;
     }
+    if (!hrp.rec && hrp.pattern >= SQ_PATTERNS) {
+        app_say("NO PATTERN", "CHOOSE ONE FIRST");
+        return;
+    }
     hrp.rec = (uint8_t)!hrp.rec;
     hrp.next = 0xFFu;
 }
@@ -520,6 +557,12 @@ static void dr_draw(int sel_held)
     const hr_pad_t *pd = &hr_pad[dr.pad % HR_PADS];
     const char *state = sqp.state == SQP_STOPPED && !sqp.aux ? " " : hrp_recording() ? CH_REC : CH_PLAY;
     t[0] = 0;
+    if (dr_no_pattern()) {        /* "LENGTH  PATT --" / "NO PATTERN" */
+        ed_lr(t, DF_TXT[dr.fn], "PATT --");
+        lcd_row(0, t);
+        lcd_row(1, "NO PATTERN");
+        return;
+    }
     switch (dr.fn) {
     case DF_PLAY:
         if (dr_song_playing()) {
@@ -536,11 +579,11 @@ static void dr_draw(int sel_held)
             }
         } else {
             str_cat(t, "PATT ");
-            fmt_uint(n, hrp.pattern, 2, '0');
+            patt_txt(n, hrp.pattern);
             str_cat(t, n);
             if (hrp.next != 0xFFu) {
                 str_cat(t, ">");
-                fmt_uint(n, hrp.next, 2, '0');
+                patt_txt(n, hrp.next);
                 str_cat(t, n);
                 str_cat(t, " B");
             } else {
@@ -569,6 +612,8 @@ static void dr_draw(int sel_held)
             str_cat(t, " SW ");   /* "REC 1/16 SW 54.2" */
             swing_text(n);
             str_cat(t, n);
+        } else if (p >= SQ_PATTERNS) {
+            str_cat(t, "NO DRUMS");
         } else {
             fmt_uint(n, hr_beats(p), 0, ' ');
             str_cat(t, n);
@@ -873,23 +918,23 @@ static void dr_panel(void)
     } else {
         now = hrp.pattern;
         str_cat(a, !running ? "PATTERN" : sqp.state == SQP_PLAYING && hrp.mute ? "MUTED" : "PLAYING");
-        if (hrp.next != 0xFFu) {  /* queued: at this pattern's end */
+        if (hrp.next != 0xFFu) {  /* queued: at this pattern's end (none's: the part's) */
             next = hrp.next;
             next_c = C_HI;
             queued = 1;
-            next_under = patt_under(ub, next);
+            next_under = next < SQ_PATTERNS ? patt_under(ub, next) : "NO DRUMS";
         } else if (running) {     /* none: it goes round again */
             next = hrp.pattern;
-            next_under = "PLAYS AGAIN";
+            next_under = next < SQ_PATTERNS ? "PLAYS AGAIN" : "NO DRUMS";
         } else {
             next_under = "WHILE PLAYING";
         }
         tick = running ? hrp.at : 0u;
-        ticks = hr_beats(now) * SQ_PPQN;
+        ticks = hrp_ticks();
     }
     panel_col(8, a, now, C_HI, 0, now < SQ_PATTERNS ? patt_under(ua, now) : "NO DRUMS");
     panel_col(128, b, next, next_c, queued, next_under);
-    panel_progress(tick, ticks, running && next < PANEL_NONE, queued);
+    panel_progress(tick, ticks, running && (next < PANEL_NONE || queued), queued);   /* (none queued: counted too) */
     panel_end();
 }
 

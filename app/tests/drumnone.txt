@@ -1,0 +1,130 @@
+# The drums' own pattern none ("--", as a song step's D--): one below 00 on PRESET (the drum page) and K4 (the SEQ
+# page). Quiet, alone or beside a part; a pattern chosen from it starts on the next beat alone, with the part's next
+# round beside one; none chosen comes at the pattern's end. Nothing to record into, and a pattern's functions say so.
+# 120 BPM: 500 ms a beat.
+wait 600
+# pattern 00: the kick on each beat (STEP EDIT, then LENGTH 1)
+tap ARP
+wait 30
+turn ALGO 1
+wait 30
+expect drfn 1
+midi 99 24 64
+wait 30
+turn ALGO 1
+wait 30
+expect drfn 2
+turn K1 -7 20
+tap REC
+wait 30
+expect drbeats 1
+expect drhits 1
+turn ALGO -2
+wait 30
+expect drfn 0
+# PRESET below 00: none; it stops there
+turn PRESET -1
+wait 30
+expect drpat -1
+turn PRESET -1
+wait 30
+expect drpat -1
+wait 1300
+shot drnone.png
+# REC: nothing to record into
+tap REC
+wait 30
+expect drrec 0
+wait 1300
+# a pattern's function: NO PATTERN, and REC does nothing; a pad's still works
+turn ALGO 2
+wait 30
+expect drfn 2
+shot drnone_length.png
+tap REC
+wait 30
+expect drhits0 1
+expect drbeats0 1
+turn ALGO 4
+wait 30
+expect drfn 6
+expect drsndp -1
+turn ALGO -6
+wait 30
+expect drfn 0
+# PLAY alone: quiet; 00 chosen starts on the next beat
+out
+tap PLAY
+wait 1100
+expect aux 1
+expect drplaying -1
+expect_no_out USB 99 24 64
+turn PRESET 1
+wait 30
+expect drnext 0
+wait 400
+expect drpat 0
+expect drplaying 0
+expect_out USB 99 24 64
+# none chosen while 00 plays (mid-beat; the turn's 80 ms on top): at its end
+turn PRESET -1
+wait 30
+expect drnext 100
+wait 600
+expect drpat -1
+expect drnext -1
+tap PLAY
+wait 30
+expect aux 0
+# the SEQ page: part 00 of 2 beats; K4 from 00 down to none
+turn PRESET 1
+wait 30
+expect drpat 0
+tap SEQ
+wait 30
+expect page 9
+turn ALGO 1
+wait 30
+turn K1 2 20
+tap REC
+wait 30
+expect beats 2
+tap SEQ
+wait 30
+expect fn 0
+turn K4 -1
+wait 30
+expect drpat -1
+wait 1300
+shot drnone_seq.png
+# beside the part: quiet
+out
+tap PLAY
+wait 200
+expect seq 2
+expect drplaying -1
+# 00 chosen: not on the next beat, with the part's next round (1000 ms)
+turn K4 1
+wait 30
+expect drnext 0
+wait 400
+expect drpat -1
+expect_no_out USB 99 24 64
+out
+wait 500
+expect drpat 0
+expect drplaying 0
+expect_out USB 99 24 64
+# none again: at 00's end
+turn K4 -1
+wait 30
+expect drnext 100
+wait 600
+expect drpat -1
+expect drplaying -1
+tap ARP
+wait 30
+shot drnone_part.png
+tap PLAY
+wait 30
+expect seq 0

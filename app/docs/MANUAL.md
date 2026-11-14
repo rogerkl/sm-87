@@ -99,8 +99,8 @@ sampler's dumps, as many as the file holds.
   - The HR-16's memory dump over USB, both ways: an HR-16's dump replaces the drum patterns, and ours goes out in the
     same format, also when an HR-16's request for one comes.
   - With the MMT-8: one clock and tempo. A song step chooses the drum pattern that plays with it (or none). Playing
-    a part, the drums loop their own pattern beside it; with PROGRAM CHANGE on, a program change in the part
-    chooses it. On their own page they play alone.
+    a part, the drums loop their own pattern beside it (or none, `--`, for the part alone); with PROGRAM CHANGE on,
+    a program change in the part chooses it. On their own page they play alone.
 - **The effect** is an Alesis MIDIVerb (1986) on an aux send: its 63 programs (rooms and halls, gated and
   reverse reverbs), as Eric Brombaugh compiled them from its ROM, run at its own rate between its own input and
   output filters. Each sampler slot and each drum pad has a send; a program change on a channel of its own chooses
@@ -122,7 +122,7 @@ sampler's dumps, as many as the file holds.
 | REC + first 8 white keys | The record track; the armed track's key again: none (until REC + a key chooses one) |
 | PRESET | The part or song (SEQ page; while a part plays, the next, queued for its end), else the sampler's program: the one the keys play |
 | K1 / K2 (SEQ) | Tempo / the record track's channel (UNCHANGED, 1-16) |
-| K4 (SEQ) | The drum pattern that plays with the parts; in a song (stopped): the step's drum pattern, or none (the step's row shows it: `P05 12345678 D07`, `D--` none) |
+| K4 (SEQ) | The drum pattern that plays with the parts, or none below 00 (`DRUMS NONE` on the strip: the part plays alone); in a song (stopped): the step's drum pattern, or none (the step's row shows it: `P05 12345678 D07`, `D--` none) |
 | ALGO (SEQ) | The MMT-8's functions, below; SEQ goes back to the part or song |
 | SELECT (SEQ) | The place, as the MMT-8's fast-forward and rewind (below): a part by beats (SEL: by four); a song by steps (SEL: by beats) |
 | SELECT / K3 (SONG, stopped) | The step, shown and edited, and where SEL + PLAY goes on from / its part (at the END: appends the last part; past 99: the song ends there) |
@@ -261,17 +261,17 @@ breaks up, turn it off (K4) and see if CPU drops. A build can leave it out altog
 
 ![The drum page playing a pattern: PATT 00 BT 001, 8 BEATS 5 HITS, the pads KIC SNA CLH OPH CRA RID, and pattern 00 playing large under the strip](img/drums.png "The drum machine")
 
-The LCD shows the pattern and its beat (`PATT 05  BT 003`, `PATT 05>07` with 07 queued), then its length and hits,
-or while recording the quantize and swing. The strip shows the 16 pads, lit as they sound. Under it, as on the SEQ
-page, the pattern playing and the next show large, with their lengths and hits: a pattern queued with PRESET lit,
-with the beats to go (`IN 3 BEATS`); in a song, the step's pattern and the next step's (`NO DRUMS` for a step
-without). The drums muted beside a part show `MUTED`.
+The LCD shows the pattern and its beat (`PATT 05  BT 003`, `PATT 05>07` with 07 queued, `PATT --` none), then its
+length and hits (`NO DRUMS` for none), or while recording the quantize and swing. The strip shows the 16 pads, lit as
+they sound. Under it, as on the SEQ page, the pattern playing and the next show large, with their lengths and hits: a
+pattern queued with PRESET lit, with the beats to go (`IN 3 BEATS`); in a song, the step's pattern and the next
+step's (`NO DRUMS` for a step without). The drums muted beside a part show `MUTED`.
 
 | | |
 |---|---|
 | White keys | The 16 pads, by velocity (the black keys do nothing here) |
 | PLAY | The drums alone, from the top / stop; SEL + PLAY: on from the beat |
-| PRESET | The pattern; while playing, queued for the end of the one playing |
+| PRESET | The pattern, or none below 00 (`--`, as a song step without drums: they stay quiet); while playing, queued for the end of the one playing |
 | K1 / K2 / K3 | Tempo / quantize (1/4, 1/8, 1/12, 1/16, 1/24, 1/32, 1/48, 1/64, off; another: no swing again) / swing, the HR-16's clocks (below) |
 | REC | Recording on or off: the hits played (pads, or MIDI in on the drums' channel) go into the pattern as it loops |
 | SEL + a pad, recording | Erases that pad's hits as they come by, while held (the HR-16's ERASE + a pad) |
@@ -404,7 +404,10 @@ PLAY was started:
 
 - **From the SEQ page, in PART mode:** the sequencer's PLAY plays the part, and the drums loop their pattern beside
   it, each on its own length. K4 chooses the drum pattern, queued while playing. SEL + the 9th white key mutes the
-  drums.
+  drums. Below 00 is none (`--`, as PRESET on the drum page): the part plays without drums. A pattern chosen while
+  none plays starts with the part's next round, in time with it (playing the drums alone: on the next beat).
+  There is nothing to record into, so REC and the functions about a pattern (STEP EDIT, LENGTH, ERASE, COPY,
+  OFFSET) say `NO PATTERN`; the pads play the global set-up's sounds.
 - **From the SEQ page, in SONG mode:** each step's drum pattern (K4 on the step, or in the song's EDIT) starts with
   the step, and is cut at the step's end. A step without one is quiet. A new step takes the drums of the step
   before. A step lasts as long as its part: a part without a length (an empty one) is passed over, as the MMT-8

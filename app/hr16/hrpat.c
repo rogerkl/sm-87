@@ -8,8 +8,11 @@
 const uint8_t HR_GRID[HR_GRIDS] = {96, 48, 32, 24, 16, 12, 8, 6, 1};
 const char *const HR_GRID_TXT[HR_GRIDS] = {"1/4", "1/8", "1/12", "1/16", "1/24", "1/32", "1/48", "1/64", "OFF"};
 
-uint32_t hr_beats(uint32_t p) { return sq.pattern[p].beats ? sq.pattern[p].beats : HR_DEFAULT_BEATS; }
-uint32_t hr_hits(uint32_t p) { return sq_len(SQ_PAT(p)) / SQ_HIT_LEN; }
+uint32_t hr_beats(uint32_t p)
+{
+    return p < SQ_PATTERNS && sq.pattern[p].beats ? sq.pattern[p].beats : HR_DEFAULT_BEATS;
+}
+uint32_t hr_hits(uint32_t p) { return p < SQ_PATTERNS ? sq_len(SQ_PAT(p)) / SQ_HIT_LEN : 0u; }
 
 const uint8_t *hr_hit_at(uint32_t p, uint32_t i)
 {
@@ -414,7 +417,11 @@ void hrp_resync(void) { moved = 1; }
 
 void hrp_shift(int32_t ticks)
 {
-    int32_t len = (int32_t)(hr_beats(hrp.pattern) * SQ_PPQN), t = ((int32_t)hrp.tick + ticks) % len;
+    int32_t len, t;
+    if (hrp.pattern >= SQ_PATTERNS)
+        return;                   /* (none: its place is the part's) */
+    len = (int32_t)(hr_beats(hrp.pattern) * SQ_PPQN);
+    t = ((int32_t)hrp.tick + ticks) % len;
     hrp.tick = (uint16_t)(t < 0 ? t + len : t);
     moved = 1;
 }
@@ -437,6 +444,19 @@ static int skipped(uint32_t pad)
 
 static int song_playing(void) { return sqp.state == SQP_PLAYING && sqp.song_mode; }
 
+/* none's loop: beside a part the part's; alone, or beside an empty part (no length), a beat (as a part chosen after an
+ * empty one starts on the next) */
+static uint32_t none_ticks(void)
+{
+    uint32_t len = sqp.state == SQP_PLAYING ? sq_part_ticks(sqp.part) : 0u;
+    return len ? len : SQ_PPQN;
+}
+
+uint32_t hrp_ticks(void)
+{
+    return hrp.pattern < SQ_PATTERNS ? hr_beats(hrp.pattern) * SQ_PPQN : none_ticks();
+}
+
 void hrp_tick(void)
 {
     uint32_t p, t, ticks, len, a, in_pattern = 0;   /* in_pattern: the pads the pattern has on this clock */
@@ -450,7 +470,13 @@ void hrp_tick(void)
             n_skip = 0;           /* (a run before's) */
         pre_start = 0;
     }
-    if (own) {
+    if (own && hrp.pattern >= SQ_PATTERNS) {   /* none (--): quiet, on the part's clock (or a beat's) */
+        p = HR_NONE;
+        ticks = none_ticks();
+        t = (sqp.state == SQP_PLAYING ? sqp.tick : hrp.tick) % ticks;
+        hrp.tick = (uint16_t)(t + 1u >= ticks ? 0u : t + 1u);
+        quiet = sqp.state == SQP_PLAYING && hrp.mute;   /* (no hits: FILL's, unless muted) */
+    } else if (own) {
         p = hrp.pattern;
         ticks = hr_beats(p) * SQ_PPQN;
         if (hrp.tick >= ticks)    /* (made shorter as it played) */
@@ -470,16 +496,16 @@ void hrp_tick(void)
     }
     if (p != hr_snd.p)
         hr_sounds_apply(p);       /* another pattern: the pads take its sounds (edits not stored: gone) */
-    hrp.playing = quiet ? 0xFFu : (uint8_t)p;
+    hrp.playing = quiet || p >= SQ_PATTERNS ? 0xFFu : (uint8_t)p;
     hrp.at = (uint16_t)t;
-    if (p != cur_p || (int32_t)t != cur_t + 1 || moved) {
+    if (p < SQ_PATTERNS && (p != cur_p || (int32_t)t != cur_t + 1 || moved)) {
         cur = find(p, t, 0);
         moved = 0;
     }
-    cur_p = (uint8_t)p;
+    cur_p = (uint8_t)p;           /* (none: FILL's place, hit_pos, is its clock) */
     cur_t = (int32_t)t;
-    d = sq_data(SQ_PAT(p));
-    len = sq_len(SQ_PAT(p));
+    d = p < SQ_PATTERNS ? sq_data(SQ_PAT(p)) : 0;
+    len = p < SQ_PATTERNS ? sq_len(SQ_PAT(p)) : 0u;
     for (a = cur; a < len && hr_hit_tick(d + a) == t; a += SQ_HIT_LEN) {
         uint32_t pad = d[a + 2u];
         if (quiet)
@@ -515,7 +541,8 @@ void hrp_tick(void)
 
 int hrp_recording(void)
 {
-    return hrp.rec && (sqp.aux || (sqp.state == SQP_PLAYING && !sqp.song_mode && !hrp.mute));
+    return hrp.rec && hrp.pattern < SQ_PATTERNS &&
+           (sqp.aux || (sqp.state == SQP_PLAYING && !sqp.song_mode && !hrp.mute));
 }
 
 /* where a hit played now goes in pattern p, before it's quantized: the clock just played or the next, the nearer;
@@ -603,6 +630,6 @@ void hrp_program(uint32_t prog)
 
 void hrp_step_in(uint32_t pad, uint32_t vel)
 {
-    if (pad < HR_PADS && vel)
+    if (pad < HR_PADS && vel && hrp.pattern < SQ_PATTERNS)
         rec_put(hrp.pattern, 0, pad, vel, HR_REC_STEP);
 }

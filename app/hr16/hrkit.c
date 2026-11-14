@@ -215,7 +215,7 @@ void hr_sounds_apply(uint32_t p)
             x->pan = hr_std[i].pan;
         }
     }
-    hr_snd.p = p < SQ_PATTERNS ? (uint8_t)p : 0xFFu;
+    hr_snd.p = (uint8_t)(p < SQ_PATTERNS ? p : HR_NONE);
     hr_snd.own = (uint8_t)own;
     hr_snd.edited = 0;
 }
