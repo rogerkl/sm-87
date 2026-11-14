@@ -1,0 +1,55 @@
+diff --git a/web/emu/index.html b/web/emu/index.html
+index 426748a..f2ce241 100644
+--- a/web/emu/index.html
++++ b/web/emu/index.html
+@@ -50,6 +50,9 @@ a { color: var(--accent); }
+ .turn { display: none; margin: 0 0 .8rem; color: var(--muted); font-size: .92rem; }
+ @media (orientation: portrait) and (max-width: 700px) { .turn { display: block; } }
+ .start button:disabled { opacity: .6; cursor: progress; }
++.start { align-content: center; gap: 1rem; }
++.start .nosound { margin: 0 1.5em; max-width: 26em; text-align: center; color: #fff; text-shadow: 0 1px 3px #000;
++                  font: 600 1.05rem "Barlow Semi Condensed", "Barlow", sans-serif; }   /* (watchSound's hint) */
+ .bar { display: flex; flex-wrap: wrap; gap: .5rem 1.2rem; align-items: center; margin: .9rem 0 0; color: var(--muted); font-size: .92rem; }
+ .bar button, .speak button { font: inherit; color: var(--ink); background: var(--card); border: 1px solid var(--muted); border-radius: 8px; padding: .3em .8em; cursor: pointer; min-height: 2.2em; }
+ .bar button[aria-pressed="true"] { background: var(--ink); color: var(--ground); }
+@@ -553,6 +556,32 @@ function saveStore(store) {
+ const status = $("status"), cpu = $("cpu");
+ let appPart = null;
+ function showAlert(t) { $("alert").textContent = t; }
++
++// The FM-1 runs on the browser's audio thread: with no audio output working (a Bluetooth headset that switched itself
++// off, an output unplugged) it never starts ("Starting…" for ever) or it stops, with no error anywhere. Once the
++// audio clock has stood still for 3 s the page says so, on the switch while it's there and in the alert line (unless
++// that says something else); gone when the clock moves again
++const NO_SOUND = "No sound from the browser, so the FM-1 can't run: is an audio output on? (A Bluetooth headset may"
++  + " have switched itself off.) Choose one that works, then reload the page.";
++function watchSound(ac) {
++  const hint = document.createElement("p");
++  hint.className = "nosound";
++  hint.textContent = NO_SOUND;
++  let last = -1, still = 0;
++  const timer = setInterval(() => {
++    if (ac.state === "closed") { clearInterval(timer); return; }
++    const now = ac.currentTime;
++    still = now === last ? still + 1 : 0;
++    last = now;
++    if (still >= 3) {
++      if (!$("alert").textContent) showAlert(NO_SOUND);
++      if (!$("start").hidden && !hint.isConnected) $("start").append(hint);
++    } else if (still === 0) {
++      if ($("alert").textContent === NO_SOUND) showAlert("");
++      hint.remove();
++    }
++  }, 1000);
++}
+ async function switchOn() {
+   const go = $("go");
+   go.disabled = true;
+@@ -560,6 +589,7 @@ async function switchOn() {
+   status.textContent = "Starting…";
+   try {
+     const ac = new AudioContext({ sampleRate: 44100, latencyHint: "interactive" });
++    watchSound(ac);
+     if (speakMode() === "voice") voiceOn();
+     const [wasm] = await Promise.all([fetch("app.wasm").then((r) => { if (!r.ok) throw new Error(`app.wasm: ${r.status}`); return r.arrayBuffer(); }),
+                                       ac.audioWorklet.addModule("app_worklet.js").catch(() => {})
