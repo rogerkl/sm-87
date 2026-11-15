@@ -2,10 +2,10 @@
  * Copyright (C) 2026 Roger Klaveness */
 /* SM-87: the MMT-8's page. The LCD as the MMT-8 shows a part or a song playing; the first eight white keys are its
  * eight track buttons while SEL is held (mutes; the ninth the drums), and choose the record track with REC held;
- * PRESET picks the part (or the song), queued while playing; K1 the tempo, K2 the record track's channel, K4 the
- * drum pattern that plays with the parts; in a song, SELECT its step, K3 the step's part (past 99: the song ends
- * there) and K4 its drum pattern (or none). ALGO turns to the MMT-8's functions (seq_edit.c). Part of the unity
- * build (app.c). */
+ * PRESET picks the part (or the song), queued while playing; K1 the tempo, K2 the armed record track's channel (none
+ * armed: nothing, so a track playing keeps its sound), K4 the drum pattern that plays with the parts; in a song,
+ * SELECT its step, K3 the step's part (past 99: the song ends there) and K4 its drum pattern (or none). ALGO turns to
+ * the MMT-8's functions (seq_edit.c). Part of the unity build (app.c). */
 
 static const uint8_t WHITE[16] = PLAT_WHITE_KEYS;
 

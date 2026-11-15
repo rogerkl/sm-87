@@ -1794,7 +1794,15 @@ static void seq_turn(uint32_t enc, int32_t e, uint32_t btn)
         dr_pattern_turn(e);
     } else if (enc == EN_K4) {               /* the song step's drum pattern: none, 00..99 */
         seq_step_drums(e, "K3 ADDS A STEP");
-    } else if (enc == EN_K2) {               /* the record track's channel: UNCHANGED, 1..16 */
+    } else if (enc == EN_K2 && !sqp.rec_armed && sqp.take_state != SQP_TAKE_RUNNING) {
+        /* (none armed: the record track is the one last recorded, not shown; its channel is what it plays on, so
+         * turning it would move a track playing to another channel's sound) */
+        if (sqp.song_mode)
+            app_say("RECORD A PART", "SEQ: PART MODE");
+        else
+            app_say("NO TRACK ARMED", "REC, THEN K2");
+        return;
+    } else if (enc == EN_K2) {               /* the armed track's channel: UNCHANGED, 1..16 (MIDI ECHO's) */
         int32_t c = (int32_t)sq.part[sqp.part].chan[sqp.rec_track] + e;
         sq.part[sqp.part].chan[sqp.rec_track] = (uint8_t)(c < 0 ? 0 : c > 16 ? 16 : c);
         sq_dirty = 1;
