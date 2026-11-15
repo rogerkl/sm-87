@@ -1,6 +1,8 @@
 # The record track as the MMT-8's: REC arms the part's lowest empty track; REC + the armed track's key again leaves
 # none chosen (REC then says so) until REC + a key chooses one; another part, the lowest empty again. REC in a first
-# take sets its length, to the nearest beat, and the part plays on. 120 BPM: a beat is 500 ms.
+# take sets its length, to the nearest beat, and the part plays on. K2 (the armed track's channel) with none armed
+# changes nothing: the record track is then the one last recorded, and its channel is what it plays on. 120 BPM: a
+# beat is 500 ms.
 wait 600
 tap SEQ
 wait 30
@@ -39,6 +41,12 @@ expect beats 4
 expect tracks 4
 wait 1000
 expect seq 2
+# playing, none armed: K2 leaves track 3, the one just recorded, UNCHANGED (it plays on as recorded)
+turn K2 3
+wait 30
+expect armed 0
+expect rectrack 3
+expect chan3 0
 tap PLAY
 wait 30
 expect seq 0

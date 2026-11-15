@@ -127,7 +127,7 @@ browser, with sound, and talks MIDI with SysEx both ways, so Axs7 can send it sa
 | SEL + first 8 white keys | Track mutes (on the SEQ page; in a song: the step's mutes); the 9th: the drums on or muted |
 | REC + first 8 white keys | The record track; the armed track's key again: none (until REC + a key chooses one) |
 | PRESET | The part or song (SEQ page; while a part plays, the next, queued for its end), else the sampler's program: the one the keys play |
-| K1 / K2 (SEQ) | Tempo / the record track's channel (UNCHANGED, 1-16) |
+| K1 / K2 (SEQ) | Tempo / the armed record track's channel (UNCHANGED, 1-16): what the keys and MIDI in play on (MIDI ECHO), and what the track plays back on. With no track armed it changes nothing (`NO TRACK ARMED`), so the tracks playing keep their sounds |
 | K4 (SEQ) | The drum pattern that plays with the parts, or none below 00 (`DRUMS NONE` on the strip: the part plays alone); in a song (stopped): the step's drum pattern, or none (the step's row shows it: `P05 12345678 D07`, `D--` none) |
 | ALGO (SEQ) | The MMT-8's functions, below; SEQ goes back to the part or song |
 | SELECT (SEQ) | The place, as the MMT-8's fast-forward and rewind (below): a part by beats (SEL: by four); a song by steps (SEL: by beats) |
@@ -429,7 +429,9 @@ pads. So an MMT-8 track on channel 10 plays them too.
    doesn't record).
 2. REC: it lights, and the LCD shows `REC TRK 1`, the part's lowest empty track. REC + a track key chooses
    another; it stays chosen until you change part. REC + the armed track's key again leaves none chosen, as on the
-   MMT-8: REC then says `NO TRACK CHOSEN` until REC + a key chooses one, or you change part.
+   MMT-8: REC then says `NO TRACK CHOSEN` until REC + a key chooses one, or you change part. While it's armed, K2
+   sets its channel (`REC TRK 2 CH 03`): the keys and MIDI in play on it as you play along (MIDI ECHO), and the track
+   plays back on it. UNCHANGED keeps the channel each note came on.
 3. PLAY: four clicks of count-in (`COUNT IN 4` .. `1`), then it records from beat 1. Notes in the count-in aren't
    recorded, except one played in its last sixteenth, which lands on beat 1. LOOP/CLICK sets the count-in's length;
    with none, recording starts at once.
