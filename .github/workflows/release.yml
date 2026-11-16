@@ -65,6 +65,8 @@ jobs:
         # the builder checks out without submodules: fm1-base and its felucca-bsp (fm1-base/bsp/), at the commits
         # this one links
         git submodule update --init --recursive
+        # fm1-base's changes (patches/: SysEx from the TRS jack; the browser emulator's), until they are in fm1-base
+        for p in patches/*.patch; do git -C fm1-base apply "../$p"; done
         # the drum kit's sounds are made into the build by tools/mkkit.py, which needs numpy
         python3 -m pip install -q numpy
         test "$(git -C "$AC79_SDK" rev-parse HEAD)" = d179b4484759423312073f5fbb232501aa491047

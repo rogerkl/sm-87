@@ -46,6 +46,18 @@ browser, with sound, and talks MIDI with SysEx both ways, so Axs7 can send it sa
   Axs7's **OPEN IN EMULATOR** (its BANK view) does the same with the package it makes, without saving it: it opens
   the emulator in a tab of its own (one already on starts again with the samples). Switch it on there.
 
+The release's `.fwsc` also runs in [fm1-emu](https://github.com/joakimeriksson/fm1-emu), as its standalone emulator
+(`fm1-live`) and its VST3/CLAP plugin, from version 0.5.1 (earlier ones never start fm1-base's audio: no sound).
+Both pass your computer's MIDI to the FM-1's TRS jack:
+- `fm1-live` passes SysEx too, so dumps go in through any MIDI input it listens on (on Windows, a virtual cable such as
+  loopMIDI). Nothing comes back that way: SM-87 answers over USB. And fm1-emu keeps at most a second of MIDI waiting
+  at the jack (3,125 bytes) and drops the rest, so a longer dump (a sample, the MMT-8's memory) needs a sender that
+  sends it at MIDI's speed; through a virtual cable Axs7 sends faster, and SM-87 says `DUMP CUT SHORT`.
+- On macOS and Linux, `fm1-live --usb` also gives the emulated FM-1 a USB MIDI port of its own, `SM-87 FM-1 (emu)`,
+  which takes SysEx at any speed and answers, as an FM-1's USB does. Windows has no such port.
+- The plugin gets no SysEx from its host. In it, samples and a drum kit go in built into the package (Axs7's SAVE
+  PACKAGE).
+
 ---
 
 ## 2. What it does
@@ -70,6 +82,11 @@ browser, with sound, and talks MIDI with SysEx both ways, so Axs7 can send it sa
 - **Samples over MIDI.** The FM-1 answers as an X7000 with 16 slots: the sample dump in and out, SPRM/RSPRM and
   OVS/ROVS on the sampler's channel. So [Axs7](https://rogerkl.github.io/Axs7/) sends and fetches samples as it does
   with an X7000, and it can bring them from WAV files, `.qd` disk images or a real X7000.
+- **SysEx in over USB and the TRS jack, out over USB.** An MMT-8 or HR-16 can send its dump straight into the jack,
+  and a computer can send samples through a MIDI interface. What SM-87 sends (a sample dump asked for, the MMT-8's
+  and HR-16's dumps, its answers) goes out over USB only: the FM-1 has no MIDI out jack. So Axs7 fetches samples over
+  USB, and a real X7000 reaches the FM-1 through a computer. A dump into the jack comes at MIDI's speed, about 3 KB a
+  second: a full-length sample takes 21 s.
 - **The sequencer** works like the MMT-8:
   - 100 parts of 8 tracks and 100 songs of up to 255 steps, at 96 clocks a beat, in 64 KB of event memory.
   - Real-time recording replaces a track like tape. The first take on an empty part sets its length. Recording
@@ -368,11 +385,11 @@ says `PATT SELECT  ON`, as on the HR-16, and is kept in the settings (SAVE).
 - **PLAY leaves STEP EDIT** and plays from the top.
 
 **The HR-16's memory dump**, as its service manual has it (`documentation/hr16-sysex.md`):
-- **In:** send an HR-16's dump to the FM-1 over USB at any time (on an HR-16, with SYSEX ENABLE on: TAPE held, the
-  left arrow once, RECORD). The LCD counts the bytes, with the share of the whole once the dump's header has come
-  (`HR-16 DUMP IN`, `BYTES  2048  12%`). The dump replaces all 100 drum patterns, as it would on an HR-16; the
-  MMT-8's parts and songs stay. SAVE keeps it. Then the LCD says how many patterns came, and above them
-  `HR-16 DUMP IN`, or why not all did, as for the MMT-8's dump below.
+- **In:** send an HR-16's dump to the FM-1 over USB or into its TRS jack at any time (on an HR-16, with SYSEX ENABLE
+  on: TAPE held, the left arrow once, RECORD; its MIDI out straight into the jack). The LCD counts the bytes, with
+  the share of the whole once the dump's header has come (`HR-16 DUMP IN`, `BYTES  2048  12%`). The dump replaces
+  all 100 drum patterns, as it would on an HR-16; the MMT-8's parts and songs stay. SAVE keeps it. Then the LCD says
+  how many patterns came, and above them `HR-16 DUMP IN`, or why not all did, as for the MMT-8's dump below.
 - **What comes across:** each pattern's hits, its length, and its VOICE, TUNE and MIX as the pattern's own sounds;
   the swing and quantize, as the recording's (its 1/6 becomes 1/8, its swing at most 1/8's).
 - **What doesn't:**
@@ -511,15 +528,16 @@ advanced), and a late track's last clocks are cut when the song ends.
 
 **MIDI clock in** (CLOCK, K1 to MIDI): the sequencer follows MIDI clock from USB or the TRS jack. F8 moves it on
 (each plays 4 of its 96 clocks a beat, spaced by the last beat's clocks); FA starts from the top at the next clock,
-FC stops, F2 (song position) sets the place while stopped and FB goes on from there. PLAY still plays, but waits
-for clocks. The strip shows the tempo the clocks come at (`MIDI 120`). MIDI clock out (K2) goes on as it was, so
-the FM-1 passes the clock on. Clocks are timed in rendered frames, to a block (2.9 ms); the notes land on them.
+FC stops, F2 (song position; over USB, as the TRS jack doesn't pass it) sets the place while stopped and FB goes on
+from there. PLAY still plays, but waits for clocks. The strip shows the tempo the clocks come at (`MIDI 120`). MIDI
+clock out (K2) goes on as it was, so the FM-1 passes the clock on. Clocks are timed in rendered frames, to a block
+(2.9 ms); the notes land on them.
 
 **The MMT-8's memory dump**, as its SysEx document has it (`documentation/manuals.md` lists the manuals):
-- **In:** send a dump to the FM-1 over USB at any time (from a SysEx librarian; an MMT-8 sends one with TAPE held,
-  PAGE DOWN, RECORD, through a computer's MIDI interface). MIDI DUMP's strip says so: `IN: ANY TIME`. The LCD
-  counts the bytes, with the share of the whole once the dump's header has come (`MMT-8 DUMP IN`,
-  `BYTES 41256  86%`). The dump replaces the sequencer's memory (parts, songs, names, channels; the song offsets and
+- **In:** send a dump to the FM-1 over USB or into its TRS jack at any time (from a SysEx librarian; an MMT-8 sends
+  one with TAPE held, PAGE DOWN, RECORD, its MIDI out straight into the jack). MIDI DUMP's strip says so:
+  `IN: ANY TIME`. The LCD counts the bytes, with the share of the whole once the dump's header has come
+  (`MMT-8 DUMP IN`, `BYTES 41256  86%`). The dump replaces the sequencer's memory (parts, songs, names, channels; the song offsets and
   the drum patterns stay ours) and SAVE keeps it. Its SysEx events aren't kept.
 - **What came:** the LCD says how many parts and songs it took (`93 PTS 41 SONGS`), and above them:
   - `MMT-8 DUMP IN`: all of it.
@@ -605,6 +623,9 @@ If an install goes wrong:
 - Felucca's boot-loop guard: hold OCT- + OCT+ for 5 s.
 - m-bootloader.
 - MvaveFM1Unbricker.
+
+If a dump sent to SM-87 doesn't show at all (no `DUMP IN`, `RECEIVED` or `MMT-8 DUMP IN`), check the cable and the
+port it goes out of. fm1-emu's plugin gets no SysEx from its host (above, under Install).
 
 If a dump sent to SM-87 ends with `DUMP CUT SHORT`, bytes were lost on the way to it: send it again, in pieces if
 the sender can (the MMT-8's memory dump, under Controls, says more).

@@ -24,6 +24,12 @@ for t in test/*_test.c; do
     "build/test/$n" "$FIXTURES"
 done
 "$PY" -I test/gen_sysex_test.py
+# the TRS jack's parser as SM-87's firmware builds it (fm1-base device/midi_uart.c, with patches/fm1-base-trs-sysex.patch):
+# its SysEx to the app too, every byte and the frames
+(cd fm1-base && $CC -O2 -w -DAPP_SYSEX_BYTE -DAPP_SYSEX -Ibsp/chip -Ibsp/boards/fm1 -Idevice -o ../build/test/trs_test \
+    tests/trs_test.c)
+build/test/trs_test >build/test/trs_test.log || { cat build/test/trs_test.log; exit 1; }
+tail -1 build/test/trs_test.log
 # samples put into a package: tools/mkrom.py against fm1pkg_make.py's packages, then web/sm87bank.js against mkrom.py's
 "$PY" -I test/bank_test.py build/test/bank
 if command -v node >/dev/null; then

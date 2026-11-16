@@ -61,7 +61,7 @@ SM-87 is MPL-2.0 ([LICENSING.md](LICENSING.md)).
 | `documentation/` | The S700/X7000 reference, the HR-16's dump, the sample bank's format, and `manuals.md`: the machines' manuals, which aren't in the repository |
 | `build.sh` | The build: fm1-base's `tools/build.py` on `app/`, its options passed on |
 | `.github/workflows/` | `tests.yml` (the tests on every push), `release.yml` (a release, from a tag) |
-| `patches/` | fm1-base's changes for the browser emulator (its SysEx, a hint when it has no sound, a hook for Load .fwsc), until they are in fm1-base |
+| `patches/` | fm1-base's changes, until they are in fm1-base: SysEx from the TRS jack (the firmware), and the browser emulator's (its SysEx, a hint when it has no sound, a hook for Load .fwsc) |
 | `LICENSE`, `LICENSING.md` | MPL-2.0, and what else a firmware package holds |
 
 ### Flash
@@ -269,13 +269,26 @@ and the page told which each time.
 
 `test/run.sh` runs both when there is a build.
 
-Small changes to the fm1-base submodule make whole dumps work in the emulator, show what goes wrong, say when the
-browser plays no sound, and let Load .fwsc hand its samples over before the FM-1 boots. They're in `patches/` (the submodule stays at upstream's commit); apply them after
-cloning, before building the emulator:
+Small changes to the fm1-base submodule let SysEx in from the TRS jack, make whole dumps work in the emulator, show
+what goes wrong, say when the browser plays no sound, and let Load .fwsc hand its samples over before the FM-1 boots.
+They're in `patches/` (the submodule stays at upstream's commit); apply them after cloning, before building the
+firmware or the emulator (the workflows do):
 
     for p in patches/*.patch; do git -C fm1-base apply "../$p"; done
 
-All are worth sending upstream. `fm1-base-emu-sysex.patch`:
+All are worth sending upstream. `fm1-base-trs-sysex.patch`:
+- `device/midi_uart.c`: SysEx on the TRS jack reaches the app as USB's does: every byte to `app_sysex_byte`, and a
+  frame of up to 640 bytes to `app_sysex` from the main loop. Before, the jack dropped SysEx, so an MMT-8 or HR-16
+  dumping into the jack, or a computer sending samples through a MIDI interface, reached nothing. The platform's own
+  SysEx (the update, the screen reader, the logs) stays USB's. The jack's DMA ring grows from 128 bytes to 512 (164 ms
+  at MIDI's speed) when the app takes SysEx: a cable has no flow control, and a flash erase holds the interrupts off
+  for tens of ms. A frame that lost bytes all the same ends there with an F7, so the app finds it short.
+- `device/unity.c`: the app's byte stream is one: a frame from USB doesn't reach it while one from the jack is coming,
+  nor the jack's while USB's is. `device/main_fm1.c`: the jack's frames to `app_sysex`. `include/plat.h` says so.
+- `tests/trs_test.c` (`tests/run_tests.sh`, and SM-87's `test/run.sh`): the jack's SysEx to the app, cut short, with
+  USB's coming, not taken yet, too long for a frame, and lapped by the DMA.
+
+`fm1-base-emu-sysex.patch`:
 - `web/emu/emu_web.c`: the frame size comes from `APP_WEB_SX_IN` in `app.h` (8 KB before), so a 66 KB dump arrives
   in one frame.
 - `web/emu/parts/midi_worklet.js`: a SysEx frame streamed over several frames of the main loop (plat_sysex_begin ..
@@ -305,7 +318,7 @@ its gitee repository has the revision fm1-base pins, and `get_sdk.sh` checks the
 
     sh fm1-base/tools/get_toolchain.sh            # ~/.jieli/toolchain
     SDK_URL=https://gitee.com/Jieli-Tech/fw-AC79_AIoT_SDK sh fm1-base/bsp/tools/get_sdk.sh   # ~/.jieli/ac79-sdk
-    JIELI_TOOLCHAIN=~/.jieli/toolchain AC79_SDK=~/.jieli/ac79-sdk ./build.sh    # app/build/sm87.fwsc
+    JIELI_TOOLCHAIN=~/.jieli/toolchain AC79_SDK=~/.jieli/ac79-sdk ./build.sh    # app/build/sm87.fwsc (patches/ applied)
     python3 fm1-base/tools/fm1_install.py app/build/sm87.fwsc     # over USB MIDI (or fm1-base's web installer)
 
 The build's checks pass with the drum kit and no samples built in:

@@ -1,0 +1,378 @@
+diff --git a/device/main_fm1.c b/device/main_fm1.c
+index b0e181c..46ad062 100644
+--- a/device/main_fm1.c
++++ b/device/main_fm1.c
+@@ -1409,6 +1409,16 @@ static void fm1_main(void)
+                 took = 1;
+             }
+         }
++#if FM1B_TRS && defined APP_SYSEX
++        {   /* a SysEx frame from the TRS jack (midi_uart.c): the app's alone; the platform's own come over USB */
++            const uint8_t *p;
++            uint32_t n;
++            if (trs_sx_frame(&p, &n)) {
++                (void)app_sysex(p, n);
++                trs_sx_done();
++            }
++        }
++#endif
+         fm1b_dbg.stage = 4;
+         if (!took)
+             usb_cmd(ota_service());                 /* M-UPGRADE handshake; the commands in its framing (backup,
+diff --git a/device/midi_uart.c b/device/midi_uart.c
+index 62ebbff..d5f022b 100644
+--- a/device/midi_uart.c
++++ b/device/midi_uart.c
+@@ -5,7 +5,12 @@
+  * RX, 31250 baud, RX DMA into a 128-byte ring, polled from the TIMER5 ISR outside the render, the
+  * same context as usb_poll. Channel messages and Clock / Start / Continue / Stop go into midi_in_q
+  * beside USB's, as USB-MIDI packets (CIN = status >> 4) on cable 1, which tells them apart from USB's
+- * (plat_midi_in's port); other system messages and SysEx are ignored (no SysEx -> UBOOT from the jack).
++ * (plat_midi_in's port); other system messages are ignored. SysEx goes to the app alone, as USB's goes to it
++ * (plat.h): every byte to app_sysex_byte (APP_SYSEX_BYTE), and a frame of up to UM_SX_MAX bytes to app_sysex (APP_SYSEX,
++ * from the main loop: trs_sx_frame). The platform's own SysEx (the update, UBOOT, the screen reader, the logs) stays
++ * USB's. The app's byte stream is one: a frame from the jack while one from USB is coming (usb.sx_on) doesn't reach
++ * app_sysex_byte, nor one from USB while the jack's is (trs_sx_holds, unity.c). A frame the DMA lapped (bytes lost: no
++ * flow control on a MIDI cable) ends there with an F7 for the app, which finds it short.
+  * FELUCCA_MIDI_STAMP (usb.c): each message's landing time in midi_in_t24. uart_midi_peek(t), from the same fast tick as
+  * usb_midi_peek (10 kHz, the ticks inside the render too), looks for bytes the DMA has written since: the slots the
+  * parser has taken hold UM_MARK, so a slot that does not is a byte come in since the last peek, at about t (bytes found
+@@ -13,13 +18,29 @@
+  * still goes by the DMA's count; a byte it takes that no peek saw gets the last peek's t. */
+ #include "fm1_uart.h"           /* registers (felucca-bsp chip/; the host test adds it to its include path) */
+ 
++#ifndef UM_RING
++#if defined APP_SYSEX_BYTE || defined APP_SYSEX
++#define UM_RING 512u            /* SysEx comes on at the line's full speed: 164 ms of it while a flash erase holds the
++                                 * interrupts off (tens of ms) */
++#else
+ #define UM_RING 128u
++#endif
++#endif
+ static volatile uint8_t um_ring[UM_RING] __attribute__((aligned(16)));
+ static struct {
+     uint32_t rd, pend;
+     uint32_t bytes, drops, msgs;
+     uint8_t st, need, got, d0, sysex;
++    uint8_t sx_app;             /* the SysEx frame coming reaches app_sysex_byte */
++    uint8_t sx_keep;            /* ... and is collected for app_sysex */
++    uint32_t sx_n;
+ } um;
++#ifdef APP_SYSEX
++#define UM_SX_MAX 640u          /* the bytes between F0 and F7 a frame for app_sysex may have (plat.h APP_SYSEX) */
++static uint8_t um_sx[UM_SX_MAX];
++static volatile uint32_t um_sx_len;
++static volatile uint8_t um_sx_ready;   /* a frame in um_sx for the main loop (it alone reads it then) */
++#endif
+ #if FELUCCA_MIDI_STAMP
+ #define UM_MARK 0xFDu           /* an undefined real-time byte, never sent: a slot the parser has taken */
+ #define UM_TQ 32u               /* the bytes stamped ahead of the parser (10 ms of a full line; older: the peek's t) */
+@@ -73,6 +94,72 @@ static void uart_midi_peek(uint32_t t)
+ 
+ static uint32_t um_len(uint32_t s) { return (s & 0xE0u) == 0xC0u ? 1u : 2u; }   /* Cx Dx: 1, else 2 */
+ 
++/* a SysEx byte from the jack, F0 and F7 too, for the app */
++static void um_sx_byte(uint32_t b)
++{
++#ifdef APP_SYSEX_BYTE
++    if (b == 0xF0u)
++        um.sx_app = !usb.sx_on;                    /* (USB's frame coming holds the app's stream) */
++    if (um.sx_app)
++        app_sysex_byte((uint8_t)b);
++    if (b == 0xF7u)
++        um.sx_app = 0;
++#endif
++#ifdef APP_SYSEX
++    if (b == 0xF0u) {
++        um.sx_n = 0;
++        um.sx_keep = !um_sx_ready;                 /* (the last not taken yet: this one not kept) */
++    } else if (b == 0xF7u) {
++        if (um.sx_keep) {
++            um_sx_len = um.sx_n;
++            RING_PUBLISH();
++            um_sx_ready = 1;
++        }
++        um.sx_keep = 0;
++    } else if (um.sx_keep) {
++        if (um.sx_n < UM_SX_MAX)
++            um_sx[um.sx_n++] = (uint8_t)b;
++        else
++            um.sx_keep = 0;                        /* longer: app_sysex_byte's alone */
++    }
++#else
++    (void)b;
++#endif
++}
++
++/* the SysEx frame ends early: another status (unseen by the app, as from USB), or bytes lost (lapped: an F7 for the app,
++ * which keeps what came before and says it was cut short) */
++static void um_sx_cut(int lapped)
++{
++#ifdef APP_SYSEX_BYTE
++    if (lapped && um.sx_app)
++        app_sysex_byte(0xF7u);
++    um.sx_app = 0;
++#else
++    (void)lapped;
++#endif
++    um.sx_keep = 0;
++}
++
++#ifdef APP_SYSEX_BYTE
++/* the jack's frame is reaching the app: USB's that starts meanwhile doesn't (unity.c FELUCCA_SYSEX_BYTE) */
++static int trs_sx_holds(void) { return um.sx_app; }
++#endif
++
++#ifdef APP_SYSEX
++/* the main loop: a frame from the jack for app_sysex (the bytes between F0 and F7), then trs_sx_done */
++static int trs_sx_frame(const uint8_t **p, uint32_t *n)
++{
++    if (!um_sx_ready)
++        return 0;
++    RING_PUBLISH();
++    *p = um_sx;
++    *n = um_sx_len;
++    return 1;
++}
++static void trs_sx_done(void) { um_sx_ready = 0; }
++#endif
++
+ static void um_byte(uint32_t b)
+ {
+     if (b >= 0xF8u) {                              /* real time: any time, keeps running status */
+@@ -85,13 +172,23 @@ static void um_byte(uint32_t b)
+         return;
+     }
+     if (b & 0x80u) {
++        if (um.sysex && b == 0xF7u)
++            um_sx_byte(b);
++        else if (um.sysex)
++            um_sx_cut(0);                          /* (an F0: this one cut short, the next begun below) */
+         um.sysex = b == 0xF0u;
++        if (um.sysex)
++            um_sx_byte(b);
+         um.st = b < 0xF0u ? (uint8_t)b : 0;        /* system common / SysEx end running status */
+         um.need = (uint8_t)um_len(b);
+         um.got = 0;
+         return;
+     }
+-    if (um.sysex || !um.st)
++    if (um.sysex) {
++        um_sx_byte(b);
++        return;
++    }
++    if (!um.st)
+         return;
+     if (um.need == 2u && !um.got) {
+         um.d0 = (uint8_t)b;
+@@ -115,6 +212,8 @@ static void uart_midi_take(uint32_t n)
+         um.drops += um.pend - UM_RING;
+         um.rd = (um.rd + um.pend - UM_RING) & (UM_RING - 1u);
+         um.pend = UM_RING;
++        if (um.sysex)
++            um_sx_cut(1);
+         um.st = um.got = um.sysex = 0;
+ #if FELUCCA_MIDI_STAMP
+         um_ahead = 0;                              /* (the stamps were for the bytes overwritten) */
+diff --git a/device/unity.c b/device/unity.c
+index e4492f0..f263928 100644
+--- a/device/unity.c
++++ b/device/unity.c
+@@ -163,14 +163,29 @@ static volatile uint32_t fm1_ms;  /* milliseconds since boot (TIMER4-based, TIME
+ #define FELUCCA_USB_HOST_NAME 1      /* the device's product string (plat_usb_host_name) */
+ #endif
+ #define SXQ 128u                  /* the SysEx send ring, in packets: a whole screen-reader SAY (ANN_MAX + 9 bytes) */
++#ifndef FM1B_TRS
++#define FM1B_TRS 1
++#endif
+ #ifdef APP_SYSEX_BYTE
+-#define FELUCCA_SYSEX_BYTE(b) app_sysex_byte(b)   /* the app's, every SysEx byte from USB (plat.h APP_SYSEX_BYTE) */
++/* the app's, every SysEx byte from USB (plat.h APP_SYSEX_BYTE); with the TRS jack's (midi_uart.c) one stream: a frame
++ * from USB that starts while the jack's is reaching the app doesn't (its F0 decides, the frame's bytes follow it) */
++#if FM1B_TRS
++static int trs_sx_holds(void);
++#else
++static int trs_sx_holds(void) { return 0; }
++#endif
++static uint8_t usb_sx_app;
++static void usb_sx_app_byte(uint8_t b)
++{
++    if (b == 0xF0u)
++        usb_sx_app = !trs_sx_holds();
++    if (usb_sx_app)
++        app_sysex_byte(b);
++}
++#define FELUCCA_SYSEX_BYTE(b) usb_sx_app_byte(b)
+ #endif
+ #include "usb.c"
+ #include "console.c"              /* the USB serial console's bytes for the app (plat_console_*, FM1B_CDC) */
+-#ifndef FM1B_TRS
+-#define FM1B_TRS 1
+-#endif
+ #if FM1B_TRS
+ #include "midi_uart.c"
+ #endif
+diff --git a/include/plat.h b/include/plat.h
+index 55e94c5..e5d9009 100644
+--- a/include/plat.h
++++ b/include/plat.h
+@@ -621,11 +621,14 @@ int app_stats_quiet(void);
+  *                   int app_key_drive(uint32_t key) (read it driven), void app_key_probe(uint32_t key, uint32_t v,
+  *                   uint32_t pressed) (the top row), int app_key_led_ok(uint32_t key) (0: its column dark when read);
+  *                   from the scan's interrupt
+- *   APP_SYSEX       int app_sysex(const uint8_t *p, uint32_t n)   a SysEx frame from USB the platform does not take
+- *                   (p: the bytes between F0 and F7); 1 = the app's. Its answers: plat_sysex_send. Main loop
+- *   APP_SYSEX_BYTE  void app_sysex_byte(uint8_t b)   every byte of a SysEx from USB, F0 and F7 too (realtime bytes
+- *                   left out; another status inside ends the frame, unseen here), as it comes: an app's own frames longer
+- *                   than APP_SYSEX's (640 bytes between F0 and F7; a DX7 bank is 4104). In the USB interrupt: keep it short
++ *   APP_SYSEX       int app_sysex(const uint8_t *p, uint32_t n)   a SysEx frame from USB the platform does not take,
++ *                   or from the TRS jack (the platform takes none of those) (p: the bytes between F0 and F7); 1 = the
++ *                   app's. Its answers: plat_sysex_send (over USB). Main loop
++ *   APP_SYSEX_BYTE  void app_sysex_byte(uint8_t b)   every byte of a SysEx from USB or the TRS jack, F0 and F7 too
++ *                   (realtime bytes left out; another status inside ends the frame, unseen here; one from the jack that
++ *                   lost bytes ends where it lost them, with an F7), as it comes: an app's own frames longer than
++ *                   APP_SYSEX's (640 bytes between F0 and F7; a DX7 bank is 4104). One frame at a time: one from the
++ *                   other port that starts while a frame comes doesn't reach it. In the USB interrupt: keep it short
+  *   APP_USB_CMD     void app_usb_cmd(const uint8_t *d, uint32_t n)   a frame in the update's framing (above). Main loop
+  *   APP_USB_HOST_NAME (no function) plat_usb_host_name is built (the USB host reads the device's product string)
+  *   APP_REDRAW      void app_redraw(void)        draw the whole screen again at the next frame (the mirror lost a part)
+diff --git a/tests/run_tests.sh b/tests/run_tests.sh
+index e7c6995..466405e 100755
+--- a/tests/run_tests.sh
++++ b/tests/run_tests.sh
+@@ -26,6 +26,8 @@ run() {
+ }
+ run encoder sh -c "$CC -O2 -w -Ibsp/chip -Ibsp/boards/fm1 -o $OUT/encoder_test tests/encoder_test.c && $OUT/encoder_test"
+ run trs sh -c "$CC -O2 -w -Ibsp/chip -Ibsp/boards/fm1 -Idevice -o $OUT/trs_test tests/trs_test.c && $OUT/trs_test"
++# the same with an app that takes SysEx (APP_SYSEX_BYTE, APP_SYSEX): the jack's SysEx to it too
++run trs-sysex sh -c "$CC -O2 -w -DAPP_SYSEX_BYTE -DAPP_SYSEX -Ibsp/chip -Ibsp/boards/fm1 -Idevice -o $OUT/trs_test_sysex tests/trs_test.c && $OUT/trs_test_sysex"
+ # USB audio around a render block (device/uac_mix.h) on felucca-bsp's usb.c: the recording without the computer's audio,
+ # the computer's at plat_usb_play_gain and MASTER, muted still read; and without usb_audio_out
+ run uac-mix sh -c "$CC -std=c99 -O2 -w -Ibsp/chip -Ibsp/boards/fm1 -o $OUT/uac_mix_test tests/uac_mix_test.c && \
+diff --git a/tests/trs_test.c b/tests/trs_test.c
+index 15390b7..b8ee0f0 100644
+--- a/tests/trs_test.c
++++ b/tests/trs_test.c
+@@ -1,12 +1,22 @@
+ /* SPDX-License-Identifier: MPL-2.0
+  * Copyright (C) 2026 Charles Vestal */
+ /* The TRS MIDI IN parser (midi_uart.c): bytes as the UART DMA leaves them in, USB-MIDI packets out,
+- * into the queue USB fills. */
++ * into the queue USB fills. With -DAPP_SYSEX_BYTE -DAPP_SYSEX (an app that takes SysEx) its SysEx too: every byte to
++ * app_sysex_byte, a frame for app_sysex (trs_sx_frame). */
+ #include <stdio.h>
+ #include <stdint.h>
+ #include <string.h>
+ #define RING_PUBLISH() __asm__ volatile("" ::: "memory")
+ #include "fm1_time.h"            /* fm1_delay_ms (not called here), FM1_TICKS_PER_US (FELUCCA_MIDI_STAMP) */
++#ifdef APP_SYSEX_BYTE
++static uint8_t app_got[2048];   /* what app_sysex_byte was given */
++static uint32_t app_n;
++static void app_sysex_byte(uint8_t b)
++{
++    if (app_n < sizeof app_got)
++        app_got[app_n++] = b;
++}
++#endif
+ #include "usb.c"
+ #include "midi_uart.c"
+ 
+@@ -36,6 +46,26 @@ static void want(const char *what, const uint32_t *pk, uint32_t n)
+ #define PK(s, a, b) (0x10u | (uint32_t)((s) >> 4) | (uint32_t)(s) << 8 | (uint32_t)(a) << 16 | (uint32_t)(b) << 24)
+ #define RT(s) (0x1Fu | (uint32_t)(s) << 8)
+ 
++#if defined APP_SYSEX_BYTE && defined APP_SYSEX
++static void want_app(const char *what, const uint8_t *b, uint32_t n)   /* app_sysex_byte's bytes since the last */
++{
++    int ok = app_n == n && !memcmp(app_got, b, n);
++    printf("  %s %s (%u bytes to app_sysex_byte)\n", ok ? "ok  " : "FAIL", what, app_n);
++    fails += !ok;
++    app_n = 0;
++}
++static void want_frame(const char *what, const uint8_t *b, int n)     /* the frame for app_sysex (n -1: none), taken */
++{
++    const uint8_t *p;
++    uint32_t got;
++    int has = trs_sx_frame(&p, &got), ok = n < 0 ? !has : has && got == (uint32_t)n && !memcmp(p, b, (size_t)n);
++    printf("  %s %s (%s)\n", ok ? "ok  " : "FAIL", what, has ? "a frame" : "none");
++    fails += !ok;
++    if (has)
++        trs_sx_done();
++}
++#endif
++
+ int main(void)
+ {
+     {   /* a note on, then two more by running status, a clock in the middle of one */
+@@ -73,6 +103,71 @@ int main(void)
+         feed(b, sizeof b);
+         want("overrun: resync on the next status", p, 1);
+     }
++#if defined APP_SYSEX_BYTE && defined APP_SYSEX
++    app_n = 0;                                           /* (the cases above: SysEx went to the app too) */
++    while (trs_sx_frame(&(const uint8_t *){0}, &(uint32_t){0}))
++        trs_sx_done();
++    {   /* a SysEx: every byte to the app (a clock inside left out, and counted), the frame for app_sysex */
++        static const uint8_t b[] = {0xF0, 0x7D, 0xF8, 1, 2, 0xF7};
++        static const uint8_t a[] = {0xF0, 0x7D, 1, 2, 0xF7}, f[] = {0x7D, 1, 2};
++        static const uint32_t p[] = {RT(0xF8)};
++        feed(b, sizeof b);
++        want("SysEx: the clock inside it", p, 1);
++        want_app("SysEx: its bytes, F0 and F7 too", a, sizeof a);
++        want_frame("SysEx: its frame for app_sysex", f, sizeof f);
++    }
++    {   /* cut short by another status (unseen by the app) and by an F0 (the next begins): the last frame whole */
++        static const uint8_t b[] = {0xF0, 0x7D, 1, 0x90, 60, 1, 0xF0, 0x7D, 2, 0xF0, 0x7D, 3, 0xF7};
++        static const uint8_t a[] = {0xF0, 0x7D, 1, 0xF0, 0x7D, 2, 0xF0, 0x7D, 3, 0xF7}, f[] = {0x7D, 3};
++        static const uint32_t p[] = {PK(0x90, 60, 1)};
++        feed(b, sizeof b);
++        want("cut short: the note that cut it", p, 1);
++        want_app("cut short: the bytes as they came, the status left out", a, sizeof a);
++        want_frame("cut short: the whole one alone", f, sizeof f);
++    }
++    {   /* a frame from USB coming (usb.sx_on): the jack's doesn't reach app_sysex_byte (one stream), its frame does */
++        static const uint8_t b[] = {0xF0, 0x7D, 5, 0xF7}, f[] = {0x7D, 5};
++        usb.sx_on = 1;
++        feed(b, sizeof b);
++        usb.sx_on = 0;
++        want_app("USB's frame coming: none of the jack's", b, 0);
++        want_frame("USB's frame coming: the jack's frame for app_sysex", f, sizeof f);
++    }
++    {   /* the last frame not taken yet: the next not kept for app_sysex (its bytes still go by) */
++        static const uint8_t b6[] = {0xF0, 0x7D, 6, 0xF7}, b7[] = {0xF0, 0x7D, 7, 0xF7}, b8[] = {0xF0, 0x7D, 8, 0xF7};
++        feed(b6, sizeof b6);
++        feed(b7, sizeof b7);
++        want_frame("not taken: the first kept", b6 + 1, 2);
++        feed(b8, sizeof b8);
++        want_frame("taken: the next kept", b8 + 1, 2);
++        app_n = 0;
++    }
++    {   /* longer than app_sysex takes: every byte to the app, no frame */
++        uint8_t b[UM_SX_MAX + 3];
++        uint32_t i;
++        memset(b, 0x11, sizeof b);
++        b[0] = 0xF0;
++        b[sizeof b - 1] = 0xF7;
++        for (i = 0; i < sizeof b; i += 200)              /* (in pieces, as the DMA's count comes: less than a ring) */
++            feed(b + i, sizeof b - i < 200 ? sizeof b - i : 200);
++        want_app("long: every byte", b, sizeof b);
++        want_frame("long: no frame for app_sysex", b, -1);
++    }
++    {   /* the DMA laps the reader in a SysEx: bytes lost, the app's frame ends there (an F7: it finds it short), the
++         * next status clean */
++        static const uint8_t b0[] = {0xF0, 0x7D, 1};
++        static const uint8_t a[] = {0xF0, 0x7D, 1, 0xF7};
++        static const uint32_t p[] = {PK(0x90, 60, 1)};
++        uint8_t b[UM_RING + 10];
++        memset(b, 0x30, sizeof b);
++        memcpy(b + sizeof b - 4, "\xF7\x90\x3C\x01", 4);
++        feed(b0, sizeof b0);
++        feed(b, sizeof b);
++        want("lapped in a SysEx: resync on the next status", p, 1);
++        want_app("lapped in a SysEx: the frame ended with an F7", a, sizeof a);
++        want_frame("lapped in a SysEx: no frame for app_sysex", a, -1);
++    }
++#endif
+     printf(fails ? "trs: %d FAILED\n" : "trs: ok\n", fails);
+     return fails != 0;
+ }
