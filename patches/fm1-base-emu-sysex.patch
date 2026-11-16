@@ -15,7 +15,7 @@ index dca067b..c4f5e05 100644
  static uint8_t wsx_in[WEB_SX_IN];
  __attribute__((used, visibility("default"))) uint8_t *web_sx_in_buf(void) { return wsx_in; }
 diff --git a/web/emu/parts/midi.js b/web/emu/parts/midi.js
-index ab599d5..0fd66e2 100644
+index ab599d5..d19f80b 100644
 --- a/web/emu/parts/midi.js
 +++ b/web/emu/parts/midi.js
 @@ -6,9 +6,11 @@
@@ -48,7 +48,7 @@ index ab599d5..0fd66e2 100644
 +  if (say) say(text); else console.warn(text);
 +}
 +function untell() {                       // (a new choice: the last word said taken back, if it is still the one shown)
-+  const a = document.getElementById("alert");
++  const a = typeof document.getElementById === "function" ? document.getElementById("alert") : null;   // (a page)
 +  if (said && say && a && a.textContent === said) say("");
 +  said = "";
 +}
