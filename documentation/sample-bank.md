@@ -74,7 +74,7 @@ A bank holds up to 16 samples for the sampler's slots, a drum kit for the HR-16,
    | 11 | 1 | Pan, -3 (left) .. 3 (signed) |
    | 12 | 1 | Its MIDI note, 0-127, in and out on the drum channel |
    | 13 | 1 | Group, 0-9: a hit cuts the others of its group (the hats) |
-   | 14 | 1 | Voices at once: 1 (a hit cuts the last) or 2 (the cymbals) |
+   | 14 | 1 | Voices at once: 1 (a hit cuts the last) or 2 (the HR-16's crash) |
    | 15 | 1 | FINE: sixteenths of a semitone more, -16..16 (signed; the sampler's FINE, an HR-16 tuning step is 9). Banks made before SM-87 had it kept 0 here |
 
 4. The packed words: the samples' in their entries' order, then the kit's sounds'. Each is packed two words to three
@@ -148,7 +148,7 @@ The HR-16's 16 drums go on these pads (an HR-16 dump's hits do too: `app/hr16/hr
 | TOM2 | 10 | TOM2 | 48 | |
 | TOM3 | 11 | TOM3 | 45 | |
 | TOM4 | 12 | TOM4 | 41 | |
-| RIDE | 6 | RIDE | 51 | 2 voices |
+| RIDE | 6 | RIDE | 51 | |
 | CRASH | 5 | CRASH | 49 | 2 voices |
 | PERC1 | 13 | PERC1 | 56 | |
 | PERC2 | 14 | PERC2 | 54 | |
@@ -161,12 +161,11 @@ first keygroup becomes its pad and a sound:
 - **The sound:** the sample's words from START to END (reversed with REVERSE), its rate code, and VEL>LV as its
   velocity's say. It plays once, start to end: its loop, filter, release and LFO don't apply. Drums with the same
   sample, START, END and REVERSE share one sound.
-- **Its name:** the drum's kind (`KICK`, `SNARE`, `CLHAT`, `OPHAT`, `CLAPS`, `TOM1`, `RIDE`, `CRASH`, `PERC1`, ...),
-  so an HR-16 dump finds it.
+- **Its name:** the drum's (`KICK`, `SNARE`, `CLHAT`, `OPHAT`, `CLAPS`, `TOM1`, `RIDE`, `CRASH`, `PERC1`, ...).
 - **The pad's tuning:** C3 (60) less the keygroup's root key, plus its transpose (with CONSTANT PITCH, the transpose
   alone), in semitones: -24..24. The pad plays the sample as the tool plays it on C3, so a new keygroup (root C3)
-  is the sample at its own pitch, and the root or the transpose tunes it. A pad also has a FINE (sixteenths, offset
-  15), which Axs7 doesn't fill yet: the keygroup's FINE is left out.
+  is the sample at its own pitch, and the root or the transpose tunes it. Its FINE (cents) is the pad's FINE, in
+  sixteenths: `cents × 16 / 100`, the nearest, -16..16 (the X7000's own step), and back as `FINE × 100 / 16`.
 - **The pad's level:** the drum's own LEVEL (Axs7 keeps one with each drum's program), else its sample's LOUDNESS,
   0-99. A pad's level and the sampler's LOUDNESS take the same curve (`s7_level_db`), so the drum is as loud as the
   sampler would play the sample at that LOUDNESS, and two drums playing one sound can each have a level.

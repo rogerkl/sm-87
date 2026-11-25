@@ -306,7 +306,7 @@ export function readBank(top) {
 
 // the HR-16's 16 drums, in its order (its dumps', its manual's), each with the pad SM-87 plays it on (hr16/hrdump.h
 // HD_PAD) and the set-up a kit gives that pad: its name, its MIDI note (General MIDI's), the hats' group, two voices
-// for the cymbals
+// for the crash (the HR-16's: its ride has one)
 export const HR16_DRUMS = [
   { drum: "KICK", pad: 0, name: "KICK", note: 36 },
   { drum: "SNARE", pad: 1, name: "SNARE", note: 38 },
@@ -320,7 +320,7 @@ export const HR16_DRUMS = [
   { drum: "TOM2", pad: 9, name: "TOM2", note: 48 },
   { drum: "TOM3", pad: 10, name: "TOM3", note: 45 },
   { drum: "TOM4", pad: 11, name: "TOM4", note: 41 },
-  { drum: "RIDE", pad: 5, name: "RIDE", note: 51, poly: 2 },
+  { drum: "RIDE", pad: 5, name: "RIDE", note: 51 },
   { drum: "CRASH", pad: 4, name: "CRASH", note: 49, poly: 2 },
   { drum: "PERC1", pad: 12, name: "PERC1", note: 56 },
   { drum: "PERC2", pad: 13, name: "PERC2", note: 54 },

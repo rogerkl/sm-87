@@ -80,6 +80,7 @@ const hp = hr16Pads(byDrum);
 check(hp.length === 16 && hp[0].name === "KICK" && hp[0].sound === 0 && hp[0].note === 36 && hp[0].level === 85 &&
   hp[6].name === "MDHAT" && hp[6].sound === 1 && hp[6].tune === -3 && hp[6].level === 70 && hp[6].pan === 2 &&
   hp[6].group === 1 && hp[4].name === "CRASH" && hp[4].tune === 5 && hp[4].poly === 2 && hp[4].note === 49 &&
+  hp[5].name === "RIDE" && hp[5].poly === 1 &&
   hp[1].name === "SNARE" && hp[1].sound === NO_SOUND && hp[1].note === 38, "hr16Pads: the pads in SM-87's order");
 const hk = readBank(makeBank([], { sounds: J.kit.sounds.slice(0, 2), pads: hp }));
 check(hk && hk.kit.pads.length === 16 && hk.kit.pads[6].tune === -3 && hk.kit.pads[4].sound === 0 &&

@@ -46,8 +46,7 @@ export interface BankSample {
 
 /** A drum kit's sound: played whole, once, at its rate; the pads tune it */
 export interface KitSound {
-  /** ASCII, up to 6 characters. An HR-16 dump finds a kit's sounds by their names' starts: KICK, SNARE, TOM,
-   * CLHAT, OPHAT, RIDE, CRASH, CLAP (CYMBL for either cymbal) */
+  /** ASCII, up to 6 characters (an HR-16 dump finds a kit's sounds by the pads that play them, not by name) */
   name: string;
   /** 12-bit offset binary, 0-4095; 1 to MAX_WORDS of them */
   words: ArrayLike<number>;
@@ -73,7 +72,7 @@ export interface KitPad {
   note?: number;
   /** 0, or a group 1-9: a hit cuts the others of its group (the hats) (default 0) */
   group?: number;
-  /** its voices at once: 1 (a hit cuts the last; default) or 2 (the cymbals) */
+  /** its voices at once: 1 (a hit cuts the last; default) or 2 (the HR-16's crash) */
   poly?: number;
   /** its tuning's sixteenths of a semitone, -16..16 (default 0; the sampler's FINE, an HR-16 step is 9) */
   fine?: number;
@@ -120,7 +119,7 @@ export interface Hr16Drum {
   note: number;
   /** the hats' group */
   group?: number;
-  /** 2 for the cymbals */
+  /** 2 for the crash (the HR-16's ride has one) */
   poly?: number;
 }
 /** the HR-16's drums in its own order (its dumps', its manual's) */
