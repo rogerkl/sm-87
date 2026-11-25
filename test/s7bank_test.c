@@ -233,6 +233,8 @@ int main(void)
     KIT_BAD(KP[2].sound = 18, KP[2].sound = 2, "a pad's sound past the slots: refused");
     KIT_BAD(KP[0].tune = 25, KP[0].tune = 0, "tune 25: refused");
     KIT_BAD(KP[0].tune = -25, KP[0].tune = 0, "tune -25: refused");
+    KIT_BAD(KP[0].fine = 17, KP[0].fine = 0, "fine 17: refused");
+    KIT_BAD(KP[0].fine = -17, KP[0].fine = 0, "fine -17: refused");
     KIT_BAD(KP[0].level = 100, KP[0].level = 85, "level 100: refused");
     KIT_BAD(KP[0].pan = 4, KP[0].pan = 0, "pan 4: refused");
     KIT_BAD(KP[0].note = 128, KP[0].note = 36, "note 128: refused");

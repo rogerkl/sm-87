@@ -1,13 +1,15 @@
-# The HR-16 (hr16/), with its kit (resources/kit: KICK SNARE CLHAT OPHAT CYMBL; the pads KICK SNARE CLHAT OPHAT
-# CRASH RIDE): its pads on MIDI channel 10 (the hats cut each other); a pattern recorded on its page as it loops (the hits quantized
-# to 1/16) and played back; LENGTH, COPY, ERASE, a pad's sound and MIDI; the drums beside the MMT-8's part (muted
-# with SEL + the ninth white key) and with a song's step; all of it kept across a power cycle. 120 BPM: 500 ms a
-# beat, 5.2 ms a clock.
+# The HR-16 (hr16/), with its kit (resources/kit: the HR-16's own 16 drums, KICK SNARE CLHAT OPHAT CRASH RIDE
+# MDHAT CLAPS TOM1-4 PERC1-4 on the pads): its pads on MIDI channel 10 (the hats cut each other); a pattern recorded on
+# its page as it loops (the hits quantized to 1/16) and played back; LENGTH, COPY, ERASE, a pad's sound and MIDI; the
+# drums beside the MMT-8's part (muted with SEL + the ninth white key) and with a song's step; all of it kept across a
+# power cycle. 120 BPM: 500 ms a beat, 5.2 ms a clock.
 wait 600
-expect kit 5
+expect kit 16
 expect padsnd1 0
-expect padsnd6 4
-expect padtune6 -3
+expect padsnd6 12
+expect padsnd16 7
+expect padlevel1 99
+expect padpan6 2
 expect padnote3 42
 expect drch 10
 # MIDI in on channel 10: the pads on those notes; the sampler (channel 1) not
@@ -107,16 +109,20 @@ expect drpad 2
 tap REC
 wait 30
 expect drhits 2
-# PAD SOUND: the kick 5 up, its level 80
+# PAD SOUND: the kick 5 up and 7/16 down (FINE: SEL + K2), its level 94
 turn ALGO 3
 wait 30
 expect drfn 6
 tapkey w0
 turn K2 5 20
+press SEL
+turn K2 -7 20
+release SEL
 turn K3 -5 20
 wait 30
 expect padtune1 5
-expect padlevel1 80
+expect padfine1 -7
+expect padlevel1 94
 wait 1300
 shot drums_sound.png
 # PAD MIDI: the drums' channel
@@ -225,5 +231,6 @@ expect drhits0 2
 expect drhits1 4
 expect stepdr1 1
 expect padtune1 5
-expect padlevel1 80
+expect padfine1 -7
+expect padlevel1 94
 expect drch 10

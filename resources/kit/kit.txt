@@ -1,26 +1,54 @@
-# SM-87's drum kit: the HR-16's sounds and its pads' set-up. Every build makes it a header of the firmware's
+# SM-87's drum kit: the HR-16's sounds and its pads' set-up. The firmware has none of its own: a release package
+# brings this one, as samples built in (the release workflow: tools/mkrom.py PACKAGE --kit resources/kit/kit.txt),
+# which a package made again (mkrom.py, Axs7) replaces. The host simulator and the browser emulator have it built in
 # (app/fm1.toml gen: tools/mkkit.py); run mkkit.py by hand to see what it holds and takes.
+#
+# It is the HR-16's own: its 16 drums each with the sound, level and pan an HR-16 sets it up with (V1.09, 153DH), the
+# sounds from an Axs7 memory dump of them (its DRUMS bank, each START to END), the notes General MIDI's.
 #
 #   sound NAME FILE [vel=N]
 #       a WAV file in this folder, mixed down to mono, at one of the sampler's rates (or resampled to the nearest),
 #       12 bits as the sampler keeps it. NAME: up to 6 characters. vel: velocity's say in its level, 0..99 (the
 #       sampler's VEL>LV; 60 unless told)
-#   pad NAME SOUND [tune=N] [level=N] [pan=N] [note=N] [group=N] [poly=N]
+#   pad NAME SOUND [tune=N] [fine=N] [level=N] [pan=N] [note=N] [group=N] [poly=N]
 #       the pads in order, up to 16 (the white keys from the lowest); SOUND a sound's NAME. tune: semitones
-#       (-24..24), level 0..99 (85), pan -3..3 (0), note: its MIDI note (General MIDI's), group: pads that cut each
-#       other (the hats: 1), poly: its voices at once, 1 or 2 (the HR-16's crash: 2)
+#       (-24..24), fine: sixteenths of a semitone more (-16..16, 0), level 0..99 (85), pan -3..3 (0), note: its MIDI
+#       note (General MIDI's), group: pads that cut each other (the hats: 1), poly: its voices at once, 1 or 2 (the
+#       HR-16's crash: 2; its ride has one)
 #
-# A pad saved keeps its sound by number: put new sounds at the end of the list.
+# A pad saved keeps its sound by number: put new sounds at the end of the list (another kit built in: the pads saved
+# with the last are its set-up again).
 
-sound KICK  BD.wav
-sound SNARE Snare.wav
-sound CLHAT CH.wav
-sound OPHAT OH.wav
-sound CYMBL Cymbal.wav
+sound KICK   00_24in_POWER_KICK.wav vel=50
+sound SNARE  11_AMBIENT_WOOD_SNR.wav vel=50
+sound CLHAT  23_CLOSED_HI_HAT_A.wav vel=50
+sound MDHAT  25_HALF_OPEN_HI_HAT.wav vel=50
+sound OPHAT  26_OPEN_HI_HAT.wav vel=50
+sound CLAPS  46_HAND_CLAPS.wav vel=50
+sound TAMB   45_TAMBOURINE.wav vel=50
+sound TRIANG 44_TRIANGLE.wav vel=50
+sound TOM1   20_10in_DBL_HEAD_TOM.wav vel=50
+sound TOM2   21_14in_DBL_HEAD_TOM.wav vel=50
+sound TOM3   19_16inPWR_FLOOR_TOM.wav vel=50
+sound TOM4   22_ELECTRONIC_TOM.wav vel=50
+sound RIDE   28_RIDE_CYMBAL.wav vel=50
+sound CRASH  30_CRASH_CYMBAL.wav vel=50
+sound TIMBAL 31_TIMBALE.wav vel=50
+sound CONGA  33_LOW_CONGA_SLAP.wav vel=50
 
-pad KICK  KICK  note=36
-pad SNARE SNARE note=38
-pad CLHAT CLHAT note=42 group=1
-pad OPHAT OPHAT note=46 group=1
-pad CRASH CYMBL note=49 poly=2
-pad RIDE  CYMBL note=51 tune=-3 poly=2
+pad KICK   KICK   level=99 note=36
+pad SNARE  SNARE  level=90 note=38
+pad CLHAT  CLHAT  level=99 pan=-2 note=42 group=1
+pad OPHAT  OPHAT  level=99 pan=-2 note=46 group=1
+pad CRASH  CRASH  level=85 pan=-2 note=49 poly=2
+pad RIDE   RIDE   level=90 pan=2 note=51
+pad MDHAT  MDHAT  level=99 pan=-2 note=44 group=1
+pad CLAPS  CLAPS  level=90 note=39
+pad TOM1   TOM1   level=85 pan=3 note=50
+pad TOM2   TOM2   level=85 note=48
+pad TOM3   TOM3   level=85 pan=-3 note=45
+pad TOM4   TOM4   level=85 note=41
+pad PERC1  TIMBAL level=75 pan=2 note=56
+pad PERC2  CONGA  level=75 pan=-2 note=54
+pad PERC3  TAMB   level=75 pan=1 note=62
+pad PERC4  TRIANG level=90 pan=-1 note=64

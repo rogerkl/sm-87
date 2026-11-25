@@ -136,7 +136,7 @@ uint32_t s7_poly_now(void);
 /* ---- the drum machine's voices (hr16/): the sampler's, from any sound in its format (a slot, or one of the drum
  * kit's built in), played once from START to END without the filter, bend or vibrato, and panned. Audio interrupt.
  * The voice to use is the caller's choice (hr16/hrkit.c: one per pad, the hats sharing) ---- */
-#define S7_DRUM_VOICES 8u
+#define S7_DRUM_VOICES 16u        /* the HR-16's: its sound chip's 16 channels */
 /* voice v starts sound s (slot: its slot, for s7_kill_slot; 0xFF none of them) semis from its own pitch, its gains
  * left and right (level and pan) */
 void s7_drum_start(uint32_t v, const s7_slot_t *s, uint32_t slot, float semis, float gl, float gr, float gs);

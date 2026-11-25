@@ -37,6 +37,8 @@
 #define SQ_NO_DRUMS 0xFFu         /* a song step without a drum pattern */
 #define SQ_HIT_LEN 4u             /* a drum hit's bytes */
 #define SQ_SOUNDS_LEN 64u         /* a drum pattern's own sounds: 16 pads of 4 bytes */
+#define SQ_SOUNDS_FINE 80u        /* ... then their FINE, a byte each (a pattern with one not 0) */
+#define SQ_SOUNDS_HR16 96u        /* ... then their HR-16 sounds as they came, a byte each (one of an HR-16's dump) */
 #define SQ_HR16_HDR 0x400u        /* an HR-16 dump's header (its settings and pointers, hr16/hrdump.h) */
 #define SQ_HR16_DRUMS 16u
 

@@ -5,7 +5,9 @@ usb_manufacturer = "SM-87"
 usb_product = "SM-87 FM-1"
 o2 = ["s700/*.c", "mmt8/*.c", "hr16/*.c", "fx/*.c"]   # the sampler, its memory, the sequencer, the drums, the
                                                      # effect (config.h SM87_FX): -O2
-gen = ["../tools/mkkit.py --quiet --out {gen}/hr_kit.h"]   # the drum kit (resources/kit), built in
+gen = ["../tools/mkkit.py --quiet --out {gen}/hr_kit.h"]   # the drum kit (resources/kit): built into the host
+                                                          # simulator and the browser emulator only (no slot); the
+                                                          # FM-1's comes in its release package (release.yml)
 words = "words.tsv"
 ble = false                    # no radio: the RAM goes to sequences and samples
 emu = ["midi", "port", "data"] # the browser emulator (--web): Web MIDI with SysEx both ways, a port for other pages

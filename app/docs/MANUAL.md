@@ -109,11 +109,13 @@ Both pass your computer's MIDI to the FM-1's TRS jack:
     grids, 4 modes), TRANSPOSE, MIDI CHANNEL, NAME, and EDIT, the event list editor; in a song ERASE, COPY,
     QUANTIZE (each track's clock offset, ±48), NAME and EDIT, its steps put in and taken out.
 - **The drum machine** is a cut-down HR-16:
-  - 16 pads on the white keys and on MIDI channel 10, each with its own sound, tuning (±24 semitones), level, pan
-    (the HR-16's seven places) and note. The hats cut each other (a group); the crash and ride ring over themselves
-    (two voices).
+  - 16 pads on the white keys and on MIDI channel 10, each with its own sound, tuning (±24 semitones and a FINE
+    in sixteenths), level, pan (the HR-16's seven places) and note. The closed, mid and open hats cut each other (a
+    group); the crash rings over itself (two voices), as on the HR-16.
   - The sounds are the sampler's format (12 bits, at its rates) and play on its voices, without the filter: a kit
-    built into the firmware (`resources/kit`), or any of the sampler's 16 slots.
+    built in with the samples, or any of the sampler's 16 slots. A release comes with the HR-16's own kit
+    (`resources/kit`: its 16 drums, each as an HR-16 sets it up). Samples built in with another kit replace it, and
+    built in without one the drums have none: the pads play only the slots PAD SOUND gives them.
   - 100 patterns of up to 682 beats, in the sequencer's memory. Recorded as they loop, each hit quantized (1/4 ..
     1/64, or off) and swung (the HR-16's swing, up to 58-69%) as it goes in, the HR-16's way. Its STEP EDIT,
     OFFSET and FILL too.
@@ -248,8 +250,8 @@ several samples (keygroups that overlap) takes a voice for each.
 
 Every voice costs the audio interrupt time: the strip under the LCD shows CPU while notes play. The FM-1's limit isn't
 measured yet; if the sound breaks up with many notes held, lower it. Lowered while more play, the voices over the
-new number fade as if their notes were let go. The drums have their own 8 voices and aren't counted. It's kept in
-the settings (SAVE).
+new number fade as if their notes were let go. The drums have their own 16 voices, as the HR-16, and aren't counted.
+It's kept in the settings (SAVE).
 
 ### The effect (FX)
 
@@ -326,9 +328,10 @@ percentage, loads as the clocks nearest it.
 | ERASE | A pad, or all (a pad's key chooses it) | | | | Erases that pad's hits, or the whole pattern |
 | COPY | The pattern to | The pad from, or ALL (a pad's key chooses it) | The pad to (the next pad key) | | ALL: appends the pattern to the other (an empty one gets a copy; itself: twice as long). A pad: merges its hits onto the pad to (below) |
 | OFFSET | Clocks, -99..99 (384ths; SEL: tens) | A pad, or all (a pad's key chooses it) | | | Moves the hits that much later (+) or earlier; past the end round to the start, and back. Again: as much again |
-| PAD SOUND | The sound: the kit's, then SLOT01-16 | Tuning, ±24 | Level | Pan, <3 .. 3> | Keeps the pads' sounds with the pattern; SEL + REC: lets them go (the global set-up again) |
+| PAD SOUND | The sound: the kit's, then SLOT01-16 | Tuning, ±24 semitones (SEL: FINE, ±16 sixteenths) | Level | Pan, <3 .. 3> | Keeps the pads' sounds with the pattern; SEL + REC: lets them go (the global set-up again) |
 | PAD MIDI | Its note | Its group (pads that cut each other) | Voices, 1 or 2 | The drums' channel | The pad as the kit sets it (sound and MIDI); SEL + REC: all of them |
 | PROGRAM CHANGE | `PATT SELECT` ON or OFF: a program change on the drums' channel chooses the pattern (below) | | | | |
+| MANUAL V/T/M | `TUNE/MIX` ON or OFF: every pattern plays the global set-up (below) | | | | |
 | MIDI DUMP | | | | | Sends the drum patterns as an HR-16's SysEx dump, over USB (below) |
 
 On a pad's function, a pad's key chooses it (and plays it); so does SELECT.
@@ -339,12 +342,20 @@ another. REC merges the hits onto that pad: the pattern keeps its length (hits p
 the pad already has at the same clock takes the copied one's velocity. The pad to keeps its own sound. Until a pad to
 is chosen REC does nothing (`A PAD TO COPY TO`). K2 turned past the last pad goes back to ALL, the whole pattern.
 
-**A pattern's own sounds** are the HR-16's VOICE, TUNE and MIX stored with a pattern: each pad's sound, tuning,
-level and pan. PAD SOUND's top line says whose the pads have:
+**A pad's tuning** is in semitones (K2) and a FINE in sixteenths of a semitone (SEL + K2, ±16), as the sampler's
+FINE. The LCD shows the semitones; the panel under the strip shows both large, and the two together as semitones
+(`+0.56`: TUNE +1, FINE -7, one of the HR-16's tuning steps up).
+
+**A pattern's own sounds** are the HR-16's VOICE, TUNE and MIX stored with a pattern: each pad's sound, tuning
+(with its FINE), level and pan. PAD SOUND's top line says whose the pads have:
 - **`01 KICK   GLOBAL`**: the pattern has none of its own and plays the global set-up. An edit changes the set-up,
   for every pattern without its own, and is kept with the settings (as before patterns had sounds).
 - **`01 KICK   PAT 05`**: pattern 05's own. An edit shows `PAT 05*` and lasts until REC stores it, or until another
   pattern is chosen or comes in, which loses it, as on the HR-16.
+- **`01 KICK   MANUAL`**: MANUAL V/T/M is on (the HR-16's MANUAL VOICE/TUNE/MIX, its function after PROGRAM
+  CHANGE): every pattern plays the global set-up, so the sounds stay put whatever plays, as on an HR-16 with it on.
+  The patterns keep their own, played again when it's turned off; REC and SEL + REC say `MANUAL V/T/M ON`. It's
+  kept with the settings, and an HR-16 dump sets it.
 - **REC keeps the pads' sounds with the pattern**, all 16 pads at once. **SEL + REC lets them go**: the pattern plays
   the global set-up again.
 - **The pads change with the pattern** as it starts: one queued, or a song step's. When stopped, they have the
@@ -352,8 +363,9 @@ level and pan. PAD SOUND's top line says whose the pads have:
 - **COPY** to an empty pattern copies its sounds too; appending to a pattern with hits keeps that pattern's. ERASE
   keeps them.
 - **A pad's MIDI** (note, group, voices) is the same in every pattern.
-- Each pattern's sounds take 64 bytes of the sequencer's memory. They keep a kit sound by its number and a slot as
-  the slot, so a kit grown later leaves them as they were. A memory saved before this loads with none.
+- Each pattern's sounds take 64 bytes of the sequencer's memory, 80 with a FINE and 96 with an HR-16 dump's sound
+  numbers (below). They keep a kit sound by its number and a slot as the slot, so a kit grown later leaves them as
+  they were. A memory saved before this loads with none.
 
 **Program change** (the HR-16's MIDI PROGRAM CHANGE) lets a part choose its drums. It's off until PROGRAM CHANGE
 says `PATT SELECT  ON`, as on the HR-16, and is kept in the settings (SAVE).
@@ -391,34 +403,46 @@ says `PATT SELECT  ON`, as on the HR-16, and is kept in the settings (SAVE).
   all 100 drum patterns, as it would on an HR-16; the MMT-8's parts and songs stay. SAVE keeps it. Then the LCD says
   how many patterns came, and above them `HR-16 DUMP IN`, or why not all did, as for the MMT-8's dump below.
 - **What comes across:** each pattern's hits, its length, and its VOICE, TUNE and MIX as the pattern's own sounds;
-  the swing and quantize, as the recording's (its 1/6 becomes 1/8, its swing at most 1/8's).
+  the swing and quantize, as the recording's (its 1/6 becomes 1/8, its swing at most 1/8's); its drums' MIDI notes,
+  as the pads' (PAD MIDI), so a sequence made for that HR-16 plays the same pads here. They're kept with the
+  settings (SAVE). To have the kit's notes back, SEL + REC on PAD MIDI (all the pads as the kit sets them, sounds
+  too). Its MANUAL VOICE/TUNE/MIX: on, the kit it had then becomes the global set-up and MANUAL V/T/M is on.
 - **What doesn't:**
   - Its songs: SM-87's drums follow the MMT-8's songs. When the dump has any, the LCD says `SONGS NOT TAKEN`.
-  - Its MIDI settings and tempo. The drums keep SM-87's notes and channel, so the MMT-8's tracks still play them.
-    Those bytes are kept, though, and go back out in ours. Its PROGRAM CHANGE switch is the exception: it comes
-    across, and ours goes out in its place.
+  - Its other MIDI settings and its tempo. The drums keep SM-87's channel. Those bytes are kept, though, and go back
+    out in ours. Its PROGRAM CHANGE switch is the exception: it comes across, and ours goes out in its place.
 - **Its drums on the pads**, by role:
 
   | Pads 1-6 | Pads 7-8 | Pads 9-12 | Pads 13-16 |
   |---|---|---|---|
   | KICK, SNARE, CLS HAT, OPN HAT, CRASH, RIDE | MID HAT, CLAPS | TOM 1-4 | PERC 1-4 |
 
-- **Its sounds** become the kit's sound of the same kind: kicks the KICK; snares, the rimshot, sidestick and brush
-  the SNARE; the closed and foot hats CLHAT; the half-open and open hats OPHAT; the rides and the crash the CYMBL.
-  The kit has no toms, claps or percussion, so a pad with one of those keeps the sound it has in the global set-up.
-  To hear them, give pads 7-16 sounds (sampler slots, say) on PAD SOUND before the dump comes in.
+- **Its sounds** play as the pad of their drum has them in the kit (in the global set-up, where the kit gives that
+  pad none). The built-in kit is the HR-16's own, so each drum's sound as an HR-16 sets it up plays as itself:
+  the 24" power kick, the tambourine on PERC 3 and so on, on whichever drum a pattern puts it. Other sounds go by
+  kind: any kick the KICK's, the snares, rimshot, sidestick and brush the SNARE's, the closed and foot hats CLS
+  HAT's, the 10" power tom TOM 1's, the ride bell the RIDE's, the high conga the low conga's (PERC 2). The rest of
+  the percussion (the blocks, claves, shakers, cowbells, finger snap, drum sticks) has no drum here and is silent.
+  The MID HAT, on pad 7, cuts the other hats and is cut by them, as on an HR-16, where the three share a voice.
+- **An HR-16:B's dump** (it says so in its header) has other sounds in another order, read by its own list: its
+  kicks, snares, sidesticks, hats, toms, cymbals, congas, tambourine and claps by kind; the rest silent.
+- **Each drum's sound number as it came** is kept with the pattern, and goes back out in ours. Choosing another
+  sound for that pad on PAD SOUND lets it go.
 - **Dynamics and tuning:** the HR-16's 8 dynamics become velocities 15, 31 .. 127, and go back the same. Its 32
-  tuning steps span an octave and a half, so each becomes the nearest semitone (-9 to +8). Going out, a tuning
-  beyond that range goes as the HR-16's highest or lowest step.
+  tuning steps span an octave and a half, 9/16 of a semitone each, and come across as they are: TUNE the nearest
+  semitone, FINE the sixteenths from it (a step down: TUNE -1, FINE +7). Going out, a tuning goes as the nearest
+  step, and beyond the HR-16's range (-9 to +8.44 semitones) as its highest or lowest.
 - **Out:** MIDI DUMP (the drum page's last function), REC. An HR-16's request for a dump (`F0 00 00 0E 01 07 F7`)
   sends it too, unless the FM-1 is playing, as an HR-16 does. Its MIDI test is answered.
-  - Each pad's sound goes as one of the HR-16's 49 of its kind: on each drum, the one most patterns of the last HR-16
-    dump had there, if it is that kind. A pad playing a sampler slot, or nothing, goes as that drum's sound in the
-    last HR-16 dump.
+  - Each pad's sound goes as it came. One chosen here goes as the sound of the drum whose pad has it (its own drum
+    first): the one most patterns of the last HR-16 dump had on that drum, if it plays as that drum's, else the
+    drum's sound as an HR-16 sets it up (an HR-16:B's after one of its dumps). A pad playing a sampler slot, or
+    nothing, goes as its own drum's.
+  - MANUAL V/T/M goes out too, and when it's on, the global set-up goes as the HR-16's kit (what it plays then).
   - As with the MMT-8, the header comes from the last HR-16 dump taken in, so **send the FM-1 one of your HR-16's
-    dumps first** (MIDI DUMP's strip says `HEADER: AN HR-16'S` then). Without one, the header is made up: the notes
-    the pads', the channel the drums', the tempo the sequencer's, and zeros where the manual says not to alter. An
-    HR-16 may not take that.
+    dumps first** (MIDI DUMP's strip says `HEADER: AN HR-16'S` then). The drums' notes in it are the pads', either
+    way. Without one, the header is made up: the channel the drums', the tempo the sequencer's, and zeros where the
+    manual says not to alter. An HR-16 may not take that.
   - The FM-1 takes its own dump back the same, byte for byte. A real HR-16 taking one is untested, and so is the
     sound list's numbering (the manual gives none; `documentation/hr16-sysex.md` says where it's from).
 
@@ -609,8 +633,9 @@ than it sends, so a dump may end a little before its header's count; it always c
 sample's end.)
 
 Samples sent go into the sample pool, about 292 KB, and the strip shows how much is FREE. Samples and a drum kit can
-also be built into the firmware, about 270 KB more (the effect's code takes about 95 KB of the same room: a build
-without it, `SM87_FX` 0 in `app/config.h`, leaves about 365 KB): from Axs7 (its wiki's
+also be built into the firmware, about 296 KB more (the effect's code takes about 95 KB of the same room: a build
+without it, `SM87_FX` 0 in `app/config.h`, leaves about 390 KB). A release's HR-16 kit takes 207 KB of it, so
+built in with it there's room for 89 KB of samples; built in again without it, all of it. From Axs7 (its wiki's
 [SM-87](https://github.com/rogerkl/Axs7/wiki/SM-87) page), or with `tools/mkrom.py` (the
 [README](https://github.com/rogerkl/sm-87#samples-built-in)). Try such a package in the emulator first: its **Load
 .fwsc** plays what it holds.

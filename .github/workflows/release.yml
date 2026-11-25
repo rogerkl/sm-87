@@ -67,7 +67,7 @@ jobs:
         git submodule update --init --recursive
         # fm1-base's changes (patches/: SysEx from the TRS jack; the browser emulator's), until they are in fm1-base
         for p in patches/*.patch; do git -C fm1-base apply "../$p"; done
-        # the drum kit's sounds are made into the build by tools/mkkit.py, which needs numpy
+        # the drum kit (tools/mkkit.py, tools/mkrom.py --kit) needs numpy
         python3 -m pip install -q numpy
         test "$(git -C "$AC79_SDK" rev-parse HEAD)" = d179b4484759423312073f5fbb232501aa491047
         # Emscripten for the .rfm1 (host apps: RemoteFM1), a fixed version from emsdk at a fixed commit
@@ -81,15 +81,18 @@ jobs:
         if [[ "$GITHUB_REF" == refs/tags/* ]]; then
           version=${GITHUB_REF_NAME#v}
           ./build.sh --release "$version"
-          cp "app/build/$pkg-$version.fwsc" build/release-assets/
+          # the drum kit, the HR-16's own (resources/kit), into the released package as its samples built in: the
+          # firmware has no kit of its own (the -app.bin is the firmware alone, without it)
+          python3 tools/mkrom.py "app/build/$pkg-$version.fwsc" --kit resources/kit/kit.txt \
+            -o "build/release-assets/$pkg-$version.fwsc"
           cp "app/build/$pkg.bin" "build/release-assets/$pkg-$version-app.bin"
-          # (the tests put samples into app/build/$pkg.fwsc: there, the release package itself)
+          # (the tests put samples into app/build/$pkg.fwsc: there, the release package as built, without the kit)
           cp "app/build/$pkg-$version.fwsc" "app/build/$pkg.fwsc"
           ./build.sh --rfm1 --release "$version"
           cp "app/build/$pkg-$version.rfm1" build/release-assets/
         else
           ./build.sh
-          cp "app/build/$pkg.fwsc" build/release-assets/
+          python3 tools/mkrom.py "app/build/$pkg.fwsc" --kit resources/kit/kit.txt -o "build/release-assets/$pkg.fwsc"
           cp "app/build/$pkg.bin" "build/release-assets/$pkg-app.bin"
           ./build.sh --rfm1
           cp app/build/rfm1/"$pkg"-dev+*.rfm1 "build/release-assets/$pkg.rfm1"

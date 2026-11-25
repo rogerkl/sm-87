@@ -30,6 +30,13 @@ static void fx_apply(void);       /* (the FX pages') */
 
 /* ------------------------------------------------------------------------------------------------ settings --- */
 #define SET_MAGIC 0x37384D53u     /* "SM87" */
+typedef struct {                  /* a pad as the settings keep it: hr16/hr.h hr_pad_t but its FINE (pad_fine) */
+    uint8_t sound;
+    int8_t tune;
+    uint8_t level;
+    int8_t pan;
+    uint8_t note, group, poly, send;
+} set_pad_t;
 typedef struct {
     uint32_t magic;
     uint8_t s7_channel;           /* the sampler's MIDI channel, 0..15 (the X7000 received on 1) */
@@ -44,7 +51,7 @@ typedef struct {
     uint8_t dr_quant, dr_swing;   /* recording's quantize (hr16/hr.h HR_GRID's index) and swing, clocks (the HR-16's;
                                    * before, a percentage, 50..75: taken as clocks as it loads) */
     uint8_t dr_kit_n;             /* the kit's sounds when the pads were saved (hr_pads_rekit) */
-    hr_pad_t pads[HR_PADS];       /* their global set-up (hr16/hr.h hr_std) */
+    set_pad_t pads[HR_PADS];      /* their global set-up (hr16/hr.h hr_std), FINE apart (pad_fine) */
     /* the mix (the MIX page; an object saved before it: each slot at full, in the middle, as the S700 is) */
     uint8_t mix_level[S7_SLOTS];  /* each slot's, 0..99 (99: as it is) */
     int8_t mix_pan[S7_SLOTS];     /* -50 (left) .. 50 */
@@ -71,12 +78,18 @@ typedef struct {
     uint8_t fx_ch;                /* a program change on this channel chooses its program: 0 none, 1..16 */
     uint8_t fx_on;
     uint8_t mix_send[S7_SLOTS];   /* each slot's send to it, 0..99 (the pads': hr_pad_t send) */
+    /* the pads' FINE and HR-16 sounds, and MANUAL VOICE/TUNE/MIX (an object saved before them: 0, off) */
+    int8_t pad_fine[HR_PADS];     /* sixteenths of a semitone, -16..16 */
+    uint8_t pad_hr16[HR_PADS];    /* the HR-16 sound each came as + 1 (hr_pad_t hr16) */
+    uint8_t dr_manual;            /* the HR-16's MANUAL VOICE/TUNE/MIX: every pattern the global set-up (hr_manual) */
+    uint8_t rsv4[3];
 } settings_t;
 #define SET_V1_LEN 12u            /* (to the drums') */
 #define SET_V2_LEN offsetof(settings_t, mix_level)   /* (to the mix) */
 #define SET_V3_LEN offsetof(settings_t, loop)        /* (to the loop and click) */
 #define SET_V4_LEN offsetof(settings_t, rec_filter)  /* (to the MIDI filter) */
 #define SET_V5_LEN offsetof(settings_t, fx_prog)     /* (to the effect) */
+#define SET_V6_LEN offsetof(settings_t, pad_fine)    /* (to the pads' FINE) */
 enum { LOOP_OFF, LOOP_PARTS, LOOP_ALL, LOOP_N };
 #define CLICK_QS 10u
 static void seq_settings_apply(void);   /* LOOP, CLICK and MIDI FILTER into the sequencer (ui/seq_edit.c) */
@@ -148,11 +161,21 @@ static void settings_defaults(void)
     set.multi_base = 0;
     set.s7_poly = S7_POLY_STD;
     set.dr_prog = 0;
+    set.dr_manual = 0;
+    hr_manual = 0;
     loop_click_defaults();
     filter_defaults();
     fx_defaults();
     drums_defaults();
     mix_defaults();
+}
+
+static void pad_from_set(hr_pad_t *p, const set_pad_t *q, int8_t fine, uint8_t hr16)
+{
+    p->sound = q->sound, p->tune = q->tune, p->level = q->level, p->pan = q->pan;
+    p->note = q->note, p->group = q->group, p->poly = q->poly, p->send = q->send;
+    p->fine = fine;
+    p->hr16 = hr16;
 }
 
 /* the settings as they load: what an older (shorter) object lacks, the defaults (the drums', the mix); the pads as
@@ -170,6 +193,9 @@ static void settings_load(void)
         set.s7_poly = S7_POLY_STD;
     if (set.dr_prog > 1u)
         set.dr_prog = 0;
+    if (n < (int)sizeof set || set.dr_manual > 1u)
+        set.dr_manual = 0;
+    hr_manual = set.dr_manual;
     if (n < (int)SET_V4_LEN || set.loop >= LOOP_N || set.countin > 99u || set.click_q >= CLICK_QS ||
         set.click_when > 3u)
         loop_click_defaults();
@@ -178,7 +204,7 @@ static void settings_load(void)
     if (n < (int)SET_V5_LEN || set.multi_base >= S7_PROGRAMS)
         set.multi_base = 0;
     {
-        uint32_t bad_fx = n < (int)sizeof set || set.fx_prog > 62u || set.fx_ret > 99u || set.fx_ch > 16u ||
+        uint32_t bad_fx = n < (int)SET_V6_LEN || set.fx_prog > 62u || set.fx_ret > 99u || set.fx_ch > 16u ||
                           set.fx_on > 1u;
         for (i = 0; i < S7_SLOTS; i++)
             bad_fx |= set.mix_send[i] > 99u;
@@ -199,7 +225,8 @@ static void settings_load(void)
     }
     if (hr_kit_same(set.dr_kit_tag)) {
         for (i = 0; i < HR_PADS; i++)
-            hr_std[i] = set.pads[i];
+            pad_from_set(&hr_std[i], &set.pads[i], n < (int)sizeof set ? 0 : set.pad_fine[i],
+                         n < (int)sizeof set ? 0u : set.pad_hr16[i]);   /* (rekit: in range) */
         hr_pads_rekit(set.dr_kit_n);
         for (i = 0; i < HR_PADS; i++)
             hr_pad[i] = hr_std[i];
@@ -235,8 +262,14 @@ static void mix_apply(uint32_t slot)
 static int settings_save(void)
 {
     uint32_t i;
-    for (i = 0; i < HR_PADS; i++)
-        set.pads[i] = hr_std[i];
+    for (i = 0; i < HR_PADS; i++) {
+        const hr_pad_t *p = &hr_std[i];
+        set_pad_t *q = &set.pads[i];
+        q->sound = p->sound, q->tune = p->tune, q->level = p->level, q->pan = p->pan;
+        q->note = p->note, q->group = p->group, q->poly = p->poly, q->send = p->send;
+        set.pad_fine[i] = p->fine;
+        set.pad_hr16[i] = p->hr16;
+    }
     set.dr_kit_n = (uint8_t)hr_kit_sounds();
     set.dr_kit_tag = (uint16_t)hr_kit_tag();
     return plat_store_save(OBJ_SETTINGS, &set, sizeof set);
@@ -716,7 +749,7 @@ static void take_service(void)
 
 void app_init(void)
 {
-    hr_kit_bank(s7mem_bank());    /* (a kit built in with the samples: before the pads load) */
+    hr_kit_bank(s7mem_bank(), s7mem_bank_emu());   /* (a kit built in with the samples: before the pads load) */
     settings_load();
     hrp.quant = set.dr_quant;
     hrp.swing = set.dr_swing;
@@ -1084,6 +1117,7 @@ static void hd_send(void)
     s.channel = set.dr_channel;
     s.tempo = sqp.tempo;
     s.prog = set.dr_prog;
+    s.manual = set.dr_manual;
     if (dump_hold())
         dump_go(HD_PRE, HD_PREFIX, hd_export(&stage[0][0], HD_MAX, &s), "HR-16");
 }
@@ -1476,7 +1510,10 @@ static void hd_service(void)
                                      : (uint32_t)r.swing);
     if (r.prog >= 0)
         set.dr_prog = (uint8_t)r.prog;
+    if (r.manual >= 0)
+        set.dr_manual = (uint8_t)r.manual;
     f = plat_lock();
+    hr_manual = set.dr_manual;
     hrp.quant = set.dr_quant;
     hrp.swing = set.dr_swing;
     hr_sounds_apply(hrp.pattern);   /* (the pads: the chosen pattern's sounds, as they came) */
@@ -2433,6 +2470,12 @@ int app_expect(const char *what, int *got)
         *got = hr_pad[(atoi(what + 7) - 1) & 15].note;
     else if (!strncmp(what, "padtune", 7))
         *got = hr_pad[(atoi(what + 7) - 1) & 15].tune;
+    else if (!strncmp(what, "padfine", 7))
+        *got = hr_pad[(atoi(what + 7) - 1) & 15].fine;
+    else if (!strncmp(what, "padhr16", 7))  /* padhr16N: the HR-16 sound pad N came as (-1 none) */
+        *got = (int)hr_pad[(atoi(what + 7) - 1) & 15].hr16 - 1;
+    else if (!strcmp(what, "drmanual"))
+        *got = set.dr_manual;
     else if (!strncmp(what, "padlevel", 8))
         *got = hr_pad[(atoi(what + 8) - 1) & 15].level;
     else if (!strncmp(what, "padpan", 6))

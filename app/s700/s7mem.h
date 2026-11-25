@@ -20,6 +20,8 @@
  * the slots' factory contents, played in place from the firmware's flash. A dump sent to such a slot replaces it */
 struct s7_bank_s;
 const struct s7_bank_s *s7mem_bank(void);   /* the bank of samples built in (s7bank.h), found at the first call */
+/* that bank is app/rom/emu_bank.h's (the host simulator's and the browser emulator's samples, not a package's) */
+int s7mem_bank_emu(void);
 uint32_t s7mem_rom_count(void);
 int s7mem_is_rom(uint32_t slot);  /* the slot plays a built-in sample */
 const char *s7mem_name(uint32_t slot);   /* a built-in sample's name, else 0 */

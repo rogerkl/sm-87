@@ -3,11 +3,12 @@
 /* SM-87: the HR-16. An Alesis HR-16 style drum machine (its user manual: documentation/manuals.md), cut down to what
  * the FM-1 holds:
  *   - 16 pads, each playing one sound at its own tuning, level and pan, on its own MIDI note; the hats choke each
- *     other (a group), the crash rings over itself (two voices);
- *   - the sounds: a kit built into the firmware (resources/kit: its WAV files and kit.txt, made a header by
- *     tools/mkkit.py as the firmware is built), or the kit the samples built in bring (tools/mkrom.py --kit, Axs7:
- *     it replaces the firmware's), or any of the sampler's 16 slots. They are the sampler's format (12-bit words,
- *     packed, at one of its rates) and play on its voices (s700/s7.h s7_drum_start), without its filter;
+ *     other (a group), the crash rings over itself (two voices); 16 voices, as the HR-16's;
+ *   - the sounds: the kit the samples built in bring (s700/s7bank.h; tools/mkrom.py --kit, Axs7), a release
+ *     package's the HR-16's own (resources/kit), or any of the sampler's 16 slots. The FM-1's firmware has no kit
+ *     of its own; the host simulator and the browser emulator, without a slot, have the release package's built in
+ *     (made a header by tools/mkkit.py as they are built). They are the sampler's format (12-bit words, packed, at
+ *     one of its rates) and play on its voices (s700/s7.h s7_drum_start), without its filter;
  *   - 100 patterns of up to 682 beats, in the sequencer's memory (mmt8/seq.h): recorded as they loop, each hit
  *     quantized (1/4 .. 1/64, or off) and swung (the HR-16's clocks late, as its quantize allows) as it goes in,
  *     the HR-16's way;
@@ -23,6 +24,7 @@
 #define HR_DEFAULT_BEATS 8u       /* an empty pattern's length, the HR-16's */
 #define HR_NO_SOUND 0xFFu
 #define HR_TUNE_MAX 24            /* semitones either way */
+#define HR_FINE_MAX 16            /* sixteenths of a semitone either way (the sampler's FINE) */
 #define HR_PAN_MAX 3              /* the HR-16's seven places: <3 .. <> .. 3> */
 #define HR_NAME 6u                /* a sound's or a pad's name, at most */
 
@@ -36,7 +38,12 @@ typedef struct {
     uint8_t poly;                 /* its voices at once: 1 (a hit cuts the last), 2 (the HR-16's crash) */
     uint8_t send;                 /* to the effect, 0..99 (SM87_FX; the global set-up's: a pattern's own sounds keep
                                    * none of their own) */
+    int8_t fine;                  /* its tuning's sixteenths of a semitone, -16..16 (the sampler's FINE; an HR-16's
+                                   * step is 9) */
+    uint8_t hr16;                 /* the HR-16 sound it came as + 1 (an HR-16 dump's, sent back as it was); 0 none: a
+                                   * sound chosen here */
 } hr_pad_t;
+#define HR_HR16_SOUNDS 49u        /* an HR-16's sounds (hr16/hrdump.h HD_SOUNDS) */
 
 /* ---- the kit and the pads (hrkit.c) ---- */
 typedef struct {                  /* a sound built in (the build's hr_kit.h) */
@@ -61,15 +68,17 @@ uint32_t hr_sounds(void);         /* the sounds a pad can have: the kit's, then 
 void hr_sound_name(uint32_t sound, char *b);   /* "KICK", "SLOT01", "-----" (HR_NAME + 1 bytes) */
 const char *hr_pad_name(uint32_t pad);         /* the kit's name for it, else "PAD 07" */
 void hr_pad_default(uint32_t pad);             /* the pad now as the kit sets it up (then hr_pad_changed) */
+uint32_t hr_kit_pad_sound(uint32_t pad);       /* the sound the kit's set-up gives the pad (HR_NO_SOUND: none) */
 /* the global set-up saved when the kit had kit_n sounds, as the kit is now: the slots renumbered after it, a sound
  * gone none */
 void hr_pads_rekit(uint32_t kit_n);
 
 /* ---- a pattern's own sounds (the HR-16's VOICE, TUNE and MIX stored with a pattern): each pad's sound, tuning,
- * level and pan, in the sequencer's memory (SQ_PSND). The pads take the sounds of the pattern that plays (the player,
- * as it changes) or is chosen (the app, stopped): its own, else the global set-up's. An edit of a pattern's own is
- * the pads' until stored (another pattern taken: gone, as the HR-16's); of the global set-up's, the set-up's. The
- * kit's sounds are kept by number, the slots as slots: a kit grown leaves them as they were */
+ * level and pan, in the sequencer's memory (SQ_PSND: 4 bytes a pad; then the 16 pads' FINE if one isn't 0, then
+ * their HR-16 sounds, hr16, if one has one). The pads take the sounds of the pattern that plays (the player, as it
+ * changes) or is chosen (the app, stopped): its own, else (none, or hr_manual) the global set-up's. An edit of a
+ * pattern's own is the pads' until stored (another pattern taken: gone, as the HR-16's); of the global set-up's, the
+ * set-up's. The kit's sounds are kept by number, the slots as slots: a kit grown leaves them as they were */
 typedef struct {
     uint8_t p;                    /* the pattern the pads have the sounds of (HR_NONE: none, the global set-up's; 0xFF:
                                    * none yet) */
@@ -77,6 +86,9 @@ typedef struct {
     uint8_t edited;               /* its own changed on the pads, not stored */
 } hr_snd_t;
 extern volatile hr_snd_t hr_snd;
+/* the HR-16's MANUAL VOICE/TUNE/MIX: on, every pattern plays the global set-up, its own sounds kept but not played
+ * (fixed sounds, as an HR-16's); set by the app (then hr_sounds_apply) */
+extern volatile uint8_t hr_manual;
 int hr_sounds_own(uint32_t p);    /* the pattern keeps sounds of its own */
 void hr_sounds_apply(uint32_t p); /* the pads take the pattern's sounds (the audio interrupt, or under plat_lock) */
 /* a pad changed on the pads (sound, MIDI or both; the main loop, under plat_lock): its MIDI the global set-up's;
@@ -87,19 +99,23 @@ void hr_pad_changed(uint32_t pad);
 int hr_sounds_store(uint32_t p);
 int hr_sounds_drop(uint32_t p);
 int hr_sounds_copy(uint32_t a, uint32_t b);
-/* pattern p's own sounds made of pads' (sound, tuning, level, pan; -1 no room: as it was), the pads not changed;
+/* pattern p's own sounds made of pads' (sound, tuning and its FINE, level, pan; -1 no room: as it was), the pads
+ * not changed;
  * the sounds p plays (its own, else the global set-up's) as pads, the rest of each the global set-up's */
 int hr_sounds_put(uint32_t p, const hr_pad_t *pads);
 void hr_sounds_get(uint32_t p, hr_pad_t *pads);
 /* for tests: another kit than the one built in */
 void hr_kit_use(const hr_kit_sound_t *s, uint32_t n, const hr_kit_pad_t *pads, uint32_t np);
-/* the kit the samples built in bring (s700/s7bank.h), if they have one: it replaces the firmware's own, its sounds and
- * its pads' set-up. At boot, before the settings load */
+/* the kit the samples built in bring (s700/s7bank.h): it replaces the one built in (the host simulator's and the
+ * browser emulator's), its sounds and its pads' set-up; samples built in without one, none, as on the FM-1, unless
+ * keep (app/rom/emu_bank.h's: samples for the host and the emulator alone, the kit built in staying). At boot, before
+ * the settings load */
 struct s7_bank_s;
-void hr_kit_bank(const struct s7_bank_s *b);
-/* the kit in use, as the settings keep it with the pads (16 bits): HR_KIT_BUILT_IN for the firmware's own, else a
- * bank's kit's (its CRC folded); hr_kit_same(saved): the pads were saved with this kit (0: saved before the settings
- * kept it, with the firmware's own), else they are the kit's set-up again */
+void hr_kit_bank(const struct s7_bank_s *b, int keep);
+/* the kit in use, as the settings keep it with the pads (16 bits): the one built in's (its CRC folded; none, the
+ * FM-1's and the unit tests': HR_KIT_BUILT_IN), else a bank's kit's (its CRC folded); hr_kit_same(saved): the pads
+ * were saved with this kit (0: saved before the settings kept it, then HR_KIT_BUILT_IN), else they are the kit's
+ * set-up again */
 #define HR_KIT_BUILT_IN 0xFFFFu
 uint32_t hr_kit_tag(void);
 int hr_kit_same(uint32_t saved);

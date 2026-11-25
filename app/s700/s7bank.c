@@ -82,7 +82,7 @@ int s7bank_parse(const uint8_t *top, uint32_t room, s7_bank_t *b)
         const s7_bank_pad_t *p = s7bank_pad(&t, i);
         if ((p->sound != 0xFFu && p->sound >= t.kit_sounds + S7_SLOTS) || p->tune < -24 || p->tune > 24 ||
             p->level > 99u || p->pan < -3 || p->pan > 3 || p->note > 127u || p->group > 9u || p->poly < 1u ||
-            p->poly > 2u || !name_ok(p->name, 6u, S7B_KIT_NAME))
+            p->poly > 2u || p->fine < -16 || p->fine > 16 || !name_ok(p->name, 6u, S7B_KIT_NAME))
             return -1;
     }
     *b = t;

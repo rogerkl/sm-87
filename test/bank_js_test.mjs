@@ -75,15 +75,15 @@ check(JSON.stringify(HR16_DRUMS.map((d) => d.pad)) === "[0,1,2,6,3,7,14,15,8,9,1
 const byDrum = new Array(16).fill(null);
 byDrum[0] = { sound: 0 };
 byDrum[3] = { sound: 1, tune: -3, level: 70, pan: 2 };   // MID HAT
-byDrum[13] = { sound: 0, tune: 5 };                       // CRASH, the kick's sound tuned up
+byDrum[13] = { sound: 0, tune: 5, fine: -7 };            // CRASH, the kick's sound tuned up
 const hp = hr16Pads(byDrum);
 check(hp.length === 16 && hp[0].name === "KICK" && hp[0].sound === 0 && hp[0].note === 36 && hp[0].level === 85 &&
   hp[6].name === "MDHAT" && hp[6].sound === 1 && hp[6].tune === -3 && hp[6].level === 70 && hp[6].pan === 2 &&
   hp[6].group === 1 && hp[4].name === "CRASH" && hp[4].tune === 5 && hp[4].poly === 2 && hp[4].note === 49 &&
   hp[1].name === "SNARE" && hp[1].sound === NO_SOUND && hp[1].note === 38, "hr16Pads: the pads in SM-87's order");
 const hk = readBank(makeBank([], { sounds: J.kit.sounds.slice(0, 2), pads: hp }));
-check(hk && hk.kit.pads.length === 16 && hk.kit.pads[6].tune === -3 && hk.kit.pads[4].sound === 0,
-  "a kit of hr16Pads' pads: in and back");
+check(hk && hk.kit.pads.length === 16 && hk.kit.pads[6].tune === -3 && hk.kit.pads[4].sound === 0 &&
+  hk.kit.pads[4].fine === -7 && hk.kit.pads[6].fine === 0, "a kit of hr16Pads' pads: in and back, FINE too");
 
 // a package as built: what it is
 const orig = file("orig.fwsc");

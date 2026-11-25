@@ -14,6 +14,7 @@
  * the browser emulator have no slot: theirs is app/rom/emu_bank.h while it exists (tools/mkrom.py --emu), or in the
  * emulator a package's, loaded on its page */
 static s7_bank_t bank;
+static int bank_emu;              /* (s7mem_bank_emu) */
 #ifdef PLAT_HOST
 #if defined(__has_include)
 #if __has_include("rom/emu_bank.h")
@@ -47,6 +48,7 @@ static void bank_open(void)
 #endif
 #ifdef EMU_BANK
     s7bank_parse(S7_EMU_BANK + sizeof S7_EMU_BANK, (uint32_t)sizeof S7_EMU_BANK, &bank);
+    bank_emu = bank.base != 0;
 #else
     s7bank_parse(0, 0, &bank);
 #endif
@@ -64,6 +66,12 @@ static void bank_open(void)
     s7bank_parse((const uint8_t *)top, top > end ? (uint32_t)(top - end) : 0u, &bank);
 }
 #endif
+
+int s7mem_bank_emu(void)
+{
+    (void)s7mem_bank();
+    return bank_emu;
+}
 
 const s7_bank_t *s7mem_bank(void)
 {

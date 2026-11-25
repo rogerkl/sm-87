@@ -27,9 +27,12 @@
  * the hit shown a clock (SEL: a step), K2 its velocity, K3 its pad, K4 the grid; REC erases it. PLAY leaves it and
  * plays from the top, as the HR-16. */
 
-enum { DF_PLAY, DF_STEP, DF_LENGTH, DF_ERASE, DF_COPY, DF_OFFSET, DF_SOUND, DF_MIDI, DF_PROG, DF_DUMP, DF_N };
-static const char *const DF_TXT[DF_N] = {"",          "STEP EDIT", "LENGTH",         "ERASE",    "COPY", "OFFSET",
-                                         "PAD SOUND", "PAD MIDI",  "PROGRAM CHANGE", "MIDI DUMP"};
+enum {
+    DF_PLAY, DF_STEP, DF_LENGTH, DF_ERASE, DF_COPY, DF_OFFSET, DF_SOUND, DF_MIDI, DF_PROG, DF_MANUAL, DF_DUMP, DF_N
+};
+static const char *const DF_TXT[DF_N] = {"",          "STEP EDIT", "LENGTH",         "ERASE",        "COPY",
+                                         "OFFSET",    "PAD SOUND", "PAD MIDI",       "PROGRAM CHANGE", "MANUAL V/T/M",
+                                         "MIDI DUMP"};
 #define DF_HAS_PAD(fn) ((fn) == DF_SOUND || (fn) == DF_MIDI || (fn) == DF_ERASE || (fn) == DF_OFFSET)
 
 static struct {
@@ -373,10 +376,13 @@ static void dr_turn(uint32_t enc, int32_t e, uint32_t btn)
         break;
     case DF_SOUND: {              /* (the player changes the pads' sounds as the pattern changes: held) */
         uint32_t f = plat_lock();
-        if (enc == EN_K1) {       /* none, the kit's, the slots */
+        if (enc == EN_K1) {       /* none, the kit's, the slots (an HR-16's sound as it came: no more) */
             int32_t s = p->sound == HR_NO_SOUND ? -1 : (int32_t)p->sound;
             s = clamp(s + e, -1, (int32_t)hr_sounds() - 1);
             p->sound = s < 0 ? HR_NO_SOUND : (uint8_t)s;
+            p->hr16 = 0;
+        } else if (enc == EN_K2 && (btn >> B_SEL & 1u)) {   /* SEL held: FINE, sixteenths */
+            p->fine = (int8_t)clamp(p->fine + e, -HR_FINE_MAX, HR_FINE_MAX);
         } else if (enc == EN_K2) {
             p->tune = (int8_t)clamp(p->tune + e, -HR_TUNE_MAX, HR_TUNE_MAX);
         } else if (enc == EN_K3) {
@@ -408,6 +414,16 @@ static void dr_turn(uint32_t enc, int32_t e, uint32_t btn)
     case DF_PROG:                 /* K1: on or off (at once; SAVE keeps it) */
         if (enc == EN_K1 && (uint32_t)clamp((int32_t)set.dr_prog + e, 0, 1) != set.dr_prog) {
             set.dr_prog = (uint8_t)!set.dr_prog;
+            set_dirty = 1;
+        }
+        break;
+    case DF_MANUAL:               /* K1: on or off, the pads' sounds again at once (SAVE keeps it) */
+        if (enc == EN_K1 && (uint32_t)clamp((int32_t)set.dr_manual + e, 0, 1) != set.dr_manual) {
+            uint32_t f = plat_lock();
+            set.dr_manual = (uint8_t)!set.dr_manual;
+            hr_manual = set.dr_manual;
+            hr_sounds_apply(hr_snd.p);
+            plat_unlock(f);
             set_dirty = 1;
         }
         break;
@@ -483,6 +499,10 @@ static void dr_rec(uint32_t btn)
         uint32_t sp = hr_snd.p;
         if (sp >= SQ_PATTERNS) {
             app_say("NO PATTERN", "GLOBAL SOUNDS");   /* (none: the pads have the global set-up's) */
+            return;
+        }
+        if (hr_manual) {          /* (every pattern the global set-up's: none of their own kept or let go) */
+            app_say("MANUAL V/T/M ON", "NOT PER PATTERN");
             return;
         }
         t[0] = 0;
@@ -730,7 +750,7 @@ static void dr_draw(int sel_held)
             fmt_uint(n + 4, hr_snd.p, 2, '0');
             str_cat(n, hr_snd.edited ? "*" : "");
         } else {
-            str_cat(n, "GLOBAL");
+            str_cat(n, hr_manual ? "MANUAL" : "GLOBAL");
         }
         ed_lr(t, l, n);
         lcd_row(0, t);
@@ -774,6 +794,11 @@ static void dr_draw(int sel_held)
     case DF_PROG:                 /* "PROGRAM CHANGE" / "PATT SELECT  OFF", as the HR-16's */
         lcd_row(0, "PROGRAM CHANGE");
         ed_lr(t, "PATT SELECT", set.dr_prog ? "ON" : "OFF");
+        lcd_row(1, t);
+        return;
+    case DF_MANUAL:               /* "MANUAL VOICE/" / "TUNE/MIX:    OFF", as the HR-16's */
+        lcd_row(0, "MANUAL VOICE/");
+        ed_lr(t, "TUNE/MIX:", set.dr_manual ? "ON" : "OFF");
         lcd_row(1, t);
         return;
     case DF_DUMP:                 /* "MIDI DUMP  HR-16" / "REC SENDS ALL" */
@@ -831,9 +856,13 @@ static void dr_status(void)
         if (nm[0] == 'P' && nm[1] == 'A' && nm[2] == 'D' && nm[3] == ' ') {
             n[0] = nm[4], n[1] = nm[5], n[2] = 0;   /* a pad the kit doesn't name: its number */
         } else {
-            n[0] = nm[0];         /* its name's first three */
+            uint32_t k = 0;
+            while (nm[k])
+                k++;
+            n[0] = nm[0];         /* its name's first three; one longer ending in a digit, the first two and it
+                                   * (TOM1 TO1, PERC3 PE3) */
             n[1] = nm[0] ? nm[1] : 0;
-            n[2] = n[1] ? nm[2] : 0;
+            n[2] = n[1] ? (k > 3u && nm[k - 1u] >= '0' && nm[k - 1u] <= '9' ? nm[k - 1u] : nm[2]) : 0;
             n[3] = 0;
         }
         cv_text(x + 3, y + 3, &FONT_XS, n, lit || chosen || has ? C_BLACK : C_GRAY);
@@ -885,6 +914,30 @@ static const char *patt_under(char *t, uint32_t p)
     return t;
 }
 
+/* PAD SOUND's panel: the pad's TUNE and FINE large, and the two as semitones ("+0.56": an HR-16's step up) */
+static void dr_tune_panel(const hr_pad_t *pd)
+{
+    char n[12], t[16];
+    int32_t s = pd->tune * 16 + pd->fine, a = s < 0 ? -s : s;
+    cv_text(8, 0, &FONT_XS, "TUNE  K2", C_GRAY);
+    fmt_signed(n, pd->tune, 0);
+    cv_text(8, 14, &FONT_L, n, C_HI);
+    cv_text(8, 48, &FONT_XS, "SEMITONES", C_GRAY);
+    cv_text(96, 0, &FONT_XS, "FINE  SEL+K2", C_GRAY);
+    fmt_signed(n, pd->fine, 0);
+    cv_text(96, 14, &FONT_L, n, pd->fine ? C_HI : C_DIM);
+    cv_text(96, 48, &FONT_XS, "16THS", C_GRAY);
+    t[0] = 0;                     /* (sixteenths as hundredths: each of the 16 its own) */
+    str_cat(t, s < 0 ? "-" : "+");
+    fmt_uint(n, (uint32_t)(a / 16), 0, ' ');
+    str_cat(t, n);
+    str_cat(t, ".");
+    fmt_uint(n, (uint32_t)((a % 16 * 100 + 8) / 16), 2, '0');
+    str_cat(t, n);
+    cv_text(184, 18, &FONT_XS, "IN ALL", C_GRAY);
+    cv_text(184, 32, &FONT_XS, t, pd->fine ? C_HI : C_GRAY);
+}
+
 /* the panel under the strip (pages_seq.c's): the pattern playing and the next, large. Its own loop: PRESET queues the
  * next for the end of the one playing; in a song, each step's pattern, the next step's after it */
 static void dr_panel(void)
@@ -895,6 +948,11 @@ static void dr_panel(void)
     uint16_t next_c = C_DIM;
     const char *next_under = 0;
     panel_begin();
+    if (dr.fn == DF_SOUND && dr.pad < HR_PADS) {   /* the pad's tuning: TUNE (K2) and FINE (SEL + K2) */
+        dr_tune_panel(&hr_pad[dr.pad]);
+        panel_end();
+        return;
+    }
     if (dr.fn) {                  /* a function's page: its own, nothing here */
         panel_end();
         return;

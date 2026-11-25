@@ -7,13 +7,16 @@
 #include "fastmath.h"
 #include "../s700/s7bank.h"
 
-#if defined(__has_include)
+/* the kit built in: the host simulator's and the browser emulator's, which have no slot for samples built in, the
+ * kit a release package brings there (fm1.toml gen: tools/mkkit.py from resources/kit). The FM-1's own has none: its
+ * kit comes with the samples built in (hr_kit_bank) */
+#if defined(PLAT_HOST) && defined(__has_include)
 #if __has_include("hr_kit.h")
-#include "hr_kit.h"               /* the build's (fm1.toml gen: tools/mkkit.py from resources/kit) */
+#include "hr_kit.h"
 #endif
 #endif
 #ifndef HR_KIT_N
-#define HR_KIT_N 0u               /* none (the unit tests: hr_kit_use): the pads play the sampler's slots, or nothing */
+#define HR_KIT_N 0u               /* none (the FM-1, the unit tests: hr_kit_use): the pads play the sampler's slots */
 #define HR_KIT_PADS 0u
 static const hr_kit_sound_t HR_KIT[1];
 static const hr_kit_pad_t HR_KIT_PAD[1];
@@ -23,6 +26,7 @@ hr_pad_t hr_pad[HR_PADS];
 hr_pad_t hr_std[HR_PADS];
 volatile uint32_t hr_lit;
 volatile hr_snd_t hr_snd = {0xFFu, 0u, 0u};
+volatile uint8_t hr_manual;
 
 static const hr_kit_sound_t *kit = HR_KIT;
 static uint32_t kit_n = HR_KIT_N;
@@ -40,13 +44,26 @@ void hr_kit_use(const hr_kit_sound_t *s, uint32_t n, const hr_kit_pad_t *pads, u
 /* a bank's kit (s700/s7bank.h), its sounds and pads as the built-in kit's: read in place, the names too */
 static hr_kit_sound_t bank_sound[S7B_KIT_SOUNDS];
 static hr_kit_pad_t bank_pad[S7B_KIT_PADS];
+#ifdef HR_KIT_ID                  /* the kit built in, as its contents (mkkit.py's CRC folded): another one built in,
+                                   * the pads saved with the last are its set-up again, as with a bank's kit */
+#define KIT_TAG_BUILT ((HR_KIT_ID ^ HR_KIT_ID >> 16) & 0xFFFFu)
+static uint16_t kit_tag = KIT_TAG_BUILT == 0u || KIT_TAG_BUILT == HR_KIT_BUILT_IN ? 1u : KIT_TAG_BUILT;
+#else
 static uint16_t kit_tag = HR_KIT_BUILT_IN;
+#endif
 
-void hr_kit_bank(const s7_bank_t *b)
+void hr_kit_bank(const s7_bank_t *b, int keep)
 {
     uint32_t i;
-    if (!b || !b->base || !(b->kit_sounds || b->kit_pads))
-        return;                   /* (the one built in stays) */
+    if (!b || !b->base)
+        return;                   /* (no samples built in: the kit built in stays) */
+    if (!(b->kit_sounds || b->kit_pads)) {   /* samples built in without a kit: none (as on the FM-1) */
+        if (keep)
+            return;
+        hr_kit_use(bank_sound, 0, bank_pad, 0);
+        kit_tag = HR_KIT_BUILT_IN;
+        return;
+    }
     for (i = 0; i < b->kit_sounds; i++) {
         const s7_bank_sound_t *s = s7bank_sound(b, i);
         bank_sound[i].data = b->base + s->at;
@@ -67,6 +84,8 @@ void hr_kit_bank(const s7_bank_t *b)
         p->group = q->group;
         p->poly = q->poly;
         p->send = 0;
+        p->fine = q->fine;        /* (out of range: hr_pads_rekit, hr_pad_default) */
+        p->hr16 = 0;
     }
     hr_kit_use(bank_sound, b->kit_sounds, bank_pad, b->kit_pads);
     kit_tag = (uint16_t)(b->kit_id ^ b->kit_id >> 16);
@@ -112,8 +131,9 @@ const char *hr_pad_name(uint32_t pad)
     return t[pad];
 }
 
-/* the notes a pad beyond the kit's takes: General MIDI's drums, the first one no pad before it has */
-static const uint8_t GM_NOTES[] = {36, 38, 42, 46, 49, 51, 37, 39, 41, 43, 45, 47, 48, 50, 54, 56, 44, 40, 52, 53};
+/* the notes a pad beyond the kit's takes: General MIDI's drums, the first one no pad before it has (pad 7 the
+ * HR-16's MID HAT, its note and GM's pedal hat, 44) */
+static const uint8_t GM_NOTES[] = {36, 38, 42, 46, 49, 51, 44, 39, 41, 43, 45, 47, 48, 50, 54, 56, 37, 40, 52, 53};
 
 void hr_pad_default(uint32_t pad)
 {
@@ -126,10 +146,15 @@ void hr_pad_default(uint32_t pad)
         *p = kit_pad[pad].pad;
         if (p->sound != HR_NO_SOUND && p->sound >= kit_n + S7_SLOTS)
             p->sound = HR_NO_SOUND;
+        if (p->fine > HR_FINE_MAX || p->fine < -HR_FINE_MAX)
+            p->fine = 0;
+        p->hr16 = 0;
         return;
     }
     p->sound = HR_NO_SOUND;
     p->tune = 0;
+    p->fine = 0;
+    p->hr16 = 0;
     p->level = 85;
     p->pan = 0;
     p->group = 0;
@@ -146,6 +171,12 @@ void hr_pad_default(uint32_t pad)
     }
 }
 
+uint32_t hr_kit_pad_sound(uint32_t pad)
+{
+    uint32_t s = pad < kit_pads ? kit_pad[pad].pad.sound : HR_NO_SOUND;
+    return s < kit_n + S7_SLOTS ? s : HR_NO_SOUND;
+}
+
 void hr_pads_rekit(uint32_t was)
 {
     uint32_t i;
@@ -159,6 +190,10 @@ void hr_pads_rekit(uint32_t was)
             p->sound = HR_NO_SOUND;   /* (a sound the kit no longer has) */
         if (p->tune > HR_TUNE_MAX || p->tune < -HR_TUNE_MAX)
             p->tune = 0;
+        if (p->fine > HR_FINE_MAX || p->fine < -HR_FINE_MAX)
+            p->fine = 0;
+        if (p->hr16 > HR_HR16_SOUNDS)
+            p->hr16 = 0;
         if (p->level > 99u)
             p->level = 99u;
         if (p->pan > HR_PAN_MAX || p->pan < -HR_PAN_MAX)
@@ -187,30 +222,38 @@ static uint8_t sound_from(uint32_t c)
 
 static int8_t in_range(int8_t v, int32_t max) { return v > max || v < -max ? 0 : v; }
 
-/* pad i's sound, tuning, level and pan, as pattern sounds d keep them, into x */
-static void take(hr_pad_t *x, const uint8_t *d, uint32_t i)
+/* pad i's sound, tuning, level and pan, as pattern sounds d (n bytes) keep them, into x */
+static void take(hr_pad_t *x, const uint8_t *d, uint32_t n, uint32_t i)
 {
-    d += 4u * i;
-    x->sound = sound_from(d[0]);
-    x->tune = in_range((int8_t)d[1], HR_TUNE_MAX);
-    x->level = d[2] > 99u ? 99u : d[2];
-    x->pan = in_range((int8_t)d[3], HR_PAN_MAX);
+    const uint8_t *e = d + 4u * i;
+    x->sound = sound_from(e[0]);
+    x->tune = in_range((int8_t)e[1], HR_TUNE_MAX);
+    x->level = e[2] > 99u ? 99u : e[2];
+    x->pan = in_range((int8_t)e[3], HR_PAN_MAX);
+    x->fine = n >= SQ_SOUNDS_FINE ? in_range((int8_t)d[SQ_SOUNDS_LEN + i], HR_FINE_MAX) : 0;
+    x->hr16 = n >= SQ_SOUNDS_HR16 && d[SQ_SOUNDS_FINE + i] <= HR_HR16_SOUNDS ? d[SQ_SOUNDS_FINE + i] : 0u;
 }
 
-int hr_sounds_own(uint32_t p) { return p < SQ_PATTERNS && sq_len(SQ_PSND(p)) == SQ_SOUNDS_LEN; }
+int hr_sounds_own(uint32_t p)
+{
+    uint32_t n = p < SQ_PATTERNS ? sq_len(SQ_PSND(p)) : 0u;
+    return n == SQ_SOUNDS_LEN || n == SQ_SOUNDS_FINE || n == SQ_SOUNDS_HR16;
+}
 
 void hr_sounds_apply(uint32_t p)
 {
-    int own = hr_sounds_own(p);
+    int own = hr_sounds_own(p) && !hr_manual;
     const uint8_t *d = own ? sq_data(SQ_PSND(p)) : 0;
-    uint32_t i;
+    uint32_t i, n = own ? sq_len(SQ_PSND(p)) : 0u;
     for (i = 0; i < HR_PADS; i++) {
         hr_pad_t *x = &hr_pad[i];
         if (own) {
-            take(x, d, i);
+            take(x, d, n, i);
         } else {
             x->sound = hr_std[i].sound;
             x->tune = hr_std[i].tune;
+            x->fine = hr_std[i].fine;
+            x->hr16 = hr_std[i].hr16;
             x->level = hr_std[i].level;
             x->pan = hr_std[i].pan;
         }
@@ -224,12 +267,13 @@ void hr_sounds_apply(uint32_t p)
 static int differs(uint32_t p)
 {
     const uint8_t *d = sq_data(SQ_PSND(p));
-    uint32_t i;
+    uint32_t i, n = sq_len(SQ_PSND(p));
     hr_pad_t x;
     for (i = 0; i < HR_PADS; i++) {
         const hr_pad_t *y = &hr_pad[i];
-        take(&x, d, i);
-        if (x.sound != y->sound || x.tune != y->tune || x.level != y->level || x.pan != y->pan)
+        take(&x, d, n, i);
+        if (x.sound != y->sound || x.tune != y->tune || x.fine != y->fine || x.level != y->level ||
+            x.pan != y->pan || x.hr16 != y->hr16)
             return 1;
     }
     return 0;
@@ -251,6 +295,8 @@ void hr_pad_changed(uint32_t pad)
     }
     g->sound = p->sound;
     g->tune = p->tune;
+    g->fine = p->fine;
+    g->hr16 = p->hr16;
     g->level = p->level;
     g->pan = p->pan;
 }
@@ -266,8 +312,8 @@ static void again(uint32_t p)
 
 int hr_sounds_put(uint32_t p, const hr_pad_t *pads)
 {
-    uint8_t b[SQ_SOUNDS_LEN];
-    uint32_t i;
+    uint8_t b[SQ_SOUNDS_HR16];
+    uint32_t i, fine = 0, hr16 = 0;
     if (p >= SQ_PATTERNS)
         return -1;
     for (i = 0; i < HR_PADS; i++) {
@@ -276,8 +322,13 @@ int hr_sounds_put(uint32_t p, const hr_pad_t *pads)
         b[4u * i + 1u] = (uint8_t)x->tune;
         b[4u * i + 2u] = x->level;
         b[4u * i + 3u] = (uint8_t)x->pan;
+        b[SQ_SOUNDS_LEN + i] = (uint8_t)x->fine;
+        b[SQ_SOUNDS_FINE + i] = x->hr16;
+        fine |= b[SQ_SOUNDS_LEN + i];
+        hr16 |= x->hr16;
     }
-    return sq_replace(SQ_PSND(p), b, SQ_SOUNDS_LEN);
+    /* (none of either: as before them) */
+    return sq_replace(SQ_PSND(p), b, hr16 ? SQ_SOUNDS_HR16 : fine ? SQ_SOUNDS_FINE : SQ_SOUNDS_LEN);
 }
 
 void hr_sounds_get(uint32_t p, hr_pad_t *pads)
@@ -287,7 +338,7 @@ void hr_sounds_get(uint32_t p, hr_pad_t *pads)
     for (i = 0; i < HR_PADS; i++) {
         pads[i] = hr_std[i];
         if (own)
-            take(&pads[i], sq_data(SQ_PSND(p)), i);
+            take(&pads[i], sq_data(SQ_PSND(p)), sq_len(SQ_PSND(p)), i);
     }
 }
 
@@ -318,15 +369,16 @@ int hr_sounds_drop(uint32_t p)
 
 int hr_sounds_copy(uint32_t a, uint32_t b)
 {
-    uint8_t t[SQ_SOUNDS_LEN];
-    uint32_t i;
+    uint8_t t[SQ_SOUNDS_HR16];
+    uint32_t i, n;
     if (a == b || a >= SQ_PATTERNS || b >= SQ_PATTERNS)
         return 0;
     if (!hr_sounds_own(a))
         return hr_sounds_drop(b);
-    for (i = 0; i < SQ_SOUNDS_LEN; i++)   /* (out of the arena: sq_replace moves it) */
+    n = sq_len(SQ_PSND(a));
+    for (i = 0; i < n; i++)       /* (out of the arena: sq_replace moves it) */
         t[i] = sq_data(SQ_PSND(a))[i];
-    if (sq_replace(SQ_PSND(b), t, SQ_SOUNDS_LEN) != 0)
+    if (sq_replace(SQ_PSND(b), t, n) != 0)
         return -1;
     again(b);
     return 0;
@@ -415,7 +467,8 @@ void hr_hit(uint32_t pad, uint32_t vel)
     gl = pd->pan > 0 ? g * (float)(HR_PAN_MAX - pd->pan) / (float)HR_PAN_MAX : g;
     gr = pd->pan < 0 ? g * (float)(HR_PAN_MAX + pd->pan) / (float)HR_PAN_MAX : g;
     send = (float)pd->send / 99.0f;
-    s7_drum_start(v, s, slot, (float)pd->tune, gl, gr, g * send * send);   /* (the send a fader's, as the level) */
+    s7_drum_start(v, s, slot, (float)pd->tune + (float)pd->fine / 16.0f, gl, gr,
+                  g * send * send);   /* (the send a fader's, as the level) */
     vpad[v] = (uint8_t)pad;
 }
 

@@ -75,7 +75,7 @@ A bank holds up to 16 samples for the sampler's slots, a drum kit for the HR-16,
    | 12 | 1 | Its MIDI note, 0-127, in and out on the drum channel |
    | 13 | 1 | Group, 0-9: a hit cuts the others of its group (the hats) |
    | 14 | 1 | Voices at once: 1 (a hit cuts the last) or 2 (the cymbals) |
-   | 15 | 1 | 0 |
+   | 15 | 1 | FINE: sixteenths of a semitone more, -16..16 (signed; the sampler's FINE, an HR-16 tuning step is 9). Banks made before SM-87 had it kept 0 here |
 
 4. The packed words: the samples' in their entries' order, then the kit's sounds'. Each is packed two words to three
    bytes (`app/s700/s7.h`: word `a` then `b` as `a & 0xFF`, `a >> 8 | (b & 15) << 4`, `b >> 4`; an odd count padded
@@ -105,16 +105,19 @@ At boot the firmware takes the bank only if:
 - each entry checks: its words and their place, its name's NULs, a sample's slot, a sound's rate code and velocity,
   a pad's sound and the ranges above.
 
-Otherwise it plays none of it: the slots get the test tone, as an X7000 without samples, and the drums the
-firmware's own kit. Format 1 had no kit, and had its 12 bytes at 16 as 0.
+Otherwise it plays none of it: the slots get the test tone, as an X7000 without samples, and the drums no kit (the
+firmware has none of its own). Format 1 had no kit, and had its 12 bytes at 16 as 0.
 
 The bank's CRC-32 names it in the saved sample directory. A different bank empties the slots the last one filled,
 then fills the empty ones.
 
 ### The kit
 
-A bank with a kit (`kit_sounds` or `kit_pads` not 0) replaces the kit the firmware was built with
-(`resources/kit`), its sounds and its pads together. A pad's sound can also be one of the sampler's slots, as on the
+A bank's kit (`kit_sounds` or `kit_pads` not 0) is the drum machine's, its sounds and its pads together: the
+firmware has none of its own. A release package's bank holds the HR-16's (`resources/kit`, put in by the release
+workflow: `tools/mkrom.py PACKAGE --kit resources/kit/kit.txt`). A bank without one leaves the drums without a kit.
+The host simulator and the browser emulator have the HR-16's built in, which a kit in `app/rom/emu_bank.h` replaces
+(one without keeps it) and a package's (**Load .fwsc**) replaces as on the FM-1. A pad's sound can also be one of the sampler's slots, as on the
 drum page's PAD SOUND. Pads after `kit_pads` have no sound, each on the first General MIDI drum note no pad before it
 has.
 
@@ -122,9 +125,10 @@ The settings keep the pads' set-up (PAD SOUND, PAD MIDI) and which kit it was ma
 entries' CRC-32 folded. When the kit changes, the pads take the new kit's set-up. A pattern's own sounds (VOICE,
 TUNE, MIX) keep the kit's sounds by number, so after a change they play whatever the new kit has at those numbers.
 
-An HR-16 dump coming in gives each drum a sound of its kind from the kit, found by its name's start: `KICK`,
-`SNARE`, `TOM`, `CLHAT`, `OPHAT`, `RIDE`, `CRASH`, `CLAP` (`CYMBL` for either cymbal). A kit's sounds named so get
-the HR-16's patterns played as they were meant.
+An HR-16 dump coming in plays each drum's sound as the kit's pad for that sound's drum has it: the drum whose sound
+it is as an HR-16 sets its drums up (the 24" power kick the KICK's, the tambourine PERC 3's), else the drum of its
+kind (any kick the KICK's). A kit whose pads are the HR-16's drums, each with a sound like the HR-16's, gets the
+HR-16's patterns played as they were meant. Names don't matter.
 
 The HR-16's 16 drums go on these pads (an HR-16 dump's hits do too: `app/hr16/hrdump.h` `HD_PAD`). For a full kit,
 `web/sm87bank.js` has them as `HR16_DRUMS`, with a name, General MIDI note, group and voices for each, and
@@ -161,7 +165,8 @@ first keygroup becomes its pad and a sound:
   so an HR-16 dump finds it.
 - **The pad's tuning:** C3 (60) less the keygroup's root key, plus its transpose (with CONSTANT PITCH, the transpose
   alone), in semitones: -24..24. The pad plays the sample as the tool plays it on C3, so a new keygroup (root C3)
-  is the sample at its own pitch, and the root or the transpose tunes it. A pad has no cents (fine tuning).
+  is the sample at its own pitch, and the root or the transpose tunes it. A pad also has a FINE (sixteenths, offset
+  15), which Axs7 doesn't fill yet: the keygroup's FINE is left out.
 - **The pad's level:** the drum's own LEVEL (Axs7 keeps one with each drum's program), else its sample's LOUDNESS,
   0-99. A pad's level and the sampler's LOUDNESS take the same curve (`s7_level_db`), so the drum is as loud as the
   sampler would play the sample at that LOUDNESS, and two drums playing one sound can each have a level.

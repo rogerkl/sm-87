@@ -149,7 +149,7 @@ int hr_copy(uint32_t a, uint32_t b, uint8_t *scratch)
     if (!na && !sq.pattern[a].beats)
         return SQ_E_NONE;
     if (!nb) {                    /* b without hits: a copy of a, its sounds too (the HR-16's) */
-        uint32_t snd = hr_sounds_own(a) ? SQ_SOUNDS_LEN : 0u;
+        uint32_t snd = hr_sounds_own(a) ? sq_len(SQ_PSND(a)) : 0u;
         if (a == b)
             return 0;
         if (na + snd > sq_free() + sq_len(SQ_PSND(b)))

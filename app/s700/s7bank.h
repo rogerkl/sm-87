@@ -7,7 +7,8 @@
  * them to the slots as their factory contents.
  *
  * A bank may hold a drum kit too: sounds of the HR-16's own, apart from the sampler's slots, and its pads' set-up. It
- * then replaces the kit the firmware was built with (hr16/hrkit.c hr_kit_bank).
+ * is then the drum machine's (hr16/hrkit.c hr_kit_bank): the firmware has none of its own, and a release package's
+ * bank holds the HR-16's (resources/kit). Without one the pads play the sampler's slots only.
  *
  * Little-endian, every part 4-byte aligned. From the bank's first byte:
  *   count samples (s7_bank_entry_t, 188 bytes each)
@@ -54,7 +55,7 @@ typedef struct {                  /* a pad as the kit sets it up (hr16/hr.h hr_p
     uint8_t note;                 /* its MIDI note, 0..127 */
     uint8_t group;                /* 0, or a group (0..9): a hit cuts the others of its group */
     uint8_t poly;                 /* its voices at once: 1 or 2 */
-    uint8_t rsv;
+    int8_t fine;                  /* its tuning's sixteenths of a semitone, -16..16 (0 in a bank made before it) */
 } s7_bank_pad_t;
 
 typedef struct {
@@ -62,7 +63,7 @@ typedef struct {
     uint16_t version, count;
     uint32_t size;                /* the bank's bytes below the footer */
     uint32_t crc;                 /* their CRC-32 (zlib's) */
-    uint16_t kit_sounds, kit_pads;   /* a kit: both 0 for none (the firmware's own stays) */
+    uint16_t kit_sounds, kit_pads;   /* a kit: both 0 for none */
     uint32_t rsv[2];              /* 0 */
     uint32_t fcrc;                /* the CRC-32 of the footer's 28 bytes before it */
 } s7_bank_foot_t;

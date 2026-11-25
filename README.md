@@ -114,12 +114,14 @@ That example is a piano split over 5 samples, the double bass on keys 36-52 in p
 Don't take the disk images in Axs7's `web/test/fixtures` for one: their audio is a test ramp through every 12-bit
 value, a buzz that follows the pitch. `mkrom.py` refuses more than the slot has room for.
 
-A drum kit can go in too, replacing the one the firmware was built with: `--kit` takes a list in
+The drum kit goes in the same way: the firmware has no kit of its own. `--kit` takes a list in
 `resources/kit/kit.txt`'s form (*The drum kit*), its WAV files beside it. Up to 64 sounds and 16 pads. Its sounds
-are the drum machine's own and take no sampler slot. Without `--kit` the firmware's own kit plays: each run puts in
-the whole, samples and kit as it is told.
+are the drum machine's own and take no sampler slot. A release package comes with the HR-16's
+(`resources/kit/kit.txt`) already in, but each run puts in the whole, samples and kit as it is told: without
+`--kit` the package has no kit, and the drum pads play only what PAD SOUND gives them of the sampler's slots.
 
     .venv/bin/python tools/mkrom.py sm87.fwsc piano.wav@1 --kit ../my-kit/kit.txt
+    .venv/bin/python tools/mkrom.py sm87.fwsc piano.wav@1 --kit resources/kit/kit.txt   (the HR-16's kit kept)
 
 The samples and kit are in that package only: a new firmware comes without them, so put them into its package too.
 The firmware checks them at boot (their CRC), and plays none from a damaged package. When the kit changes, the pads
@@ -137,10 +139,12 @@ HR-16's 16 drums, `HR16_DRUMS` says which pad each goes on (where an HR-16 dump 
 `hr16Pads` makes the pads. It gives `mkrom.py`'s bytes (`test/bank_js_test.mjs`); Axs7 keeps a copy, and its tests
 check the copy is this one.
 
-The host simulator and the browser emulator have no firmware slot. For them, `mkrom.py --emu FILE ... [--kit KIT]`
-writes `app/rom/emu_bank.h` (not in the repository: the sounds aren't ours to publish), built in while it exists;
-`--emu --none` removes it. `test/run.sh` sets it aside while it runs and puts it back. The emulator can also play a
-package's, with no build: its **Load .fwsc** (below).
+The host simulator and the browser emulator have no firmware slot. They have the HR-16's kit built in, as a release
+package brings it. For them, `mkrom.py --emu FILE ... [--kit KIT]` writes `app/rom/emu_bank.h` (not in the
+repository: the sounds aren't ours to publish), built in while it exists; its kit replaces the HR-16's, and without
+one the HR-16's stays. `--emu --none` removes it. `test/run.sh` sets it aside while it runs and puts it back. The
+emulator can also play a package's, with no build: its **Load .fwsc** (below), as the FM-1 would, so a package
+without a kit plays no drums there.
 
 #### Getting the most samples in
 
@@ -148,10 +152,10 @@ The FM-1 keeps samples in two places, and a full set uses both:
 
 | | Room | Filled by | Kept |
 |---|---|---|---|
-| Built in, in the firmware's slot | 372 KB, beside the firmware (159 KB) and the drum kit (37 KB) | `mkrom.py`, then installing the package | Each to the byte, plus 188 bytes for its settings. Until another firmware is installed |
+| Built in, in the firmware's slot | 296 KB beside the firmware (272 KB); a release package's drum kit takes 207 KB of it | `mkrom.py`, then installing the package | Each to the byte, plus 188 bytes for its settings. Until another firmware is installed |
 | The sample pool | 292 KB (FREE on the sampler's strip) | Sample dumps over USB at any time: Axs7, or an X7000 through it | In whole 4 KB sectors. Saved by themselves 3 s after the transfer |
 
-That's about 664 KB in all, 13 full-length samples of 48 KB, in the sampler's 16 slots, which the two share. A dump
+That's about 588 KB in all, 12 full-length samples of 48 KB, in the sampler's 16 slots, which the two share. A dump
 to a slot with a built-in sample takes pool space and leaves the built-in one unused until the next install.
 
 - **Short sounds built in.** The pool rounds each sample up to whole sectors, so a 1 KB hit takes 4 KB there.
@@ -165,9 +169,10 @@ to a slot with a built-in sample takes pool space and leaves the built-in one un
 - **One sample over many keys.** With short sounds the 16 slots run out before the memory does. One sample can play
   over a whole key range, and in several programs with a transpose each, as the S700's keygroups do. Axs7 sets them
   and saves them in its WAV files, which `mkrom.py` takes as they are.
-- **The kit shares the slot.** The drum kit (`resources/kit`) takes 37 KB of the same room. Fewer, shorter or
-  lower-rate kit sounds leave more for samples (that one takes a build), and a drum pad can play a sampler slot too
-  (PAD SOUND).
+- **The kit shares the room.** The drum kit is built in with the samples. A release package's, the HR-16's
+  (`resources/kit`), takes 207 KB, leaving 89 KB beside it. A package made again gets the kit it's given: the
+  HR-16's again (`--kit resources/kit/kit.txt`), one of fewer, shorter or lower-rate sounds, or none, which leaves
+  the whole room to samples. A drum pad can play a sampler slot too (PAD SOUND).
 - **The room is the package's.** `mkrom.py PACKAGE.fwsc` says how much the firmware in it leaves. A later firmware
   may leave a little less. The effect's code takes about 95 KB of it; a build without it (`SM87_FX` 0 in
   `app/config.h`) leaves that for samples.
@@ -182,18 +187,24 @@ Then send the rest to the pool from Axs7 over USB, as to an X7000 (*In the brows
 
 ### The drum kit
 
-The drum machine's sounds are in `resources/kit`: the WAV files, and `kit.txt`, the list of them.
+The drum machine's kit is the HR-16's own, in `resources/kit`: the WAV files, and `kit.txt`, the list of them. Its
+16 drums each have the sound, level and pan an HR-16 sets them up with (its V1.09's new pattern), the sounds from an
+Axs7 memory dump of them, each from START to END.
 - `sound` lines name a WAV file in the folder.
-- `pad` lines set up the pads in order: a sound, tuning, level, pan, note, group and voices.
+- `pad` lines set up the pads in order: a sound, tuning (semitones, and a FINE in sixteenths), level, pan, note,
+  group and voices.
 
-Every build makes the kit into a header of its own (`fm1.toml`'s `gen` runs `tools/mkkit.py`), so a change to the
-folder is in the next build. Run by hand, `mkkit.py` reports what the kit holds and takes:
+The firmware has no kit of its own. A release package brings this one as samples built in: the release workflow runs
+`tools/mkrom.py PACKAGE --kit resources/kit/kit.txt`, so it takes 207 KB of the package's room (*Samples built in*),
+and a package made again replaces it. A build of your own comes without it: put it in the same way. The host
+simulator and the browser emulator, which have no slot, have it built into them (`fm1.toml`'s `gen` runs
+`tools/mkkit.py`), so a change to the folder is in their next build. Run by hand, `mkkit.py` reports what the kit holds
+and takes:
 
     .venv/bin/python tools/mkkit.py
 
-The kit's sounds (37 KB now) are part of the firmware's image, so they take from the room `tools/mkrom.py` has for
-samples in the slot (568 KB in all). It is the minimal kit every build has. Another kit, of up to 64 sounds and all
-16 pads, goes into a package without a build: `tools/mkrom.py --kit` takes a list of this form (*Samples built in*).
+Another kit, of up to 64 sounds and all 16 pads, goes into a package the same way: `tools/mkrom.py --kit` takes a
+list of this form.
 
 The kit is designed to grow:
 - A pad keeps its sound by number, so add new sounds at the end of the list.
@@ -333,7 +344,7 @@ For recovery if an install goes wrong:
 - MvaveFM1Unbricker.
 
 The first things to measure on a device, before more is built on these assumptions:
-- `plat_cpu_pct()` with 6 voices playing from the flash, and the 8 drum voices (the status strip shows CPU). Then
+- `plat_cpu_pct()` with 6 voices playing from the flash, and the 16 drum voices (the status strip shows CPU). Then
   with the sampler raised to 16 voices (GLO, VOICES), to find how many the FM-1 plays without breaking up.
 - `plat_xruns()`.
 - A full 66 KB dump from Axs7 over USB, checked bit for bit with RSD.

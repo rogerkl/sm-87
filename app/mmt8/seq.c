@@ -184,7 +184,8 @@ int sq_valid(void)
             return 0;
     for (i = 0; i < SQ_PATTERNS; i++)
         if (sq_len(SQ_PAT(i)) % SQ_HIT_LEN || sq.pattern[i].beats > SQ_MAX_BEATS ||
-            (sq_len(SQ_PSND(i)) && sq_len(SQ_PSND(i)) != SQ_SOUNDS_LEN))
+            (sq_len(SQ_PSND(i)) && sq_len(SQ_PSND(i)) != SQ_SOUNDS_LEN && sq_len(SQ_PSND(i)) != SQ_SOUNDS_FINE &&
+             sq_len(SQ_PSND(i)) != SQ_SOUNDS_HR16))
             return 0;
     return sum == sq.used;        /* every byte someone's, none twice */
 }

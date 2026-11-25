@@ -416,8 +416,8 @@ def hr16_waits(n):
 
 def hr16_memory(patterns, keep):
     """patterns {no: (beats, [(sound, level, pan << 5 | pitch)] for its 16 drums, [(clock, drum, dynamics)])}, keep
-    {address: byte}: the header's other bytes. Its events in time order; a clock's drums in the order of SM-87's pads,
-    as SM-87 sends them"""
+    {address: byte}: the header's other bytes. Its events in time order, a wait first (80H, none, for a hit on the
+    first clock: an HR-16's dumps have it); a clock's drums in the order of SM-87's pads, as SM-87 sends them"""
     mem = bytearray(0x400)
     for a, v in keep.items():
         mem[a] = v
@@ -426,12 +426,12 @@ def hr16_memory(patterns, keep):
         beats, voices, hits = patterns[p]
         mem[0x200 + 2 * p:0x202 + 2 * p] = (len(mem) + 0x8200).to_bytes(2, "big")
         pat = bytearray(0x34)
-        pat[2:4] = int(str(beats), 16).to_bytes(2, "little")
+        pat[2:4] = int(str(beats + 1), 16).to_bytes(2, "little")   # (the beats + 1 in BCD, as HR-16 dumps have them)
         for d, v in enumerate(voices):
             pat[4 + 3 * d:7 + 3 * d] = bytes(v)
         t = 0
         for clock, drum, dyn in sorted(hits, key=lambda h: (h[0], HR16_PAD[h[1]])):
-            pat += hr16_waits(clock - t)
+            pat += hr16_waits(clock - t) or (bytes([0x80]) if len(pat) == 0x34 else b"")
             t = clock
             pat.append(dyn << 4 | drum)
         pat += hr16_waits(beats * 96 - t) + bytes([0xFF])
@@ -446,11 +446,11 @@ def hr16_memory(patterns, keep):
 
 
 def hr16_test():
-    # each drum's sound, level, pan and pitch (the pitch's steps ones SM-87's semitones give back)
+    # each drum's sound, level, pan and pitch (its steps 9/16 of a semitone: TUNE and FINE)
     sounds = [7, 13, 24, 27, 26, 46, 32, 33, 18, 19, 20, 21, 29, 30, 42, 45]
     levels = [90, 80, 70, 60, 75, 85, 50, 55, 65, 66, 67, 68, 72, 99, 40, 0]
     pans = [3, 2, 4, 3, 1, 5, 0, 6, 3, 3, 3, 3, 4, 2, 3, 3]
-    pitch = [16, 18, 14, 16, 20, 16, 11, 16, 18, 16, 14, 16, 16, 16, 16, 16]
+    pitch = [16, 18, 14, 17, 20, 16, 11, 16, 18, 16, 14, 16, 16, 16, 16, 15]
     voices = [(sounds[d], levels[d], pans[d] << 5 | pitch[d]) for d in range(16)]
     patterns = {
         0: (2, voices, [(0, 0, 7), (0, 13, 5), (0, 3, 2), (48, 1, 6), (96, 2, 3), (100, 8, 4), (191, 15, 0)]),
@@ -499,26 +499,58 @@ def hr16_test():
         "expect drhvel2 95",
         "expect drhpad3 7",
         "expect drhvel3 47",
-        "# its sounds on the pads: kinds the kit has (a gated kick the KICK, a crash the cymbal, the foot hat the",
-        "# closed one), a tom none (the pad's own); levels, pans, tunings",
+        "# its sounds on the pads, each its drum's pad's in the kit (the HR-16's): a gated kick the KICK's, the",
+        "# crash the CRASH's, the foot hat the CLS HAT's, a 10\" power tom TOM 1's, a tambourine on PERC 2 PERC 3's;",
+        "# a cowbell none; levels, pans, tunings",
         "expect padsnd1 0",
         "expect padlevel1 90",
         "expect padpan1 0",
         "expect padsnd2 1",
         "expect padtune2 1",
         "expect padpan2 -1",
-        "expect padsnd5 4",
+        "expect padsnd5 13",
         "expect padlevel5 99",
         "expect padsnd7 2",
-        "expect padsnd9 -1",
+        "expect padsnd9 8",
+        "expect padsnd13 -1",
+        "expect padhr1613 42",
+        "expect padsnd14 6",
+        "expect padhr1614 45",
         "expect padtune9 1",
+        "expect padfine9 2",
         "expect padlevel9 65",
+        "# a step up, the MID HAT's: TUNE +1, FINE -7; a step down, PERC 2's (pad 14): -1, +7",
+        "expect padtune7 1",
+        "expect padfine7 -7",
+        "expect padtune14 -1",
+        "expect padfine14 7",
+        "# its notes the pads': the KICK on 35 (the HR-16's), the MID HAT (pad 7) 44, PERC 4 (pad 16) 61",
+        "expect padnote1 35",
+        "expect padnote7 44",
+        "expect padnote16 61",
         "wait 1300",
         "shot hr16_in.png",
-        "# MIDI DUMP (the drum page's last function): REC sends them back, byte for byte the dump that came",
+        "# MANUAL VOICE/TUNE/MIX (the function before MIDI DUMP): off as it came; on, every pattern plays the global",
+        "# set-up (the KICK's level 99, not pattern 00's 90; PERC 1 the kit's timbale, not none), off again its own",
+        "expect drmanual 0",
         "turn ALGO 9",
         "wait 30",
         "expect drfn 9",
+        "turn K1 1",
+        "wait 30",
+        "expect drmanual 1",
+        "expect padlevel1 99",
+        "expect padsnd13 14",
+        "turn K1 -1",
+        "wait 30",
+        "expect drmanual 0",
+        "expect padlevel1 90",
+        "expect padsnd13 -1",
+        "# MIDI DUMP (the drum page's last function): REC sends them back, byte for byte the dump that came (each",
+        "# drum's sound as it came)",
+        "turn ALGO 10",
+        "wait 30",
+        "expect drfn 10",
         "wait 1300",
         "shot hr16_dump.png",
         "sysex_out",

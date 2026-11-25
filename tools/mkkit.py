@@ -1,16 +1,19 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MPL-2.0
 # Copyright (C) 2026 Roger Klaveness
-"""The HR-16's drum kit built into the firmware, from resources/kit/kit.txt and the WAV files beside it.
+"""The HR-16's drum kit, from resources/kit/kit.txt and the WAV files beside it: the kit a release package brings.
 
-The build makes it (app/fm1.toml: gen = mkkit.py --out {gen}/hr_kit.h): a header of the kit's sounds and its pads'
-set-up, for app/hr16/hrkit.c. Run by hand, it tells what the kit holds and what it takes of the firmware's slot:
+The FM-1 gets it in its package, as samples built in (tools/mkrom.py PACKAGE --kit resources/kit/kit.txt: the release
+workflow puts it in); its firmware has no kit of its own. The host simulator and the browser emulator, which have no
+slot for samples built in, have it built into them: their build makes it (app/fm1.toml: gen = mkkit.py --out
+{gen}/hr_kit.h) a header of the kit's sounds and its pads' set-up, for app/hr16/hrkit.c. Run by hand, it tells what
+the kit holds and what it takes of a package's room for samples (mkrom.py's parse() reads the list too):
 
   .venv/bin/python tools/mkkit.py                       (resources/kit/kit.txt)
   .venv/bin/python tools/mkkit.py KIT [--dir DIR] [--out FILE]
 
 The sounds are the sampler's format: mono, 12 bits, packed two words to three bytes, at one of its 41 rates (a WAV at
-another is resampled to the nearest). They share the firmware's slot with the samples tools/mkrom.py puts in a package.
+another is resampled to the nearest).
 """
 import argparse
 import sys
@@ -51,7 +54,7 @@ def parse(path):
             pads.append({"name": plain[0], "sound": plain[1], "tune": int(opts.get("tune", 0)),
                          "level": int(opts.get("level", 85)), "pan": int(opts.get("pan", 0)),
                          "note": int(opts.get("note", 0)), "group": int(opts.get("group", 0)),
-                         "poly": int(opts.get("poly", 1)), "at": where})
+                         "poly": int(opts.get("poly", 1)), "fine": int(opts.get("fine", 0)), "at": where})
         else:
             raise SystemExit(f"{where}: not a sound or a pad: {line.strip()}")
     names = [s["name"] for s in sounds]
@@ -72,7 +75,7 @@ def parse(path):
         if not name_ok(p["name"]):
             raise SystemExit(f"{p['at']}: {p['name']}: a name of up to {NAME} characters, no \" \\ or */")
         for k, lo, hi in (("tune", -24, 24), ("level", 0, 99), ("pan", -3, 3), ("note", 0, 127), ("group", 0, 9),
-                          ("poly", 1, 2)):
+                          ("poly", 1, 2), ("fine", -16, 16)):
             if not lo <= p[k] <= hi:
                 raise SystemExit(f"{p['at']}: {k} {p[k]}: {lo}..{hi}")
         p["sound"] = names.index(p["sound"])
@@ -100,7 +103,7 @@ def main():
     sounds, pads = parse(a.kit)
     if not sounds:
         raise SystemExit(f"{a.kit}: no sounds")
-    lines = [f"/* The HR-16's drum kit, built into the firmware: made by tools/mkkit.py from {Path(a.kit).name}, do not",
+    lines = [f"/* The HR-16's drum kit, a release package's: made by tools/mkkit.py from {Path(a.kit).name}, do not",
              " * edit. The sounds:"]
     body, total, blob = [], 0, b""
     for i, s in enumerate(sounds):
@@ -125,7 +128,7 @@ def main():
         lines.append("static const hr_kit_pad_t HR_KIT_PAD[HR_KIT_PADS] = {")
         for p in pads:
             lines.append(f'    {{"{p["name"]}", {{{p["sound"]}u, {p["tune"]}, {p["level"]}u, {p["pan"]}, {p["note"]}u, '
-                         f'{p["group"]}u, {p["poly"]}u, 0u}}}},')
+                         f'{p["group"]}u, {p["poly"]}u, 0u, {p["fine"]}, 0u}}}},')
         lines += ["};", ""]
     else:
         lines += ["static const hr_kit_pad_t HR_KIT_PAD[1];", ""]
@@ -142,7 +145,9 @@ def main():
         print(f"sound {i}  {s['name']:6}  {s['words']:6} words  {mkrom.RATES[s['code']]:7.0f} Hz  "
               f"{s['words'] / mkrom.RATES[s['code']]:5.2f} s  peak {db:5.1f} dBFS")
     for i, p in enumerate(pads):
-        print(f"pad {i + 1:2}  {p['name']:6}  {sounds[p['sound']]['name']:6}  tune {p['tune']:+d}  note {p['note']}"
+        fine = f"{p['fine']:+d}/16" if p["fine"] else ""
+        print(f"pad {i + 1:2}  {p['name']:6}  {sounds[p['sound']]['name']:6}  tune {p['tune']:+d}{fine}  "
+              f"level {p['level']}  pan {p['pan']:+d}  note {p['note']}"
               + (f"  group {p['group']}" if p["group"] else "") + (f"  poly {p['poly']}" if p["poly"] > 1 else ""))
     print(f"{len(sounds)} sounds, {total / 1024:.1f} KB of the firmware's slot" + (f": {a.out}" if a.out else ""))
     print("(samples put into a package take what the firmware leaves: tools/mkrom.py PACKAGE.fwsc says how much)")

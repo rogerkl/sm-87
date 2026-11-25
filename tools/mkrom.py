@@ -14,7 +14,7 @@ samples out again, and gives the package back as it was built, byte for byte.
   .venv/bin/python tools/mkrom.py PACKAGE.fwsc [FILE ...] --kit KIT.txt
                                                                  a drum kit too, replacing the firmware's
   .venv/bin/python tools/mkrom.py PACKAGE.fwsc                   what it holds, and the room
-  .venv/bin/python tools/mkrom.py PACKAGE.fwsc --none            without samples (and the firmware's own kit)
+  .venv/bin/python tools/mkrom.py PACKAGE.fwsc --none            without samples or a kit (the package as built)
   .venv/bin/python tools/mkrom.py --emu FILE[@SLOT] ... [--kit KIT.txt]
                                                                  for the host simulator and the browser emulator
   .venv/bin/python tools/mkrom.py --emu --none
@@ -28,8 +28,9 @@ FILE is
     (documentation/akai-s700-x7000/05-quickdisk.md).
 
 KIT.txt is a drum kit's list in resources/kit/kit.txt's form (tools/mkkit.py), its WAV files beside it: up to 64
-sounds and 16 pads. It replaces the kit the firmware was built with, sounds and pads; without --kit the firmware's own
-plays. Each run makes the whole: samples and kit as it is told.
+sounds and 16 pads. The firmware has no kit of its own: a release package brings the HR-16's (resources/kit/kit.txt,
+put in by the release workflow). Each run makes the whole, samples and kit as it is told, so without --kit the package
+has none and the drum pads play the sampler's slots only: --kit resources/kit/kit.txt keeps the HR-16's.
 
 Up to 16 samples, of up to 32,752 words each, packed two words to three bytes, and the kit's sounds the same, in what
 the firmware leaves of its 581,564-byte slot (the package says how much: run it with the package alone).
@@ -307,18 +308,21 @@ BANK_VERSION = 2
 BANK_NAME = 24
 BANK_ENTRY = 188                  # <BBHI24s, the 155 values, a spare byte
 BANK_SOUND = 16                   # a kit's sound: <HBBI8s
-BANK_PAD = 16                     # a kit's pad: <8sBbBbBBBB
+BANK_PAD = 16                     # a kit's pad: <8sBbBbBBBb
 BANK_FOOT = 32
 KIT_SOUNDS, KIT_PADS, KIT_NAME = 64, 16, 6
 RATE_LO, RATE_HI = 36, 76
 DESC_MAGIC = b"SM87 S7 BANK"      # s7_bank_desc_t, in the firmware's image
-PAD_KEYS = ("sound", "tune", "level", "pan", "note", "group", "poly")
-PAD_RANGE = {"tune": (-24, 24), "level": (0, 99), "pan": (-3, 3), "note": (0, 127), "group": (0, 9), "poly": (1, 2)}
+PAD_KEYS = ("sound", "tune", "level", "pan", "note", "group", "poly", "fine")
+PAD_RANGE = {"tune": (-24, 24), "level": (0, 99), "pan": (-3, 3), "note": (0, 127), "group": (0, 9), "poly": (1, 2),
+             "fine": (-16, 16)}
+PAD_OPTIONAL = {"fine": 0}        # (a pad without it: 0; the byte a bank before it kept 0)
 
 
 def check_kit(kit):
     """a kit as bank() takes it: {"sounds": [{name, words, rate, vel}], "pads": [{name, sound, tune, level, pan,
-    note, group, poly}]}; SystemExit for one the firmware wouldn't take"""
+    note, group, poly, fine (sixteenths of a semitone, -16..16; 0 unless given)}]}; SystemExit for one the firmware
+    wouldn't take"""
     sounds, pads = kit["sounds"], kit["pads"]
     if len(sounds) > KIT_SOUNDS or len(pads) > KIT_PADS:
         raise SystemExit(f"a kit of {len(sounds)} sounds and {len(pads)} pads: at most {KIT_SOUNDS} and {KIT_PADS}")
@@ -332,8 +336,12 @@ def check_kit(kit):
         if not (q["sound"] == 0xFF or 0 <= q["sound"] < len(sounds) + 16):
             raise SystemExit(f"the kit's pad {q['name']}: sound {q['sound']}")
         for k, (lo, hi) in PAD_RANGE.items():
-            if not lo <= q[k] <= hi:
-                raise SystemExit(f"the kit's pad {q['name']}: {k} {q[k]}: {lo}..{hi}")
+            if not lo <= pad_value(q, k) <= hi:
+                raise SystemExit(f"the kit's pad {q['name']}: {k} {pad_value(q, k)}: {lo}..{hi}")
+
+
+def pad_value(q, k):
+    return q.get(k, PAD_OPTIONAL[k]) if k in PAD_OPTIONAL else q[k]
 
 
 def bank(items, kit=None):
@@ -360,7 +368,7 @@ def bank(items, kit=None):
         head += struct.pack("<HBBI8s", len(snd["words"]), snd["rate"], snd["vel"], put(snd["words"]),
                             snd["name"].encode())
     for q in pads:
-        head += struct.pack("<8sBbBbBBBB", q["name"].encode(), *(q[k] for k in PAD_KEYS), 0)
+        head += struct.pack("<8sBbBbBBBb", q["name"].encode(), *(pad_value(q, k) for k in PAD_KEYS))
     body = bytes(head + data)
     foot = struct.pack("<IHHIIHH8x", BANK_MAGIC, BANK_VERSION, len(items), len(body), zlib.crc32(body), len(sounds),
                        len(pads))
@@ -420,7 +428,7 @@ def bank_read(top):
         sounds.append({"name": name.rstrip(b"\0").decode("latin-1"), "words": words, "rate": rate, "vel": vel})
     o += nsnd * BANK_SOUND
     for i in range(npad):
-        name, *v = struct.unpack_from("<8sBbBbBBBB", body, o + i * BANK_PAD)
+        name, *v = struct.unpack_from("<8sBbBbBBBb", body, o + i * BANK_PAD)
         q = dict(zip(PAD_KEYS, v))
         if any(name[KIT_NAME:]) or not (q["sound"] == 0xFF or q["sound"] < nsnd + 16) or \
                 any(not lo <= q[k] <= hi for k, (lo, hi) in PAD_RANGE.items()):
@@ -631,7 +639,8 @@ def show(items, kit=None):
     for i, q in enumerate(kit["pads"]):
         snd = q["sound"]
         what = names[snd] if snd < len(names) else f"SLOT{snd - len(names) + 1:02}" if snd != 0xFF else "-----"
-        print(f"kit pad {i + 1:2}  {q['name'] or '-':6}  {what:6}  tune {q['tune']:+d}  level {q['level']}  "
+        fine = f"{q['fine']:+d}/16" if q.get("fine") else ""
+        print(f"kit pad {i + 1:2}  {q['name'] or '-':6}  {what:6}  tune {q['tune']:+d}{fine}  level {q['level']}  "
               f"pan {q['pan']:+d}  note {q['note']}" + (f"  group {q['group']}" if q["group"] else "")
               + (f"  poly {q['poly']}" if q["poly"] > 1 else ""))
 
@@ -694,9 +703,9 @@ def main():
         if c:
             show(c["samples"], c["kit"])
             print(f"{held(c['samples'], c['kit'])}, {kb(c['size'])}, {kb(pkg.room() - c['size'])} free"
-                  + ("" if c["kit"] else "; the firmware's own kit"))
+                  + ("" if c["kit"] else "; no drum kit"))
         else:
-            print("no samples; the firmware's own kit")
+            print("no samples, no drum kit")
         return
     items = [] if a.none else load_items(files)
     kit = load_kit(a.kit) if a.kit else None
@@ -706,7 +715,7 @@ def main():
     out.write_bytes(pkg.close())
     show(items, kit)
     print(f"{out}: {about}" + (f"; {held(items, kit)} in, {kb(len(b))}, {kb(pkg.room() - len(b))} free"
-                                if b else "; no samples") + ("" if kit else "; the firmware's own kit"))
+                                if b else "; no samples") + ("" if kit else "; no drum kit"))
 
 
 if __name__ == "__main__":

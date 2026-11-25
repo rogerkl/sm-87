@@ -6,8 +6,6 @@
 const uint8_t HD_PRE[HD_PREFIX] = {0xF0, 0x00, 0x00, 0x0E, HD_ID, HD_CMD_DUMP};
 const uint8_t HD_PAD[HD_DRUMS] = {0, 1, 2, 6, 3, 7, 14, 15, 8, 9, 10, 11, 5, 4, 12, 13};
 
-#define DRUM_RIDE 12u
-
 static uint32_t be16(const uint8_t *p) { return (uint32_t)p[0] << 8 | p[1]; }
 static uint32_t le16(const uint8_t *p) { return p[0] | (uint32_t)p[1] << 8; }
 static void put_be16(uint8_t *p, uint32_t v) { p[0] = (uint8_t)(v >> 8), p[1] = (uint8_t)v; }
@@ -23,91 +21,83 @@ static uint32_t to_bcd(uint32_t v) { return v % 10u | (v / 10u % 10u) << 4 | (v 
 int hd_has_header(void) { return sq.hr16[0xFE] == 0x27u && sq.hr16[0xFF] == 0xB5u; }
 
 /* ------------------------------------------------------------------------------------------------ sounds --- */
-/* its 49 sounds by kind (the HR-16's voice list): 00-09 kicks, 10-17 snares (a sidestick and a brush hit among them),
- * 18-22 toms, 23-27 hats (25, 26 open), 28-30 cymbals (two rides, a crash), 31-48 percussion, 46 the hand claps */
-enum { K_KICK, K_SNARE, K_TOM, K_CLHAT, K_OPHAT, K_RIDE, K_CRASH, K_CLAP, K_PERC, K_N };
+/* its drums, in its order (HD_PAD: our pads) */
+enum { KICK, SNARE, CLS, MID, OPN, CLAPS, PERC3, PERC4, TOM1, TOM2, TOM3, TOM4, RIDE, CRASH, PERC1, PERC2, NO = 0xFF };
+/* each of its sounds' drum: the one whose sound it is as an HR-16 sets its drums up (KICK the 24" power kick, PERC 3
+ * the tambourine ..), else the drum of its kind (any kick the KICK's, a tom by its size, the closed hats CLS HAT's,
+ * a conga the conga's); NO, a sound no drum has (a cowbell, the drum sticks). Ours plays it as its drum's pad: the
+ * HR-16's 49 (V1.09, documentation/hr16-sysex.md) */
+static const uint8_t HOME[HD_SOUNDS] = {
+    KICK,  KICK,  KICK,  KICK,  KICK,  KICK,  KICK,  KICK,  KICK,  KICK,    /* 00-09 the kicks */
+    SNARE, SNARE, SNARE, SNARE, SNARE, SNARE, SNARE, SNARE,                 /* 10-17 snares, rimshot, sidestick .. */
+    TOM1,  TOM3,  TOM1,  TOM2,  TOM4,                                       /* 18-22 10", 16", 10", 14", electronic */
+    CLS,   CLS,   MID,   OPN,   CLS,                                        /* 23-27 closed A, B, half open, open .. */
+    RIDE,  RIDE,  CRASH,                                                    /* 28-30 ride, its bell, crash */
+    PERC1, PERC2, PERC2,                                                    /* 31-33 timbale, high and low conga slap */
+    NO,    NO,    NO,    NO,    NO,    NO,    NO,    NO,    NO,    NO,      /* 34-43 blocks .. cowbells */
+    PERC4, PERC3, CLAPS, NO,    NO};                                        /* 44-48 triangle, tambourine, claps, .. */
+/* the HR-16:B's 49 (V2.00: other sounds in another order, HR16_FORMAT.md) on the same drums, by the HR-16's kinds */
+static const uint8_t HOME_B[HD_SOUNDS] = {
+    KICK,  KICK,  KICK,  KICK,  KICK,  KICK,  KICK,                         /* 00-06 the kicks */
+    SNARE, SNARE, SNARE, SNARE, SNARE, SNARE, SNARE, SNARE, SNARE, SNARE,   /* 07-16 snares */
+    SNARE, SNARE,                                                           /* 17-18 sidesticks */
+    CLS,   MID,   OPN,   CLS,   MID,                                        /* 19-23 closed, mid, open, R&B, rock */
+    TOM1,  TOM2,  TOM4,  CRASH, RIDE,                                       /* 24-28 three toms, crash, ride */
+    PERC2, PERC2, NO,    NO,    NO,    PERC3, CLAPS,                        /* 29-35 congas, bongo, cabasas, tambourine,
+                                                                             * claps */
+    NO,    NO,    NO,    NO,    NO,    NO,    NO,    NO,    NO,    NO,      /* 36-45 agogo .. glass break */
+    NO,    NO,    NO};                                                      /* 46-48 jam blocks */
+/* each drum's sound as an HR-16 sets it up, a new pattern's (V1.09 at 153DH; the B's at 6BC5H) */
+static const uint8_t DEF[HD_DRUMS] = {0, 11, 23, 25, 26, 46, 45, 44, 20, 21, 19, 22, 28, 30, 31, 33};
+static const uint8_t DEF_B[HD_DRUMS] = {0, 8, 19, 20, 21, 35, 39, 45, 24, 25, 25, 26, 28, 27, 41, 43};
 
-static uint32_t kind_of(uint32_t n)
+int hd_is_b(const uint8_t *hdr) { return hdr[0xE7] == 'B'; }
+static int b_now(void) { return hd_has_header() && hd_is_b(sq.hr16); }
+
+/* the sound drum d's pad has: the kit's set-up's, else (none there) the global set-up's in std */
+static uint32_t drum_sound(uint32_t d, const hr_pad_t *std)
 {
-    if (n < 10u)
-        return K_KICK;
-    if (n < 18u)
-        return K_SNARE;
-    if (n < 23u)
-        return K_TOM;
-    if (n == 25u || n == 26u)
-        return K_OPHAT;
-    if (n < 28u)
-        return K_CLHAT;
-    if (n < 30u)
-        return K_RIDE;
-    if (n == 30u)
-        return K_CRASH;
-    return n == 46u ? K_CLAP : K_PERC;
+    uint32_t s = hr_kit_pad_sound(HD_PAD[d]);
+    return s != HR_NO_SOUND ? s : std[HD_PAD[d]].sound;
 }
 
-/* the kit's names for a kind (a sound's name starting so), in the order tried */
-static const char *const KIND_NAME[K_N][2] = {{"KICK", 0},  {"SNARE", 0},          {"TOM", 0},
-                                               {"CLHAT", 0}, {"OPHAT", 0},          {"RIDE", "CYMBL"},
-                                               {"CRASH", "CYMBL"}, {"CLAP", 0},     {0, 0}};
-/* the sound ours of a kind goes as, when the drum's own isn't of it */
-static const uint8_t KIND_SENT[K_N] = {0, 10, 18, 23, 26, 28, 30, 46, 31};
-/* each drum's sound in a dump made up (no HR-16's came yet): 24" power kick, 8x14" wood snare, closed hi-hat A, half
- * open hi-hat, open hi-hat, hand claps, high conga, low conga, the toms high to low, ride, crash, medium cowbell,
- * tambourine */
-static const uint8_t DRUM_SOUND[HD_DRUMS] = {0, 10, 23, 25, 26, 46, 32, 33, 18, 20, 21, 19, 28, 30, 42, 45};
-
-static int starts(const char *s, const char *pre)
+uint32_t hd_sound_in(uint32_t hr_sound, int b, const hr_pad_t *std)
 {
-    while (*pre)
-        if (*s++ != *pre++)
-            return 0;
-    return 1;
+    uint32_t d = hr_sound < HD_SOUNDS ? (b ? HOME_B : HOME)[hr_sound] : NO;
+    return d == NO ? HR_NO_SOUND : drum_sound(d, std);
 }
 
-uint32_t hd_sound_in(uint32_t hr_sound, uint32_t pad)
+uint32_t hd_sound_out(const hr_pad_t *x, uint32_t drum)
 {
-    uint32_t kind = hr_sound < HD_SOUNDS ? kind_of(hr_sound) : K_PERC, k, s;
-    char b[HR_NAME + 1];
-    for (k = 0; k < 2u && KIND_NAME[kind][k]; k++)
-        for (s = 0; s < hr_kit_sounds(); s++) {
-            hr_sound_name(s, b);
-            if (starts(b, KIND_NAME[kind][k]))
-                return s;
-        }
-    return hr_std[pad % HR_PADS].sound;   /* the kit has none of it: the pad's as set globally */
+    int b = b_now();
+    uint32_t e = drum % HD_DRUMS, k, v = sq.hr16_voice[e];
+    if (x->hr16 && x->hr16 <= HD_SOUNDS)
+        return x->hr16 - 1u;      /* (as it came) */
+    if (x->sound != HR_NO_SOUND && drum_sound(e, hr_std) != x->sound)
+        for (k = 0; k < HD_DRUMS; k++)   /* the drum whose pad has it (its own first) */
+            if (drum_sound(k, hr_std) == x->sound) {
+                e = k;
+                v = sq.hr16_voice[e];
+                break;
+            }
+    return hd_has_header() && v < HD_SOUNDS && (b ? HOME_B : HOME)[v] == e ? v : (b ? DEF_B : DEF)[e];
 }
 
-uint32_t hd_sound_out(uint32_t sound, uint32_t drum)
-{
-    uint32_t base = DRUM_SOUND[drum % HD_DRUMS], kind = K_N, k;
-    char b[HR_NAME + 1];
-    if (hd_has_header() && sq.hr16_voice[drum % HD_DRUMS] < HD_SOUNDS)
-        base = sq.hr16_voice[drum % HD_DRUMS];
-    if (sound < hr_kit_sounds()) {
-        hr_sound_name(sound, b);
-        if (starts(b, "CYMBL"))   /* (the kit's one cymbal: the ride's on the RIDE, else a crash) */
-            kind = drum == DRUM_RIDE ? K_RIDE : K_CRASH;
-        else
-            for (k = 0; k < K_PERC && kind == K_N; k++)
-                if (starts(b, KIND_NAME[k][0]))
-                    kind = k;
-    }
-    return kind == K_N || kind_of(base) == kind ? base : KIND_SENT[kind];
-}
+/* the pitch: 32 steps (bits 0-4, 0 = -16) over an octave and a half, 9/16 of a semitone each: as sixteenths */
+int32_t hd_tune_in(uint32_t bits) { return ((int32_t)(bits & 31u) - 16) * 9; }
 
-/* the pitch: 32 steps (bits 0-4, 0 = -16) over an octave and a half, 9/16 of a semitone each */
-int32_t hd_tune_in(uint32_t bits)
+uint32_t hd_tune_out(int32_t sixteenths)
 {
-    int32_t v = ((int32_t)(bits & 31u) - 16) * 9;
-    return (v >= 0 ? v + 8 : v - 8) / 16;
-}
-
-uint32_t hd_tune_out(int32_t semis)
-{
-    int32_t v = semis * 16, st = (v >= 0 ? v + 4 : v - 4) / 9;
+    int32_t st = (sixteenths >= 0 ? sixteenths + 4 : sixteenths - 4) / 9;
     st = st < -16 ? -16 : st > 15 ? 15 : st;
     return (uint32_t)(st + 16);
+}
+
+void hd_tune_split(int32_t sixteenths, hr_pad_t *x)
+{
+    int32_t a = sixteenths < 0 ? -sixteenths : sixteenths, t = (a + 8) / 16;   /* the nearest semitone, FINE the rest */
+    x->tune = (int8_t)(sixteenths < 0 ? -t : t);
+    x->fine = (int8_t)(sixteenths - x->tune * 16);
 }
 
 /* its quantize values (0-9) as their clocks, and as HR_GRID's index (1/6 has none: 1/8) */
@@ -159,6 +149,29 @@ static uint32_t hit_in(uint8_t *h, uint32_t n, uint32_t tick, uint32_t pad, uint
     return n + SQ_HIT_LEN;
 }
 
+/* a dump's taking in: an HR-16:B's, the global set-up as it was before (its sounds mapped through it) */
+static int b_in;
+static hr_pad_t std_in[HR_PADS];
+
+/* a drum's VOICE, TUNE and MIX (v: its sound, level and output, pan and pitch) as pad x's */
+static void voice_in(const uint8_t *v, hr_pad_t *x)
+{
+    uint32_t pan = v[2] >> 5;
+    x->sound = (uint8_t)hd_sound_in(v[0], b_in, std_in);
+    x->hr16 = (uint8_t)(v[0] < HD_SOUNDS ? v[0] + 1u : 0u);
+    x->level = (uint8_t)((v[1] & 0x7Fu) > 99u ? 99u : v[1] & 0x7Fu);
+    x->pan = (int8_t)((pan > 6u ? 6 : (int32_t)pan) - 3);
+    hd_tune_split(hd_tune_in(v[2]), x);
+}
+
+/* a pad's VOICE, TUNE and MIX as a drum's, into v */
+static void voice_out(const hr_pad_t *x, uint32_t d, uint8_t *v)
+{
+    v[0] = (uint8_t)hd_sound_out(x, d);
+    v[1] = (uint8_t)(x->level > 99u ? 99u : x->level);   /* (output 1) */
+    v[2] = (uint8_t)((uint32_t)(x->pan + HR_PAN_MAX) << 5 | hd_tune_out(x->tune * 16 + x->fine));
+}
+
 /* pattern p from the image at 'at': its hits, length and sounds. 0, 1 empty (no beats), -1 not readable, -2 no room,
  * -3 past the len bytes that came */
 static int hd_pattern_in(const uint8_t *img, uint32_t len, uint32_t at, uint32_t p, uint8_t *scratch)
@@ -175,8 +188,11 @@ static int hd_pattern_in(const uint8_t *img, uint32_t len, uint32_t at, uint32_t
     if (k >= end)
         return -1;                /* no end */
     beats = (t + SQ_PPQN - 1u) / SQ_PPQN;
-    if (!beats)
+    if (!beats) {                 /* (no waits: its length as said, the beats + 1 in BCD, as the HR-16's dumps have
+                                   * it: 16 beats 0017H; 0 or 1, none) */
         beats = from_bcd(le16(img + at + 2u));
+        beats = beats ? beats - 1u : 0u;
+    }
     if (!beats)
         return 1;                 /* (0 beats: an empty pattern) */
     if (beats > SQ_MAX_BEATS)
@@ -197,15 +213,8 @@ static int hd_pattern_in(const uint8_t *img, uint32_t len, uint32_t at, uint32_t
     sq.pattern[p].beats = (uint16_t)beats;
     for (k = 0; k < HR_PADS; k++)
         pads[k] = hr_std[k];
-    for (d = 0; d < HD_DRUMS; d++) {   /* its VOICE, TUNE and MIX: the pattern's own sounds */
-        const uint8_t *v = img + at + 4u + 3u * d;
-        hr_pad_t *x = &pads[HD_PAD[d]];
-        uint32_t pan = v[2] >> 5;
-        x->sound = (uint8_t)hd_sound_in(v[0], HD_PAD[d]);
-        x->level = (uint8_t)((v[1] & 0x7Fu) > 99u ? 99u : v[1] & 0x7Fu);
-        x->pan = (int8_t)((pan > 6u ? 6 : (int32_t)pan) - 3);
-        x->tune = (int8_t)hd_tune_in(v[2]);
-    }
+    for (d = 0; d < HD_DRUMS; d++)   /* its VOICE, TUNE and MIX: the pattern's own sounds */
+        voice_in(img + at + 4u + 3u * d, &pads[HD_PAD[d]]);
     return hr_sounds_put(p, pads) == 0 ? 0 : -2;
 }
 
@@ -215,7 +224,7 @@ int hd_import(const uint8_t *img, uint32_t len, uint8_t *scratch, hd_report_t *r
     uint32_t p, s, d, i, short_;
     r->patterns = r->lost = r->songs = 0;
     r->first_lost = -1;
-    r->quant = r->swing = r->prog = -1;
+    r->quant = r->swing = r->prog = r->manual = -1;
     r->cut = r->bad = r->full = 0;
     r->got = len;
     r->want = 0;
@@ -230,6 +239,24 @@ int hd_import(const uint8_t *img, uint32_t len, uint8_t *scratch, hd_report_t *r
     }
     for (i = 0; i < HD_HDR; i++)
         sq.hr16[i] = img[i];
+    b_in = hd_is_b(img);
+    for (i = 0; i < HR_PADS; i++)
+        std_in[i] = hr_std[i];
+    if (img[0xE3u] <= 1u)
+        r->manual = (int8_t)img[0xE3u];
+    if (r->manual == 1)           /* MANUAL VOICE/TUNE/MIX on: every pattern plays the kit it has now, the global
+                                   * set-up's */
+        for (d = 0; d < HD_DRUMS; d++) {
+            voice_in(img + 0x103u + 3u * d, &hr_std[HD_PAD[d]]);
+            hr_pad[HD_PAD[d]] = hr_std[HD_PAD[d]];
+        }
+    for (d = 1; d < HD_DRUMS && img[0xCCu + d] == img[0xCCu]; d++)
+        ;
+    for (i = 0; d < HD_DRUMS && i < HD_DRUMS; i++) {   /* the drums' MIDI notes, the pads' (the global set-up's; all
+                                                         * 16 on one, a dump made without them: not) */
+        hr_std[HD_PAD[i]].note = img[0xCCu + i] & 0x7Fu;
+        hr_pad[HD_PAD[i]].note = hr_std[HD_PAD[i]].note;
+    }
     /* the sound most of its patterns have on each drum: what ours sends for a pad of that kind */
     for (d = 0; d < HD_DRUMS; d++)
         for (i = 0; i < HD_SOUNDS; i++)
@@ -241,7 +268,7 @@ int hd_import(const uint8_t *img, uint32_t len, uint8_t *scratch, hd_report_t *r
                 count[d][img[at + 4u + 3u * d]]++;
     }
     for (d = 0; d < HD_DRUMS; d++) {
-        uint32_t best = DRUM_SOUND[d];
+        uint32_t best = (b_in ? DEF_B : DEF)[d];
         for (i = 0; i < HD_SOUNDS; i++)
             if (count[d][i] > count[d][best])
                 best = i;
@@ -317,8 +344,7 @@ static void header_made_up(uint8_t *img, const hd_settings_t *st)
         img[i] = 0;
     img[0xC8] = st->channel & 15u;
     img[0xC9] = img[0xCA] = 1;    /* drum triggers in and out */
-    for (i = 0; i < HD_DRUMS; i++)
-        img[0xCCu + i] = hr_std[HD_PAD[i]].note & 0x7Fu;
+    img[0xCB] = 34;               /* the click's note, an HR-16's (A#0) */
     img[0xDF] = img[0xE0] = 1;    /* clock out, auto start */
     img[0xE4] = 5;                /* pad dynamics */
     img[0xE6] = 1;                /* SysEx on */
@@ -341,6 +367,12 @@ int32_t hd_export(uint8_t *img, uint32_t max, const hd_settings_t *st)
     else
         header_made_up(img, st);
     img[0xDD] = st->prog ? 1u : 0u;   /* MIDI PROGRAM CHANGE: patterns chosen by program change */
+    img[0xE3] = st->manual ? 1u : 0u; /* MANUAL VOICE/TUNE/MIX: on, the kit it has now (the global set-up) for all */
+    if (st->manual)
+        for (d = 0; d < HD_DRUMS; d++)
+            voice_out(&hr_std[HD_PAD[d]], d, img + 0x103u + 3u * d);
+    for (i = 0; i < HD_DRUMS; i++)    /* the drums' notes: the pads' (a dump's came to them) */
+        img[0xCCu + i] = hr_std[HD_PAD[i]].note & 0x7Fu;
     for (i = 0; i < 2u * SQ_PATTERNS; i++)
         img[0x200u + i] = 0;
     for (i = 0; i < 200u; i++)
@@ -354,22 +386,21 @@ int32_t hd_export(uint8_t *img, uint32_t max, const hd_settings_t *st)
         if (pos + HD_PAT_HDR > max)
             return -1;
         put_be16(img + 0x200u + 2u * p, at + HD_BASE);
-        put_le16(img + at + 2u, to_bcd(beats));
+        put_le16(img + at + 2u, to_bcd(beats + 1u));   /* (the beats + 1, as an HR-16 writes them) */
         hr_sounds_get(p, pads);
-        for (d = 0; d < HD_DRUMS; d++) {
-            const hr_pad_t *x = &pads[HD_PAD[d]];
-            img[at + 4u + 3u * d] = (uint8_t)hd_sound_out(x->sound, d);
-            img[at + 5u + 3u * d] = (uint8_t)(x->level > 99u ? 99u : x->level);   /* (output 1) */
-            img[at + 6u + 3u * d] = (uint8_t)((uint32_t)(x->pan + HR_PAN_MAX) << 5 | hd_tune_out(x->tune));
-        }
+        for (d = 0; d < HD_DRUMS; d++)
+            voice_out(&pads[HD_PAD[d]], d, img + at + 4u + 3u * d);
         pos += HD_PAT_HDR;
         for (i = 0; i < n; i++) {
             const uint8_t *h = hr_hit_at(p, i);
             uint32_t t = hr_hit_tick(h), dyn = h[3] ? (h[3] - 1u) / 16u : 0u;
             if (t >= ticks)
                 continue;
-            if (wait_out(img, &pos, max, t - last) != 0 || pos + 1u > max)
+            if (wait_out(img, &pos, max, t - last) != 0 || pos + 2u > max)
                 return -1;
+            if (pos == at + HD_PAT_HDR)   /* (its events start with a wait, as an HR-16's do: 80H, none, for a hit on
+                                           * the first clock) */
+                img[pos++] = 0x80u;
             last = t;
             img[pos++] = (uint8_t)((dyn > 7u ? 7u : dyn) << 4 | drum_of[h[2] % HR_PADS]);
         }

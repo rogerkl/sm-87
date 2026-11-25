@@ -126,11 +126,14 @@ check(got is not None and [(s, n, w, p, pr) for s, n, w, p, pr in got] ==
 # a drum kit too: its sounds and pads after the samples' entries, its words after theirs
 KIT = {"sounds": [{"name": "KICK", "words": ramp(700, 5), "rate": 60, "vel": 40},
                   {"name": "HAT", "words": ramp(301, 11), "rate": 76, "vel": 99}],
-       "pads": [{"name": "KICK", "sound": 0, "tune": 0, "level": 85, "pan": 0, "note": 36, "group": 0, "poly": 1},
-                {"name": "CLHAT", "sound": 1, "tune": -2, "level": 99, "pan": -3, "note": 42, "group": 1, "poly": 1},
-                {"name": "", "sound": 2 + 4, "tune": 12, "level": 50, "pan": 3, "note": 60, "group": 0, "poly": 2},
+       "pads": [{"name": "KICK", "sound": 0, "tune": 0, "level": 85, "pan": 0, "note": 36, "group": 0, "poly": 1,
+                 "fine": 0},
+                {"name": "CLHAT", "sound": 1, "tune": -2, "level": 99, "pan": -3, "note": 42, "group": 1, "poly": 1,
+                 "fine": -5},
+                {"name": "", "sound": 2 + 4, "tune": 12, "level": 50, "pan": 3, "note": 60, "group": 0, "poly": 2,
+                 "fine": 16},
                 {"name": "NONE", "sound": 0xFF, "tune": -24, "level": 0, "pan": 0, "note": 127, "group": 9,
-                 "poly": 1}]}
+                 "poly": 1, "fine": -16}]}
 bk = mkrom.bank(ITEMS, KIT)
 head = 2 * 188 + 2 * 16 + 4 * 16
 sdata = head + (mkrom.packed_size(32752) + 3) // 4 * 4 + (mkrom.packed_size(1001) + 3) // 4 * 4
@@ -141,8 +144,11 @@ check(struct.unpack_from("<HBBI8s", bk, 2 * 188) == (700, 60, 40, sdata, b"KICK\
       struct.unpack_from("<HBBI8s", bk, 2 * 188 + 16)[3] == sdata + (mkrom.packed_size(700) + 3) // 4 * 4,
       "the kit's sounds: after the samples' entries, their words after the samples' words")
 check(bk[sdata:sdata + mkrom.packed_size(700)] == mkrom.pack(KIT["sounds"][0]["words"]), "a kit sound's words")
-check(struct.unpack_from("<8sBbBbBBBB", bk, 2 * 188 + 32 + 16) == (b"CLHAT\0\0\0", 1, -2, 99, -3, 42, 1, 1, 0) and
-      struct.unpack_from("<8sBbBbBBBB", bk, 2 * 188 + 32 + 32)[:2] == (b"\0" * 8, 6), "the pads")
+check(struct.unpack_from("<8sBbBbBBBb", bk, 2 * 188 + 32 + 16) == (b"CLHAT\0\0\0", 1, -2, 99, -3, 42, 1, 1, -5) and
+      struct.unpack_from("<8sBbBbBBBb", bk, 2 * 188 + 32 + 32)[:2] == (b"\0" * 8, 6), "the pads, FINE last")
+no_fine = {"sounds": KIT["sounds"], "pads": [{k: v for k, v in q.items() if k != "fine"} for q in KIT["pads"]]}
+check(mkrom.bank_read(mkrom.bank([], no_fine))["kit"]["pads"][1]["fine"] == 0,
+      "a pad without FINE: 0 (the byte a bank before it kept)")
 pkk = mkrom.Package(orig, "test")
 pkk.put(bk)
 withkit = pkk.close()
@@ -169,6 +175,7 @@ refused(lambda: mkrom.bank([], kit_with(sounds_0_name="SEVENCH")), "a name of 7 
 refused(lambda: mkrom.bank([], kit_with(pads_2_sound=2 + 16)), "a pad's sound past the slots refused")
 refused(lambda: mkrom.bank([], kit_with(pads_0_tune=25)), "tune 25 refused")
 refused(lambda: mkrom.bank([], kit_with(pads_0_poly=3)), "poly 3 refused")
+refused(lambda: mkrom.bank([], kit_with(pads_0_fine=17)), "fine 17 refused")
 refused(lambda: mkrom.bank([], {"sounds": KIT["sounds"] * 33, "pads": []}), "66 sounds refused")
 refused(lambda: mkrom.bank([], {"sounds": KIT["sounds"], "pads": KIT["pads"] * 5}), "20 pads refused")
 
@@ -230,21 +237,23 @@ check(r.returncode == 0 and f.read_bytes() == orig, "--none")
 r = run(tmp / "sine.wav", "x.wav")
 check(r.returncode != 0 and "package" in r.stderr, "a WAV first: refused")
 kitf = tmp / "kit.txt"
-kitf.write_text("sound BEEP sine.wav vel=20\npad KICK BEEP note=36\npad HIGH BEEP tune=7 level=50 pan=-2 note=40\n")
+kitf.write_text("sound BEEP sine.wav vel=20\npad KICK BEEP note=36\npad HIGH BEEP tune=7 fine=-3 level=50 pan=-2 "
+                "note=40\n")
 r = run(f, "--kit", kitf)
 c = mkrom.Package(f.read_bytes(), "t").contents()
 check(r.returncode == 0 and c and c["samples"] == [] and [x["name"] for x in c["kit"]["sounds"]] == ["BEEP"] and
       c["kit"]["pads"][1] == {"name": "HIGH", "sound": 0, "tune": 7, "level": 50, "pan": -2, "note": 40, "group": 0,
-                              "poly": 1}, f"--kit alone: {r.stderr}")
+                              "poly": 1, "fine": -3}, f"--kit alone: {r.stderr}")
 r = run(f, f"{wav}@2", "--kit", kitf)
 c = mkrom.Package(f.read_bytes(), "t").contents()
 check(r.returncode == 0 and c and len(c["samples"]) == 1 and c["kit"], "samples and --kit")
 r = run(f)
-check("kit pad  2  HIGH    BEEP    tune +7" in r.stdout and "1 samples and a kit of 1 sounds and 2 pads" in r.stdout,
+check("kit pad  2  HIGH    BEEP    tune +7-3/16" in r.stdout and
+      "1 samples and a kit of 1 sounds and 2 pads" in r.stdout,
       f"the package alone, its kit: {r.stdout}")
 r = run(f, f"{wav}@2")
 c = mkrom.Package(f.read_bytes(), "t").contents()
-check(r.returncode == 0 and c["kit"] is None and "the firmware's own kit" in r.stdout, "again without --kit: no kit")
+check(r.returncode == 0 and c["kit"] is None and "no drum kit" in r.stdout, "again without --kit: no kit")
 r = run(f, "--none", "--kit", kitf)
 check(r.returncode != 0, "--none with --kit: refused")
 r = run(f, "--none")

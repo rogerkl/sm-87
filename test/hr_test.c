@@ -474,10 +474,10 @@ static uint8_t snd[S7_PACKED(4000)];
 static const hr_kit_sound_t KIT[3] = {
     {snd, 4000, 69, 0, "TONE"}, {snd, 4000, 69, 0, "HATS"}, {snd, 4000, 69, 99, "VEL"}};
 static const hr_kit_pad_t KIT_PAD[4] = {
-    {"KICK", {0, 0, 99, 0, 36, 0, 1, 0}},
-    {"CLHAT", {1, 0, 99, -3, 42, 1, 1, 0}},
-    {"OPHAT", {1, 0, 99, 3, 46, 1, 1, 0}},
-    {"CRASH", {0, -3, 99, 0, 49, 0, 2, 0}},
+    {"KICK", {0, 0, 99, 0, 36, 0, 1, 0, 0, 0}},
+    {"CLHAT", {1, 0, 99, -3, 42, 1, 1, 0, 0, 0}},
+    {"OPHAT", {1, 0, 99, 3, 46, 1, 1, 0, 0, 0}},
+    {"CRASH", {0, -3, 99, 0, 49, 0, 2, 0, 0, 0}},
 };
 static float bl[8192], br[8192];
 
@@ -569,12 +569,14 @@ static void test_voices(void)
     /* a pad without a sound, its values out of range (a damaged settings object): checked as any other's */
     hr_std[8].sound = HR_NO_SOUND;
     hr_std[8].tune = 100;
+    hr_std[8].fine = 40;
     hr_std[8].level = 200;
     hr_std[8].poly = 9;
     hr_pads_rekit(2);
-    CHECK(hr_std[8].sound == HR_NO_SOUND && hr_std[8].tune == 0 && hr_std[8].level == 99u && hr_std[8].poly == 1u,
-          "no sound, out of range: in range (tune %d level %u poly %u)", hr_std[8].tune, hr_std[8].level,
-          hr_std[8].poly);
+    CHECK(hr_std[8].sound == HR_NO_SOUND && hr_std[8].tune == 0 && hr_std[8].fine == 0 && hr_std[8].level == 99u &&
+              hr_std[8].poly == 1u,
+          "no sound, out of range: in range (tune %d fine %d level %u poly %u)", hr_std[8].tune, hr_std[8].fine,
+          hr_std[8].level, hr_std[8].poly);
 }
 
 /* a pattern's own sounds: stored, edited (the pads' until stored), taken as the pattern changes, copied, let go */
@@ -583,7 +585,8 @@ static void same_as_std(int *ok)
     uint32_t i;
     for (i = 0; i < HR_PADS; i++)
         *ok &= hr_pad[i].sound == hr_std[i].sound && hr_pad[i].tune == hr_std[i].tune &&
-               hr_pad[i].level == hr_std[i].level && hr_pad[i].pan == hr_std[i].pan;
+               hr_pad[i].fine == hr_std[i].fine && hr_pad[i].level == hr_std[i].level &&
+               hr_pad[i].pan == hr_std[i].pan && hr_pad[i].hr16 == hr_std[i].hr16;
 }
 
 static void test_sounds(void)
@@ -668,6 +671,55 @@ static void test_sounds(void)
     CHECK(hr_sounds_own(5), "erased: its sounds kept");
     CHECK(hr_copy(3, 5, scratch) == 0 && !hr_sounds_own(5), "3 copied to 5 (erased): 3's, none");
 
+    /* FINE: a pattern's own keep it after their 64 bytes, only when one isn't 0; the global set-up's its own */
+    hr_sounds_apply(2);
+    hr_pad[3].fine = -7;
+    hr_pad_changed(3);
+    CHECK(hr_snd.edited && hr_std[3].fine == 0, "FINE edited: the pattern's own, not the set-up's");
+    CHECK(hr_sounds_store(2) == 0 && sq_len(SQ_PSND(2)) == SQ_SOUNDS_FINE && !hr_snd.edited && hr_sounds_own(2),
+          "stored with a FINE: %u bytes", sq_len(SQ_PSND(2)));
+    hr_sounds_apply(3);
+    CHECK(hr_pad[3].fine == 0, "pattern 3: the set-up's FINE (%d)", hr_pad[3].fine);
+    hr_sounds_apply(2);
+    CHECK(hr_pad[3].fine == -7 && hr_pad[0].sound == 4u && hr_pad[0].level == 40u,
+          "pattern 2 again: its FINE (%d), its sounds", hr_pad[3].fine);
+    CHECK(hr_copy(2, 7, scratch) == 0 && sq_len(SQ_PSND(7)) == SQ_SOUNDS_FINE &&
+              !memcmp(sq_data(SQ_PSND(7)), sq_data(SQ_PSND(2)), SQ_SOUNDS_FINE),
+          "copied to an empty pattern: with its FINE");
+    hr_pad[3].fine = 0;
+    hr_pad_changed(3);
+    CHECK(hr_sounds_store(2) == 0 && sq_len(SQ_PSND(2)) == SQ_SOUNDS_LEN, "no FINE left: %u bytes again",
+          sq_len(SQ_PSND(2)));
+    /* an HR-16 sound as it came: kept after the FINEs; MANUAL: every pattern the set-up's, their own kept */
+    hr_sounds_apply(2);
+    hr_pad[5].hr16 = 29;
+    hr_pad_changed(5);
+    CHECK(hr_sounds_store(2) == 0 && sq_len(SQ_PSND(2)) == SQ_SOUNDS_HR16, "stored with an HR-16 sound: %u bytes",
+          sq_len(SQ_PSND(2)));
+    hr_sounds_apply(3);
+    CHECK(hr_pad[5].hr16 == hr_std[5].hr16, "pattern 3: the set-up's (%u)", hr_pad[5].hr16);
+    hr_sounds_apply(2);
+    CHECK(hr_pad[5].hr16 == 29u && hr_snd.own, "pattern 2 again: its HR-16 sound (%u)", hr_pad[5].hr16);
+    hr_manual = 1;
+    hr_sounds_apply(2);
+    ok = 1;
+    same_as_std(&ok);
+    CHECK(ok && !hr_snd.own && hr_sounds_own(2) && hr_pad[5].hr16 == hr_std[5].hr16,
+          "MANUAL: pattern 2 plays the set-up, its own kept");
+    hr_manual = 0;
+    hr_sounds_apply(2);
+    CHECK(hr_snd.own && hr_pad[5].hr16 == 29u, "MANUAL off: its own again");
+    hr_pad[5].hr16 = 0;
+    hr_pad_changed(5);
+    CHECK(hr_sounds_store(2) == 0 && sq_len(SQ_PSND(2)) == SQ_SOUNDS_LEN, "none left: %u bytes", sq_len(SQ_PSND(2)));
+    hr_sounds_apply(3);
+    hr_pad[4].fine = 5;
+    hr_pad_changed(4);
+    CHECK(hr_std[4].fine == 5, "a global FINE: the set-up's (%d)", hr_std[4].fine);
+    hr_pad[4].fine = 0;
+    hr_pad_changed(4);
+    CHECK(sq_valid(), "the memory holds together, a FINE's record in it");
+
     /* let go: the set-up's again */
     hr_sounds_apply(2);
     CHECK(hr_sounds_drop(2) == 0 && !hr_sounds_own(2) && !hr_snd.own && sq_len(SQ_PSND(2)) == 0u, "2's let go");
@@ -691,7 +743,7 @@ static void test_bank_kit(void)
     char nm[HR_NAME + 1];
     CHECK(hr_kit_tag() == HR_KIT_BUILT_IN && hr_kit_same(0) && hr_kit_same(HR_KIT_BUILT_IN) && !hr_kit_same(77),
           "the kit built in: saved with it (or before the tag), the same");
-    hr_kit_bank(0);
+    hr_kit_bank(0, 0);
     CHECK(hr_kit_tag() == HR_KIT_BUILT_IN, "no bank: the kit built in stays");
     memset(bank_mem, 0, sizeof bank_mem);
     ks[0].words = 100, ks[0].rate = 60, ks[0].vel = 30, ks[0].at = at;
@@ -710,7 +762,7 @@ static void test_bank_kit(void)
     f->crc = s7bank_crc32(m, size);
     f->fcrc = s7bank_crc32(f, 28u);
     CHECK(s7bank_parse(m + size + S7B_FOOT, size + S7B_FOOT, &b) == 0 && b.kit_sounds == 2u, "a bank with a kit");
-    hr_kit_bank(&b);
+    hr_kit_bank(&b, 0);
     CHECK(hr_kit_sounds() == 2u && hr_sounds() == 2u + S7_SLOTS, "its two sounds, then the slots");
     hr_sound_name(1, nm);
     CHECK(!strcmp(nm, "TSS"), "a sound's name: %s", nm);
@@ -730,6 +782,16 @@ static void test_bank_kit(void)
           "its tag: its CRC folded");
     CHECK(hr_kit_same(hr_kit_tag()) && !hr_kit_same(0) && !hr_kit_same(HR_KIT_BUILT_IN),
           "pads saved with the kit built in (or before the tag): not this kit's");
+    {   /* samples built in without a kit: none, as on the FM-1; but emu_bank.h's (keep): the kit stays */
+        s7_bank_t no_kit = b;
+        no_kit.kit_sounds = no_kit.kit_pads = 0;
+        hr_kit_bank(&no_kit, 1);
+        CHECK(hr_kit_sounds() == 2u, "the emulator's own samples without a kit: the kit stays (%u)", hr_kit_sounds());
+        hr_kit_bank(&no_kit, 0);
+        CHECK(hr_kit_sounds() == 0u && hr_sounds() == S7_SLOTS && hr_kit_tag() == HR_KIT_BUILT_IN &&
+                  hr_kit_pad_sound(0) == HR_NO_SOUND,
+              "a package's samples without a kit: none, the pads the slots' (%u)", hr_kit_sounds());
+    }
     hr_kit_use(KIT, 3, KIT_PAD, 4);   /* (the others' kit again) */
 }
 
