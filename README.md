@@ -152,7 +152,7 @@ The FM-1 keeps samples in two places, and a full set uses both:
 
 | | Room | Filled by | Kept |
 |---|---|---|---|
-| Built in, in the firmware's slot | 296 KB beside the firmware (272 KB); a release package's drum kit takes 207 KB of it | `mkrom.py`, then installing the package | Each to the byte, plus 188 bytes for its settings. Until another firmware is installed |
+| Built in, in the firmware's slot | 296 KB beside the firmware (272 KB); a release package's drum kit takes 173 KB of it | `mkrom.py`, then installing the package | Each to the byte, plus 188 bytes for its settings. Until another firmware is installed |
 | The sample pool | 292 KB (FREE on the sampler's strip) | Sample dumps over USB at any time: Axs7, or an X7000 through it | In whole 4 KB sectors. Saved by themselves 3 s after the transfer |
 
 That's about 588 KB in all, 12 full-length samples of 48 KB, in the sampler's 16 slots, which the two share. A dump
@@ -170,7 +170,7 @@ to a slot with a built-in sample takes pool space and leaves the built-in one un
   over a whole key range, and in several programs with a transpose each, as the S700's keygroups do. Axs7 sets them
   and saves them in its WAV files, which `mkrom.py` takes as they are.
 - **The kit shares the room.** The drum kit is built in with the samples. A release package's, the HR-16's
-  (`resources/kit`), takes 207 KB, leaving 89 KB beside it. A package made again gets the kit it's given: the
+  (`resources/kit`), takes 173 KB, leaving 124 KB beside it. A package made again gets the kit it's given: the
   HR-16's again (`--kit resources/kit/kit.txt`), one of fewer, shorter or lower-rate sounds, or none, which leaves
   the whole room to samples. A drum pad can play a sampler slot too (PAD SOUND).
 - **The room is the package's.** `mkrom.py PACKAGE.fwsc` says how much the firmware in it leaves. A later firmware
@@ -195,7 +195,7 @@ Axs7 memory dump of them, each from START to END.
   group and voices.
 
 The firmware has no kit of its own. A release package brings this one as samples built in: the release workflow runs
-`tools/mkrom.py PACKAGE --kit resources/kit/kit.txt`, so it takes 207 KB of the package's room (*Samples built in*),
+`tools/mkrom.py PACKAGE --kit resources/kit/kit.txt`, so it takes 173 KB of the package's room (*Samples built in*),
 and a package made again replaces it. A build of your own comes without it: put it in the same way. The host
 simulator and the browser emulator, which have no slot, have it built into them (`fm1.toml`'s `gen` runs
 `tools/mkkit.py`), so a change to the folder is in their next build. Run by hand, `mkkit.py` reports what the kit holds

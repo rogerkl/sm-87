@@ -149,8 +149,9 @@ def main():
         print(f"pad {i + 1:2}  {p['name']:6}  {sounds[p['sound']]['name']:6}  tune {p['tune']:+d}{fine}  "
               f"level {p['level']}  pan {p['pan']:+d}  note {p['note']}"
               + (f"  group {p['group']}" if p["group"] else "") + (f"  poly {p['poly']}" if p["poly"] > 1 else ""))
-    print(f"{len(sounds)} sounds, {total / 1024:.1f} KB of the firmware's slot" + (f": {a.out}" if a.out else ""))
-    print("(samples put into a package take what the firmware leaves: tools/mkrom.py PACKAGE.fwsc says how much)")
+    print(f"{len(sounds)} sounds, {total / 1024:.1f} KB of a package's room for samples"
+          + (f": {a.out}" if a.out else ""))
+    print("(tools/mkrom.py PACKAGE.fwsc --kit KIT says what it leaves there for samples)")
 
 
 if __name__ == "__main__":

@@ -634,8 +634,8 @@ sample's end.)
 
 Samples sent go into the sample pool, about 292 KB, and the strip shows how much is FREE. Samples and a drum kit can
 also be built into the firmware, about 296 KB more (the effect's code takes about 95 KB of the same room: a build
-without it, `SM87_FX` 0 in `app/config.h`, leaves about 390 KB). A release's HR-16 kit takes 207 KB of it, so
-built in with it there's room for 89 KB of samples; built in again without it, all of it. From Axs7 (its wiki's
+without it, `SM87_FX` 0 in `app/config.h`, leaves about 390 KB). A release's HR-16 kit takes 173 KB of it, so
+built in with it there's room for 124 KB of samples; built in again without it, all of it. From Axs7 (its wiki's
 [SM-87](https://github.com/rogerkl/Axs7/wiki/SM-87) page), or with `tools/mkrom.py` (the
 [README](https://github.com/rogerkl/sm-87#samples-built-in)). Try such a package in the emulator first: its **Load
 .fwsc** plays what it holds.

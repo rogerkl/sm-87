@@ -4,7 +4,8 @@
 # (app/fm1.toml gen: tools/mkkit.py); run mkkit.py by hand to see what it holds and takes.
 #
 # It is the HR-16's own: its 16 drums each with the sound, level and pan an HR-16 sets it up with (V1.09, 153DH), the
-# sounds from an Axs7 memory dump of them (its DRUMS bank, each START to END), the notes General MIDI's.
+# sounds from an Axs7 memory dump of them (its DRUMS bank, each START to END; some at lower rates, shortened, to take
+# less room), the notes General MIDI's.
 #
 #   sound NAME FILE [vel=N]
 #       a WAV file in this folder, mixed down to mono, at one of the sampler's rates (or resampled to the nearest),
@@ -19,22 +20,22 @@
 # A pad saved keeps its sound by number: put new sounds at the end of the list (another kit built in: the pads saved
 # with the last are its set-up again).
 
-sound KICK   00_24in_POWER_KICK.wav vel=50
-sound SNARE  11_AMBIENT_WOOD_SNR.wav vel=50
-sound CLHAT  23_CLOSED_HI_HAT_A.wav vel=50
-sound MDHAT  25_HALF_OPEN_HI_HAT.wav vel=50
-sound OPHAT  26_OPEN_HI_HAT.wav vel=50
-sound CLAPS  46_HAND_CLAPS.wav vel=50
-sound TAMB   45_TAMBOURINE.wav vel=50
-sound TRIANG 44_TRIANGLE.wav vel=50
-sound TOM1   20_10in_DBL_HEAD_TOM.wav vel=50
-sound TOM2   21_14in_DBL_HEAD_TOM.wav vel=50
-sound TOM3   19_16inPWR_FLOOR_TOM.wav vel=50
-sound TOM4   22_ELECTRONIC_TOM.wav vel=50
-sound RIDE   28_RIDE_CYMBAL.wav vel=50
-sound CRASH  30_CRASH_CYMBAL.wav vel=50
-sound TIMBAL 31_TIMBALE.wav vel=50
-sound CONGA  33_LOW_CONGA_SLAP.wav vel=50
+sound KICK   KICK.wav vel=50
+sound SNARE  SNARE.wav vel=50
+sound CLHAT  CLHAT.wav vel=50
+sound MDHAT  MDHAT.wav vel=50
+sound OPHAT  OPHAT.wav vel=50
+sound CLAPS  CLAPS.wav vel=50
+sound TAMB   TAMB.wav vel=50
+sound TRIANG TRIANG.wav vel=50
+sound TOM1   TOM1.wav vel=50
+sound TOM2   TOM2.wav vel=50
+sound TOM3   TOM3.wav vel=50
+sound TOM4   TOM4.wav vel=50
+sound RIDE   RIDE.wav vel=50
+sound CRASH  CRASH.wav vel=50
+sound TIMBAL TIMBAL.wav vel=50
+sound CONGA  CONGA.wav vel=50
 
 pad KICK   KICK   level=99 note=36
 pad SNARE  SNARE  level=90 note=38
